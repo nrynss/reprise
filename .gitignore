@@ -11,6 +11,15 @@ dev-diary/*
 .env.*
 !.env.example
 
+# Editor swap and backup files. A swap file mirrors the contents of the file it
+# belongs to, so an unignored one beside .env carries the secrets past the rules
+# above: ..env.kate-swp is matched by none of them.
+*~
+*.kate-swp
+.*.kate-swp
+.*.sw[a-p]
+*.sw[a-p]
+
 # Dependency and build output.
 node_modules/
 web/build/
