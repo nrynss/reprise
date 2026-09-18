@@ -25,13 +25,11 @@ RUN npm ci
 COPY web/ .
 RUN npm run build
 
-FROM scratch AS mediatools
-# Pinned static media binaries from the same author CI downloads. The binary
-# release archive CI names is gone upstream, so this stage pulls the same
-# author's pinned 7.1 image instead and copies the pair out of it. The
-# binaries are static, so they run on the distroless stage with no libs.
-COPY --from=mwader/static-ffmpeg:7.1 /ffmpeg /ffmpeg
-COPY --from=mwader/static-ffmpeg:7.1 /ffprobe /ffprobe
+# The media pair is pinned by digest, and it is the build the render library
+# measures its own fixtures against. Loudness and peak numbers only compare
+# when the tool matches, so the gate and this image name one digest between
+# them. The binaries are static and run on the distroless stage with no libs.
+FROM mwader/static-ffmpeg:9.0.1@sha256:54e55b0cb8f672870fc38ceb2e6c411855cb3b39c505f5f3b2505ee01ed5f2b7 AS mediatools
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /srv

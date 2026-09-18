@@ -19,15 +19,16 @@ jobs:
         with:
           node-version: '26'
 
-      # Pinned static builds, so the media checks measure with the same
-      # binaries everywhere.
+      # The same digest the image carries, so the media checks measure with
+      # one build everywhere. The release archive this once used is gone
+      # upstream, so the binaries come out of the image instead.
       - name: Install pinned ffmpeg and ffprobe
         run: |
-          base=https://github.com/mwader/static-ffmpeg/releases/download/v7.1
-          curl -fsSL -o ffmpeg "$base/ffmpeg-linux-amd64"
-          curl -fsSL -o ffprobe "$base/ffprobe-linux-amd64"
-          chmod +x ffmpeg ffprobe
-          echo "$PWD" >> "$GITHUB_PATH"
+          cid=$(docker create mwader/static-ffmpeg:9.0.1@sha256:54e55b0cb8f672870fc38ceb2e6c411855cb3b39c505f5f3b2505ee01ed5f2b7)
+          docker cp "${cid}:/ffmpeg" /usr/local/bin/ffmpeg
+          docker cp "${cid}:/ffprobe" /usr/local/bin/ffprobe
+          docker rm "${cid}"
+          ffmpeg -version | head -1
 
       - name: Install web dependencies
         run: npm ci

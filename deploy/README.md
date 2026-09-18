@@ -203,7 +203,10 @@ different name, override with `DB_FILE=` and `MEDIA_DIR=` stays as is.
 
 ## Media tools
 
-The image carries pinned static `ffmpeg` and `ffprobe` 7.1 at
-`/usr/local/bin`. They come from the pinned `mwader/static-ffmpeg:7.1`
-image, the same author and version the build gate installs. The render
-passes those absolute paths, because the distroless stage sets no `PATH`.
+The image carries a static `ffmpeg` and `ffprobe` pair at `/usr/local/bin`,
+copied from the `mwader/static-ffmpeg` image the `Dockerfile` pins by digest.
+The `Dockerfile` holds that version and digest, so this file names neither and
+cannot drift from them. The build gate installs the same pair from the same
+digest, and it refuses a machine whose build differs, because loudness and peak
+numbers compare only when the measuring tool matches. The render passes those
+absolute paths, because the distroless stage sets no `PATH`.

@@ -36,6 +36,20 @@ for tool in ffmpeg ffprobe go node npm; do
 	command -v "$tool" >/dev/null 2>&1 || fail "tools" "$tool is not on PATH"
 done
 
+# The media pair must be the pinned build, not merely present. Loudness and
+# peak numbers compare only when the measuring tool matches, and the render
+# library pins this version for its own fixtures. The image and the workflow
+# name the same digest.
+FFMPEG_PIN=9.0.1
+for tool in ffmpeg ffprobe; do
+	have=$("$tool" -version 2>/dev/null | head -1 | awk '{print $3}')
+	have=${have#n}
+	case "$have" in
+	"$FFMPEG_PIN"*) ;;
+	*) fail "tools" "$tool is $have, not the pinned $FFMPEG_PIN" ;;
+	esac
+done
+
 echo "-- gofmt"
 unformatted=$(gofmt -l cmd)
 if [ -n "$unformatted" ]; then
