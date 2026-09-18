@@ -60,7 +60,7 @@ requires:   T3.1, T0.3
 fixture-ok: yes
 size:       L · frontier
 owns:       internal/gemini/, internal/editorial/
-status:     in-progress:remediate-r2:t3.2-rem-r1
+status:     in-progress:review-r3:t3.2-rev-r3@917d5d078889603c5a4d44355aecc407d292c476
 ```
 One Gemini request hears both stems and reads the word timeline. It returns proposals that point at
 word ids, validated against a JSON schema.
