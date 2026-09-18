@@ -90,7 +90,7 @@ requires:   T2.1
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/reconcile.go
-status:     in-progress:land:t2.3-rem-r1@af521f3279856ef6a1dc906f403ddf6633f10c22
+status:     done:3788df18031fe871e4269680f37ed6b9f7f86d5e
 ```
 **Build on:** `keel/job` with a kind named `reconcile`, and `keel/lease` for the settle and the
 reconciliation, which records both the measured duration and the provider's. Reading the Sessions API
@@ -203,6 +203,10 @@ from stored rows only. The rebase onto current main kept the gate green. T2.1 la
 (Orchestrator-2) after a round 1 APPROVE with zero findings. The ConfigBuilder stub stands as a
 valid seam for the landed host shape, and the lease-to-session link waits on the store owner. The
 rebase onto current main kept the gate green. That landing opens T2.3 and T2.4, both claimed.
+T2.3 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. The expired
+lease now completes the tail after settling, and the over-cap alert fires once per session on a
+durable flag. Landing needed two rebases past the other orchestrator's T0.3 commits with a green
+gate each time.
 
 ### What surprised us
 Nothing yet.
