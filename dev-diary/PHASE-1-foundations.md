@@ -148,7 +148,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/episode/lifecycle.go, internal/episode/lifecycle_test.go
-status:     in-progress:review-r1:t1.2-rev-r1@6ead8a8b7f522e0de58e6712f5e0fb2f7bd21fc1
+status:     in-progress:land:t1.2-impl@6ead8a8b7f522e0de58e6712f5e0fb2f7bd21fc1
 ```
 The states are `recording`, `draft`, `rendering`, `analysing`, `ready` and `failed`. Visibility is
 separate, and always starts `private`.
