@@ -215,7 +215,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/
-status:     in-progress:review-r1:t1.4-rev-r1@0d82641fd4f2067fea736c001f52dfae312f2e42
+status:     in-progress:land:t1.4-impl@0d82641fd4f2067fea736c001f52dfae312f2e42
 ```
 Keel lists users as a non-goal, and that boundary holds, so identity is Reprise's.
 
