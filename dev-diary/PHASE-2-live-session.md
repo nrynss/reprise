@@ -65,7 +65,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/host/
-status:     in-progress:review-r1:t2.2-rev-r1@b49c31f6d04820143f25232a325e7195916e433f
+status:     in-progress:land:t2.2-impl@b49c31f6d04820143f25232a325e7195916e433f
 ```
 Build the session config from stored rows only. It reads the `callbacks` and `mentions` tables from
 T1.1. T4.2 fills `callbacks` later, so this task tests against fixture rows.
