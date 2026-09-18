@@ -215,7 +215,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/
-status:     in-progress:land:t1.4-impl@0d82641fd4f2067fea736c001f52dfae312f2e42
+status:     done:889add00f9e484214688164423b076aaa8576c66
 ```
 Keel lists users as a non-goal, and that boundary holds, so identity is Reprise's.
 
@@ -259,7 +259,9 @@ approved with zero findings, so the box config and the credential source stay pi
 (Orchestrator-2) after a round 1 APPROVE with zero findings. The rebase onto current main kept the
 gate green. T1.3 landed (Orchestrator-2) after a round 1 APPROVE with zero findings. Its owns
  line now covers the golden companions the done criteria demand. The rebase onto current main kept
- the gate green.
+ the gate green. T1.4 landed (Orchestrator-2) after a round 1 APPROVE with zero findings. The
+ diff touches only its owned directory, so no owns change was needed. The rebase onto current main
+ kept the gate green.
 
 ### What surprised us
 
