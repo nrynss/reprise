@@ -128,8 +128,10 @@ func SearchSamples(sampleRate int, seconds float64) (int, error) {
 }
 
 // ResampleLinear converts samples from one rate to another by linear
-// interpolation. Equal rates return a copy. The output holds the
-// converted last input sample, so a ramp keeps both endpoints.
+// interpolation. Equal rates return a copy. When the output length divides
+// the input span evenly the output keeps both endpoints, as in an exact
+// doubling. Other ratios truncate the tail by integer division, so the last
+// input sample may never emit.
 func ResampleLinear(samples []float64, fromRate, toRate int) ([]float64, error) {
 	if len(samples) == 0 {
 		return nil, fmt.Errorf("align: no samples: %w", ErrSignal)
