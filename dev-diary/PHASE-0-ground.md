@@ -200,34 +200,39 @@ regenerated pcm matches what the live probe streamed, or the record says why it 
 
 ---
 
-### T0.7: Repair the CI media install
+### T0.7: Pin the media tools to the build Keel measured with
 ```yaml
 requires:   T0.1
 fixture-ok: yes
 size:       S · mid
-owns:       .github/workflows/ci.yml, Dockerfile
+owns:       .github/workflows/ci.yml, Dockerfile, tools/check.sh
 status:     not-started
 ```
-T6.1's review recorded this at H severity and out of scope, because `.github/workflows/ci.yml`
-belongs to T0.1, which is done. Nobody owns it, so nobody fixes it.
+T6.1's review recorded the dead install at H severity and out of scope, because
+`.github/workflows/ci.yml` belongs to T0.1, which is done. Nobody owns it, so nobody fixes it. The
+version is wrong as well as the URL.
 
 **The pinned archive is gone.** The install step fetches `ffmpeg-linux-amd64` and
-`ffprobe-linux-amd64` from the `mwader/static-ffmpeg` v7.1 release. Both answer 404, confirmed again
-on 2026-09-19. `curl -fsSL` fails the step, so no run reaches the gate. The workflow has never run,
-because the repository has no remote yet. It breaks on the first push instead.
+`ffprobe-linux-amd64` from the `mwader/static-ffmpeg` v7.1 release. Both answer 404, confirmed on
+2026-09-19. `curl -fsSL` fails the step, so no run reaches the gate. Nothing has broken yet only
+because the repository has no remote, so the workflow has never run.
 
-**The image already solved this.** T6.1's Dockerfile copies the pair out of the pinned
-`mwader/static-ffmpeg:7.1` image rather than the release archive. CI takes the same route, so the
-same binaries measure in both places. AGENTS.md requires exactly that, because a measurement is only
-comparable when the measuring tool is identical wherever the check runs.
+**Reprise renders with Keel's code, so it measures with Keel's ffmpeg.** `keel/edl`, `keel/ffmpeg`
+and `keel/waveform` do the rendering, and Keel pins
+`mwader/static-ffmpeg:9.0.1@sha256:54e55b0cb8f672870fc38ceb2e6c411855cb3b39c505f5f3b2505ee01ed5f2b7`
+in its own CI, by digest, copied out with `docker create`. Its audio fixtures are byte-reproducible
+against that build. Reprise carries 7.1 instead, inherited from an older pattern in another project.
+T3.4 then reads loudness within 1 LU and peak deltas at every cut boundary with a tool the library
+never validated. Move to Keel's digest, and copy the pair the same way Keel does.
 
-**Pin by digest, not by tag.** Both the workflow and the Dockerfile name a tag today, and a tag
-moves. A digest makes the pair reproducible, and it makes a silent upstream change visible as a pull
-failure rather than as a drifting measurement.
+**Pin every place the tool runs.** The workflow, the Dockerfile and `tools/check.sh` all name the
+pair today, and only the first two name a version. `check.sh` checks presence alone, so a local gate
+measures with whatever ffmpeg the machine holds. Make it refuse a version that is not the pinned one,
+because a measurement is comparable only when the measuring tool is identical wherever it runs.
 
-**Done when:** A run reaches the gate with the media stages green. `ffmpeg -version` in the workflow
-prints the same version the image ships, and both the workflow and the Dockerfile name the same
-digest.
+**Done when:** `ffmpeg -version` prints 9.0.1 in the workflow, in the image and under `check.sh`, and
+all three name the same digest. `check.sh` fails on a machine whose ffmpeg differs, with a message
+naming the pin.
 
 ---
 
@@ -238,7 +243,7 @@ digest.
 - [ ] The Gemini credential route, the chapter route and the result route are decided.
 - [ ] `testdata/sessions/` holds three recorded sessions made from generated speech.
 - [ ] Every committed fixture comes from its own script, and `ffprobe` reads it with no warning.
-- [ ] CI reaches the gate, with `ffmpeg` and `ffprobe` installed from a source that resolves.
+- [ ] CI reaches the gate, and `ffmpeg` is the 9.0.1 build Keel measures with, pinned by digest.
 
 ---
 
