@@ -1,7 +1,13 @@
+// Fixture sessions arrive as 16 bit PCM WAV. The server stores the
+// provider recording as OGG, so the fixture owner transcodes it to WAV
+// before placing files. The driver decodes WAV only and rejects the stored
+// bytes. A transcode fidelity check against recorded fixtures stays owed
+// until they land.
 package align
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -236,6 +242,33 @@ func TestDriverMeasuresSyntheticSessions(t *testing.T) {
 
 	if measured != 2 {
 		t.Fatalf("measured %d synthetic sessions, want 2", measured)
+	}
+}
+
+// TestDriverRejectsStoredBytes pins the transcoding dependency. The stored
+// provider bytes use the OGG container, so the WAV driver must reject them
+// instead of measuring. Feeding stored bytes to the driver errors on magic
+// by construction.
+func TestDriverRejectsStoredBytes(t *testing.T) {
+	ogg := make([]byte, 48)
+	copy(ogg, "OggS")
+	if _, err := DecodeWAV(ogg); !errors.Is(err, ErrWAV) {
+		t.Fatalf("ogg magic err = %v, want ErrWAV", err)
+	}
+	const rate = 8000
+	user := chirp(6000, 300, 1500, rate)
+	host := chirp(6000, 1500, 300, rate)
+	const pathLatency = 150
+	dir := t.TempDir()
+	writeDriverSession(t, dir,
+		user, host,
+		delayed(user, pathLatency), delayed(host, pathLatency),
+		rate, ClockOffsets{UserStartSec: 0.25, HostStartSec: 1.0})
+	if err := os.WriteFile(filepath.Join(dir, "provider.wav"), ogg, 0o600); err != nil {
+		t.Fatalf("write stored bytes: %v", err)
+	}
+	if _, err := measureSession(dir); !errors.Is(err, ErrWAV) {
+		t.Fatalf("stored bytes err = %v, want ErrWAV", err)
 	}
 }
 
