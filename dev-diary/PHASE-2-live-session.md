@@ -263,7 +263,7 @@ requires:   T2.4, T2.7
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/record/, web/src/routes/record/cap.spec.ts
-status:     in-progress:land:t2.8-rem-r1@197699b2f4f55cc1307657ceef75512aa245ba81
+status:     done:2d86f2cad88158d3b206e94dd0f5eaf5c931f87f
 ```
 Opened from T2.7 round 1's out-of-scope rows. The cap unit landed unwired: the record page never
 constructs `SessionCap`, so no timer runs in the app and the Playwright remainder of T2.7's done
@@ -315,6 +315,11 @@ short-circuits open on the end latch. That landing opens T2.5 and T2.7, both cla
 T2.7 landed (Orchestrator-2) after round 1 APPROVE with zero findings. The timer unit is proved
 through the real socket on a fake clock, but the record page never constructs it, so T2.8 opens to
 wire the cap into the page with the two Playwright runs.
+T2.8 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. The cap
+runs on the record page with the two mock-driven Playwright proofs. Round 1 found the dead
+standing end control; the fix reaches the live button through delegation. P2 tasks T2.1 through
+T2.4 and T2.6 through T2.8 are done; T2.5 is in its second remediation measuring the real
+fixtures.
 T2.6 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. The live
 measurement stands: no server call ends a session, so the sweep settles first and deletes after,
 with shortfall settle and idempotent delete. Round 1 fixed the audit row on alert failure. Total
