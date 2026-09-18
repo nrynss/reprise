@@ -170,7 +170,7 @@ requires:   T2.3, T2.4
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/align/
-status:     in-progress:implement:t2.5-impl
+status:     in-progress:review-r1:t2.5-rev-r1@bca8f89b85dae27ed7b9cf041099f59ef2c7669d
 ```
 Place both stems on one episode clock and prove it. The clock is real rather than inferred, because
 T2.4's page records and plays on one context: `CaptureChunk` carries `contextTime` per block, and the
