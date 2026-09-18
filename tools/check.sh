@@ -9,14 +9,16 @@
 #   clean under Svelte 5 and then never react. Runes only, mechanically.
 #
 #   consumer names: "hackathon" and "lablab" name where the idea came from.
-#   They belong in no tracked file of the product.
+#   They belong in no tracked file of the product. The plan is tracked and is
+#   not product code, so AGENTS.md, product.md and dev-diary/ are exempt.
 #
 #   plan references: task ids (T2.1), phase ids (P0), planning file names
 #   (AGENTS.md, PLAN.md, project.md, product.md, libraries.md, handoff.md,
 #   PHASE-*, the review area), section marks and numbered invariants. Code and
-#   comments state their own reasons and never cite the plan. The .gitignore is
-#   exempt: it must name what it keeps out of the repository. This script and
-#   the lockfiles are exempt for the same reason.
+#   comments state their own reasons and never cite the plan. The planning
+#   files themselves are exempt, because a phase file naming its tasks is the
+#   point of a phase file. The .gitignore, this script and the lockfiles are
+#   exempt for the same kind of reason: each must name what it governs.
 #
 # Scans run over tracked files only, through git grep, so build output and
 # tool caches never trip them.
@@ -83,7 +85,7 @@ $leak"
 fi
 
 echo "-- consumer names"
-names=$(git grep -InEi 'hackathon|lablab' -- ':!tools/check.sh' || true)
+names=$(git grep -InEi 'hackathon|lablab' -- ':!tools/check.sh' ':!AGENTS.md' ':!product.md' ':!dev-diary' || true)
 if [ -n "$names" ]; then
 	fail "consumer names" "provider or consumer names in tracked files:
 $names"
@@ -91,7 +93,8 @@ fi
 
 echo "-- plan references"
 refs=$(git grep -InE '\bT[0-9]+\.[0-9]+[a-z]?\b|\bP[0-9]+\b|AGENTS\.md|PLAN\.md|project\.md|product\.md|libraries\.md|handoff\.md|PHASE-|adversarial-review|§' \
-	-- ':!.gitignore' ':!tools/check.sh' ':!web/package-lock.json' || true)
+	-- ':!.gitignore' ':!tools/check.sh' ':!web/package-lock.json' \
+	':!AGENTS.md' ':!product.md' ':!dev-diary' || true)
 if [ -n "$refs" ]; then
 	fail "plan references" "tracked files cite the plan:
 $refs"

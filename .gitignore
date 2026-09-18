@@ -1,10 +1,7 @@
-# Planning stays out of the repository.
-AGENTS.md
-product.md
-dev-diary/*
-# The mockup is the exception: it is committed so it travels between machines.
-# A parent directory cannot be un-ignored, hence dev-diary/* rather than dev-diary/.
-!dev-diary/mockup/
+# The plan travels with the code. AGENTS.md, product.md and dev-diary/ are
+# tracked, so a clone carries how the work runs, what the product is, and every
+# phase. The gate's name and plan-reference scans skip them by path, because a
+# phase file naming a task is the point of a phase file.
 
 # Secrets never land here.
 .env

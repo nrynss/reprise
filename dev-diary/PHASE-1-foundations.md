@@ -1,0 +1,239 @@
+# P1: Foundations
+
+```yaml
+id:       P1
+size:     M
+requires: [T0.1]
+blocks:   P2, P3, P4, P5
+parallel: partly
+```
+
+**Goal:** Freeze the configuration, the data model, the episode lifecycle, the API surface, and
+guest identity. Every later task compiles against these.
+
+---
+
+### T1.5: Settings and secrets ★
+```yaml
+requires:   T0.1
+fixture-ok: yes
+size:       S · mid
+owns:       internal/settings/, config/reprise.local.toml, config/reprise.box.toml, .env.example
+status:     done:e9d2aa693614e1213ce0f03a476444a88eb8ed9b
+```
+**Build on:** `keel/config` and `keel/config/source`. Keel owns loading, precedence,
+validation and the resolution plan. Reprise owns only its settings struct.
+
+One struct, one file per environment, loaded once in `main` and passed down.
+
+* **Settings inline.** Model ids, the session cap, guest quotas, the daily spend ceiling, the render
+  concurrency, the data and media paths, the public origin.
+* **Secrets as references.** `assemblyai_api_key`, `gemini_credential` and `session_signing_key`.
+  Locally each reads `/home/nryn/work/reprise/.env` through an `env_file` source. On the box each
+  reads `/etc/reprise/env` through the same source. T1.6 moves the Gemini one to a `file` source
+  after the Vertex decision, because a service account key is a file rather than a string.
+* **File selection.** `config.Config.PathVar` is `REPRISE_CONFIG`. `Search` falls back to
+  `config/reprise.local.toml`.
+* **The plan prints at boot.** `Plan.String()` goes to the log on start, so the running process says
+  which source each secret came from and never shows a value.
+* **`.env.example`** lists the three variable names with empty values.
+
+Keel's loader already refuses a loose secrets file, an inline secret, an unknown key and a quoted
+env value. Do not re-implement those checks. Test that they reach Reprise's startup.
+
+**Done when:** Starting with a missing secret stops the process and names the key, its source and its
+path. Starting with a group-readable `.env` stops the process. The boot log shows the plan and a
+probe finds no secret value anywhere in it. Both TOML files are tracked and hold no value.
+
+---
+
+### T1.6: The Gemini credential becomes a service account file
+```yaml
+requires:   T1.5
+fixture-ok: yes
+size:       S · mid
+owns:       internal/settings/, config/reprise.local.toml, config/reprise.box.toml, .env.example
+status:     in-progress:implement:t1.6-impl
+```
+**Read first:** `dev-diary/project.md`, "Gemini reaches Reprise through Vertex AI", which holds why.
+
+T1.5 landed every secret as an `env_file` reference, which fits a key string. Vertex authenticates a
+service account, so the Gemini credential is a JSON key file and its reference has to change with it.
+
+* `[secrets.gemini_credential]` becomes a `file` source naming the key path. Locally that is
+  `/home/nryn/.config/reprise/gemini-sa.json`, outside the repository so no ignore rule stands
+  between the key and a commit. On the box it is `/etc/reprise/gemini-sa.json`. Both are mode `0600`.
+* The key belongs to `reprise-vertex@nryn-personal.iam.gserviceaccount.com`, which holds
+  `roles/aiplatform.user` and nothing else.
+* `vertex_project` and `vertex_location` join the inline settings, `nryn-personal` and the region
+  T0.3 measures against. Neither is a secret, so neither becomes a reference.
+* `.env.example` drops `GEMINI_CREDENTIAL`, because nothing reads it any more. The other two names
+  stay.
+* The boot plan still names the source of every secret and still prints no value, which is the
+  property T1.5 pinned and this task must not lose.
+
+**Done when:** **Passes:** a readable key file at the configured path boots, and the plan line for
+`gemini_credential` names the `file` source and its path. **Refuses:** a missing file, and a
+group-readable file, each stop the process and name the key, the source and the path. A probe over
+the whole boot log finds no fragment of the key's contents. `.env.example` and both TOML files agree
+on the names the code reads, pinned by a test rather than by eye.
+
+---
+
+### T1.1: Schema ★
+```yaml
+requires:   T0.1
+fixture-ok: yes
+size:       M · frontier
+owns:       internal/store/, internal/store/migrations/
+status:     in-progress:implement:t1.1-impl
+```
+**Build on:** `keel/sqlite`. Reprise migrates under its own namespace with `sqlite.Migrate`. Keel's
+job, media, upload and cost stores keep their own namespaces in the same file.
+
+| Table | Holds |
+|---|---|
+| `users` | Guest and owner rows. Kind, created time, last seen. |
+| `episodes` | Owner, number, title, state, visibility, share token, seeded flag. |
+| `sessions` | The AssemblyAI session id, token cap, connected seconds reported by the provider. |
+| `stems` | Media id, role (user or host), sample rate, start offset on the episode clock. |
+| `turns` | The live conversation: role, text, local clock times, provider item id. |
+| `words` | Timed words with a source: `edit` (user stem batch plus host deltas) or `rendered`. |
+| `proposals` | Model proposals: kind (cut, cold open, title, notes, callback), word range, reason. Append-only. |
+| `decisions` | The user's accept or revert on each proposal. Append-only. |
+| `renders` | Input hash, media ids for Opus and AAC, loudness measured. |
+| `analyses` | Provider transcript id, chapters, summary, entities, key phrases. |
+| `mentions` | Person, place, topic or commitment, with episode, word offset, and quote. |
+| `callbacks` | The mention chosen to open the next episode, and whether the host used it. |
+
+Two kinds of state are deliberately absent. Owner spend lives in `keel/cost/sqlitestore`, whose
+keyed budget holds a ceiling and the headroom left per owner. Runtime switches live in
+`keel/flag/sqlitestore`. Both keep their own namespaces in this same SQLite file, so a second table
+here would be a second source of truth for state a library already owns.
+
+Every row that holds diary content carries `owner_id` and cascades on episode delete.
+
+**Done when:** Migrations apply twice with no change. A test deletes an episode and a fresh
+connection finds no row of its content in any table.
+
+---
+
+### T1.2: Episode lifecycle ★
+```yaml
+requires:   T1.1
+fixture-ok: yes
+size:       S · frontier
+owns:       internal/episode/lifecycle.go, internal/episode/lifecycle_test.go
+status:     not-started
+```
+The states are `recording`, `draft`, `rendering`, `analysing`, `ready` and `failed`. Visibility is
+separate, and always starts `private`.
+
+| From | To | Trigger |
+|---|---|---|
+| none | `recording` | A session starts |
+| `recording` | `draft` | Both stems finish uploading, confirmed by `keel/upload` completion |
+| `draft` | `rendering` | The user marks the episode done. Nothing else moves it. |
+| `rendering` | `analysing` | The render job finishes |
+| `analysing` | `ready` | The analysis and memory jobs finish |
+| any | `failed` | A job ends failed or `interrupted`. The episode keeps every stem. |
+| `failed` | the failed step | The user retries |
+
+Transitions are a single SQL update guarded on the current state, so a repeated click is harmless.
+An `interrupted` job from a restart moves its episode to `failed`, never to a silent rerun.
+
+**Done when:** A table test tries every pair of states and only the rows above succeed. Two
+concurrent "mark done" requests start one render.
+
+---
+
+### T1.3: API surface
+```yaml
+requires:   T1.1
+fixture-ok: yes
+size:       S · mid
+owns:       internal/api/routes.go, web/src/lib/api/types.ts
+status:     not-started
+```
+**Build on:** `keel/wire` for every error and event. Chaaya's `api` client and `wire` parsers on the
+browser side read the same shapes, so Reprise writes no envelope code of its own.
+
+List every route before handlers exist. Human pages are singular. API routes are plural and live
+under `/api`.
+
+| Route | Purpose |
+|---|---|
+| `POST /api/sessions` | Start a session. Returns a token and session config. |
+| `POST /api/sessions/{id}/end` | Record the end. The browser has already sent `session.end`. |
+| `/api/uploads/...` | `keel/upload` mounted with `BasePath` `/api/uploads` |
+| `GET /api/episodes`, `GET /api/episodes/{id}` | Gallery and detail |
+| `POST /api/episodes/{id}/decisions` | Accept or revert a proposal |
+| `POST /api/episodes/{id}/done` | Mark done |
+| `GET /api/jobs/{id}/events` | `stream.Broker.ServeTopic` on `job.Topic(id)` |
+| `POST /api/episodes/{id}/publish`, `DELETE .../publish` | Visibility |
+| `DELETE /api/episodes/{id}` | Erase |
+| `GET /api/threads` | The thread across episodes |
+| `GET /media/{id}` | `keel/mediastore` with Reprise's authorizer |
+
+TypeScript types for Reprise's own payloads mirror the Go handlers by hand, checked by a test that
+decodes Go-written golden responses.
+
+**Done when:** The route table is registered with stub handlers that answer `not_implemented`
+through `wire.WriteError`. The golden decode test passes, and Chaaya's `parseErrorEnvelope` reads a
+stub refusal.
+
+---
+
+### T1.4: Guest identity ★
+```yaml
+requires:   T1.1
+fixture-ok: yes
+size:       M · frontier
+owns:       internal/identity/
+status:     not-started
+```
+Keel lists users as a non-goal, and that boundary holds, so identity is Reprise's.
+
+A first visit creates a guest user row and a server-side session in SQLite. The browser holds a
+signed, `HttpOnly`, `SameSite=Lax`, `Secure` cookie carrying only the session id. The signing key is
+the `session_signing_key` secret from T1.5.
+
+* Every handler that reads diary content checks the session's user owns it.
+* `mediastore.Config.Authorize` is the same check, so a private blob never serves to anyone else.
+  A refused request gets 404, which Keel already does.
+* Revoking a session takes effect on the next request.
+* The owner's own login waits on the open decision. Guest mode does not.
+
+**Done when:** Both sides are pinned, because a handler that 404s everyone satisfies the refusals
+alone. **Passes:** a first visit creates a guest and its session, and that cookie reads its own
+episode and plays its own media, including a Range request. **Refuses:** `curl` without a cookie
+gets 404 on another user's episode and its media, and a revoked session fails its next request.
+
+---
+
+## Exit criteria
+
+- [ ] Settings load per environment, and no secret value sits in a tracked file.
+- [ ] The schema migrates and erases cleanly.
+- [ ] Only the listed lifecycle transitions succeed.
+- [ ] Every route exists as a stub with typed errors.
+- [ ] Guests get isolated sessions, verified with `curl`.
+
+---
+
+## Handoff log
+
+### What exists now
+
+Settings load once per environment through Keel. `internal/settings` holds the struct and the plan
+exposure. `config/reprise.local.toml` points the three secrets at `/home/nryn/work/reprise/.env`,
+and `config/reprise.box.toml` points them at `/etc/reprise/env`. The plan names each source and
+path and carries no value. The round 1 review approved with zero findings. The missing `main`
+wiring is a contract change held for the task that next owns that file.
+
+### What surprised us
+Nothing yet.
+
+### Notes for the next developer
+T1.5 sits first in this file because the probes in P0 need it. Its number stays 1.5 so earlier
+references keep their meaning.
