@@ -5,10 +5,10 @@
 //
 // This file holds the live access probe behind the live build tag. It never
 // runs in CI. The probe proves the service account key resolves through the
-// file source, sends a twenty minute Opus stem inline, and asks which of two
-// deliveries should open the episode without showing the transcript. Audio
-// is synthesized locally, so the task needs no committed clip and no real
-// voice.
+// file source. It sends a twenty minute Opus stem inline and asks which of
+// two deliveries should open the episode without showing the transcript.
+// The probe synthesizes audio locally, so the task needs no committed clip.
+// No real voice appears anywhere.
 package gemini
 
 import (
