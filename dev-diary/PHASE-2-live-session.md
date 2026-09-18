@@ -30,7 +30,7 @@ requires:   T1.1, T1.4, T1.5
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/, internal/assemblyai/token.go
-status:     not-started
+status:     in-progress:implement:t2.1-impl
 ```
 **Build on:** Keel `v0.3.0`. `keel/gate` for the route, `keel/cost/sqlitestore` for the global daily
 ceiling and the per-owner ceiling beneath it, `keel/flag` for the kill switch, `keel/lease` for the
@@ -65,7 +65,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/host/
-status:     not-started
+status:     in-progress:implement:t2.2-impl
 ```
 Build the session config from stored rows only. It reads the `callbacks` and `mentions` tables from
 T1.1. T4.2 fills `callbacks` later, so this task tests against fixture rows.
