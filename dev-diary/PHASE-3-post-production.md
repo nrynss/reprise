@@ -60,7 +60,7 @@ requires:   T3.1, T0.3
 fixture-ok: yes
 size:       L · frontier
 owns:       internal/gemini/, internal/editorial/
-status:     in-progress:land:t3.2-rem-r1@917d5d078889603c5a4d44355aecc407d292c476
+status:     done:f05fea6cd43059bb4daa62aa683a4f21c196bdfa
 ```
 One Gemini request hears both stems and reads the word timeline. It returns proposals that point at
 word ids, validated against a JSON schema.
@@ -204,6 +204,14 @@ and the batch client is `BatchClient` after a rebase collision with the landed t
 50 ms bar runs on a generated clip plus probe shapes until fixture sessions land for a live
 remeasure. The other orchestrator's PHASE-0 dirt was present through this landing and left
 untouched.
+
+T3.2 landed after round 3 APPROVE with zero residue against rounds 1 and 2. One Gemini request
+hears both stems and returns validated proposals on stable word offsets, with accepted cuts,
+stored callbacks, and a renderable fallback on model failure. Three settle-before-return fixes
+cover every post-spend error path. Landing survived a self-inflicted orphan scare: worktrees were
+removed before a fast-forward that failed on my own newer commits, the tip was recovered from the
+object store, rebased again with a green gate, and only then fast-forwarded and cleaned up. Never
+remove worktrees before the fast-forward succeeds.
 
 ### What surprised us
 Nothing yet.
