@@ -59,7 +59,7 @@ requires:   T0.1, T1.5
 fixture-ok: no
 size:       M · frontier
 owns:       internal/assemblyai/live_test.go, dev-diary/probes/voice-agent.md,
-status:     blocked:live probe needs AssemblyAI credentials in the local env file, and none exist
+status:     in-progress:implement:t0.2-impl
 ```
 **Read first:** AssemblyAI's `voice-agent-api` pages: browser integration, events reference, session
 history, session configuration. Download the Markdown versions again. Earlier copies were temporary.
@@ -95,7 +95,7 @@ requires:   T0.1, T1.5
 fixture-ok: no
 size:       S · frontier
 owns:       internal/gemini/live_test.go, dev-diary/probes/gemini.md
-status:     blocked:live probe needs the Vertex service account key file, and none exists yet
+status:     not-started
 **Build on:** `internal/gemini`, written against the `google.golang.org/genai` documentation. The
 credential comes through `keel/config` as a secret reference. The Hetzner box has no metadata
 server, so default credential discovery does not apply.
@@ -123,7 +123,7 @@ requires:   T0.1, T1.5
 fixture-ok: no
 size:       S · frontier
 owns:       internal/assemblyai/batch_live_test.go, dev-diary/probes/batch.md
-status:     blocked:live probe needs AssemblyAI credentials in the local env file, and none exist
+status:     in-progress:implement:t0.4-impl
 ```
 Upload a 48 kHz generated user stem and transcribe it with Universal-3.5 Pro. Record these.
 
@@ -145,7 +145,7 @@ requires:   T0.2
 fixture-ok: no
 size:       S · mid
 owns:       testdata/sessions/
-status:     blocked:T0.2 is blocked on missing AssemblyAI credentials, and fixtures need its live sessions
+status:     not-started
 ```
 Run three short live sessions from generated speech and commit their artifacts. Downstream tasks
 build on these offline.

@@ -53,7 +53,7 @@ requires:   T1.5
 fixture-ok: yes
 size:       S · mid
 owns:       internal/settings/, config/reprise.local.toml, config/reprise.box.toml, .env.example
-status:     in-progress:implement:t1.6-impl
+status:     done:ce6b8011acc2556d0c0b5438ec54a0b28edd7fa1
 ```
 **Read first:** `dev-diary/project.md`, "Gemini reaches Reprise through Vertex AI", which holds why.
 
@@ -80,13 +80,37 @@ on the names the code reads, pinned by a test rather than by eye.
 
 ---
 
+### T1.6a: Pin the box config and the credential source
+```yaml
+requires:   T1.5
+fixture-ok: yes
+size:       XS · light
+owns:       internal/settings/settings_test.go
+status:     in-progress:review-r1:t1.6a-rev-r1@99638ba356355643fc09a855d75ea49177288c31
+```
+The review of the landed service account change found two thinned pins. The file that
+checks the shipped configs reads only the local one, so box-only drift stays green. The
+boot log check wants the string `file`, which every inline row already carries. The runtime
+behavior is right. Only the pins are thin.
+
+* `TestShippedFilesAgreeOnSecretNames` opens `config/reprise.box.toml` too, with its
+  temp paths rewritten the same way, and fails on a box-only rename.
+* `TestBootLogShowsPlanWithoutValues` asserts the credential plan line carries the key
+  path, and fails when the credential points at any other source.
+
+**Done when:** Renaming one box variable fails the agreement test, and pointing the
+credential at another source fails the boot log test. Both failures name the defect
+they pin.
+
+---
+
 ### T1.1: Schema ★
 ```yaml
 requires:   T0.1
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/store/, internal/store/migrations/
-status:     in-progress:implement:t1.1-impl
+status:     done:fd9f5319d973dcbe4d982f0ae70aebb44468e860
 ```
 **Build on:** `keel/sqlite`. Reprise migrates under its own namespace with `sqlite.Migrate`. Keel's
 job, media, upload and cost stores keep their own namespaces in the same file.
@@ -226,13 +250,18 @@ gets 404 on another user's episode and its media, and a revoked session fails it
 ### What exists now
 
 Settings load once per environment through Keel. `internal/settings` holds the struct and the plan
-exposure. `config/reprise.local.toml` points the three secrets at `/home/nryn/work/reprise/.env`,
-and `config/reprise.box.toml` points them at `/etc/reprise/env`. The plan names each source and
-path and carries no value. The round 1 review approved with zero findings. The missing `main`
-wiring is a contract change held for the task that next owns that file.
+exposure. The diary schema migrates under the `reprise` namespace with twelve tables, and episode
+delete cascades across every content table with the owner surviving. The round 2 review approved
+T1.1 with zero findings. The missing `main` wiring is a contract change held for the task that
+next owns that file. The T1.6 follow-up owns the two thinned test pins on the box config and the
+credential source.
 
 ### What surprised us
-Nothing yet.
+
+`keel/sqlite` pulls `modernc.org/sqlite` transitively, so the first import of it needs `go mod
+tidy` even when the direct version stays pinned. Keel's migration ledger names itself after the
+namespace, and each migration file runs inside one transaction with no `BEGIN` or `COMMIT` of its
+own.
 
 ### Notes for the next developer
 T1.5 sits first in this file because the probes in P0 need it. Its number stays 1.5 so earlier
