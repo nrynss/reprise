@@ -56,9 +56,11 @@ Gateway, so the YouTube chapter markers still rest on AssemblyAI.
 
 ### The session cap lives in the token
 
-`GET /v1/token` accepts `max_session_duration_seconds`, from 60 to 10800. AssemblyAI ends the session
-at the cap even if the browser vanishes. The global kill switch stops minting tokens. A bare socket
-close still bills a 30 second resume window, so the browser sends `session.end` first.
+`GET /v1/token` accepts `max_session_duration_seconds`, from 60 to 10800. The cap does not end the
+session by itself. Three idle runs stayed open past a 60 second cap with no server close, and the
+Sessions API billed until the client sent `session.end`. The browser runs its own timer and ends first.
+The global kill switch stops minting tokens. A bare socket close still bills a 30 second resume window,
+so the browser sends `session.end` first.
 
 ### The callback belongs in the greeting
 
