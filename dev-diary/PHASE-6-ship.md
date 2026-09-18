@@ -19,7 +19,7 @@ requires:   T0.1, T1.5, T2.1
 fixture-ok: no
 size:       M · mid
 owns:       deploy/, cmd/reprise/main.go, Dockerfile
-status:     in-progress:review-r2:t6.1-rev-r2@b70a090ec26b4d8f2e26a2e2383f4ef4836e41f5
+status:     in-progress:land:t6.1-rem-r1@b70a090ec26b4d8f2e26a2e2383f4ef4836e41f5
 ```
 **Build on:** the image from T0.1, `config/reprise.box.toml` from T1.5, and the session registry from
 T2.1, which is what a drain waits on. The box is documented in
