@@ -83,6 +83,17 @@ type CreateRequest struct {
 	Keyterms []string
 }
 
+// createBody is the wire shape the create call sends. Keyterms stay out
+// when empty, so the JSON matches the recorded shape either way.
+type createBody struct {
+	// AudioURL is the upload URL the upload call returned.
+	AudioURL string `json:"audio_url"`
+	// SpeechModels carries the single transcription model for this pass.
+	SpeechModels []string `json:"speech_models"`
+	// Keyterms boosts names from past episodes, most recent first.
+	Keyterms []string `json:"keyterms_prompt,omitempty"`
+}
+
 // Config carries the batch client settings. The caller loads the key from
 // settings and passes the value, so this package never reads the environment.
 type Config struct {
@@ -211,12 +222,12 @@ func (c *Client) Create(ctx context.Context, req CreateRequest) (string, error) 
 	if strings.TrimSpace(req.AudioURL) == "" {
 		return "", fmt.Errorf("assemblyai: create: %w: empty audio url", ErrBatchInvalid)
 	}
-	body := map[string]any{
-		"audio_url":     req.AudioURL,
-		"speech_models": []string{c.model},
+	body := createBody{
+		AudioURL:     req.AudioURL,
+		SpeechModels: []string{c.model},
 	}
 	if len(req.Keyterms) > 0 {
-		body["keyterms_prompt"] = req.Keyterms
+		body.Keyterms = req.Keyterms
 	}
 	raw, err := c.request(ctx, "POST", "/v2/transcript", body)
 	if err != nil {
