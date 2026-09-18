@@ -6,10 +6,10 @@ How work runs lives only in [`../AGENTS.md`](../AGENTS.md). This file holds fact
 - [`project.md`](project.md): the build, and every departure from the product spec.
 - [`libraries.md`](libraries.md): what Keel and Chaaya carry, and what Reprise builds.
 
-**Current status:** Planned against Keel `v0.3.0` and Chaaya `0.2.0`, both published and verified
-against the published artifacts. The repository exists; T0.1 and T1.5 are done. T0.2 and T0.4 wait
-on the AssemblyAI key in the local env file, T0.3 waits on the Vertex service account key file,
-and T1.6 rewires the Gemini credential to that file. T1.1 is next alongside T1.6.
+**Current status:** Built on Keel `v0.3.0` and Chaaya `0.2.0`. T0.1, T1.5, T1.6, T1.1 and T1.6a are
+done. T0.2 and T0.4 are probing live against the AssemblyAI key now. T0.3 runs against the Vertex
+key file once T1.6a lands, and T0.5 runs on T0.2's sessions after that. Another orchestrator holds
+T1.2, T1.3 and T1.4 for implementation.
 
 The libraries carry the general work. Chaaya `0.2.0` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered
