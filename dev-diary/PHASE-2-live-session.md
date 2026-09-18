@@ -90,7 +90,7 @@ requires:   T2.1
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/reconcile.go
-status:     in-progress:implement:t2.3-impl
+status:     in-progress:review-r1:t2.3-rev-r1@11a51eca269db761555f7be21e824c0b24cb1e56
 ```
 **Build on:** `keel/job` with a kind named `reconcile`, and `keel/lease` for the settle and the
 reconciliation, which records both the measured duration and the provider's. Reading the Sessions API
