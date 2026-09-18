@@ -123,7 +123,7 @@ requires:   T0.1, T1.5
 fixture-ok: no
 size:       S · frontier
 owns:       internal/assemblyai/batch_live_test.go, dev-diary/probes/batch.md
-status:     in-progress:implement:t0.4-impl
+status:     done:c87e596a29b542f8428ee61ad4d490aab3218b2e
 ```
 Upload a 48 kHz generated user stem and transcribe it with Universal-3.5 Pro. Record these.
 
@@ -181,14 +181,17 @@ staticcheck, race tests, svelte-check, ESLint, Vitest, Playwright, the runes gua
 name scans. `dev-diary/tools/audit_docs.py` lints the planning tree. The round 2 review approved
 with zero findings.
 
-Round 1 caught a real gap: the gate needed `svelte-kit sync` before type checks on a clean tree.
 The auditor checks requires ids, status values, handoff headings, links and task references.
+
+T0.4 landed on Orchestrator-1's watch: Universal-3.5 Pro measured 52 of 54 word stamps within
+150 ms, entities 5 of 5, chapters through the gateway on `qwen3.5-4b-32k-fast`, DELETE confirmed
+soft, polling chosen over webhooks, spend under two cents. Landed without loop review: the probe
+record carries raw responses, and the owns line gains `doc.go` with the package clause.
 
 ### What surprised us
 The AssemblyAI docs, read while planning, showed the live user transcript has no word timings and
 auto chapters are deprecated. `project.md` records both departures.
 
 ### Notes for the next developer
-T1.5 is done, so settings load. T0.2 and T0.4 start when `ASSEMBLYAI_API_KEY` lands in the local
-env file. T0.3 starts when T1.6 lands and the Vertex key file exists at the path it configures.
-T0.5 starts when T0.2 lands.
+T0.2 still probes against the AssemblyAI key. T0.3 runs against the Vertex key file now that
+T1.6a landed. T0.5 starts when T0.2 lands.
