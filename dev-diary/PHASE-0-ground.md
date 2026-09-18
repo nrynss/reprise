@@ -95,7 +95,7 @@ requires:   T0.1, T1.5
 fixture-ok: no
 size:       S · frontier
 owns:       internal/gemini/live_test.go, dev-diary/probes/gemini.md
-status:     in-progress:implement:t0.3-impl
+status:     done:5ab25cad6d12d68bbd9480fe5c3255fb2287bba2
 **Build on:** `internal/gemini`, written against the `google.golang.org/genai` documentation. The
 credential comes through `keel/config` as a secret reference. The Hetzner box has no metadata
 server, so default credential discovery does not apply.
@@ -188,10 +188,15 @@ T0.4 landed on Orchestrator-1's watch: Universal-3.5 Pro measured 52 of 54 word 
 soft, polling chosen over webhooks, spend under two cents. Landed without loop review: the probe
 record carries raw responses, and the owns line gains `doc.go` with the package clause.
 
+T0.3 landed after round 2 approval with zero residue: the file credential reaches Vertex, a 19.5
+minute Opus stem plays inline with no bucket, and the laughing take wins the transcript-free
+listening test. About 30k tokens across three calls. The probe builds its client inline, so T3.2
+still needs a shared client owner for `internal/gemini`.
+
 ### What surprised us
 The AssemblyAI docs, read while planning, showed the live user transcript has no word timings and
 auto chapters are deprecated. `project.md` records both departures.
 
 ### Notes for the next developer
-T0.2 still probes against the AssemblyAI key. T0.3 runs against the Vertex key file now that
-T1.6a landed. T0.5 starts when T0.2 lands.
+T0.2 still probes against the AssemblyAI key. T0.5 starts when T0.2 lands. The other
+orchestrator's tree held no dirt at this landing.
