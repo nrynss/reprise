@@ -55,6 +55,9 @@ go test -race $GO_PKGS || fail "go test -race" "tests failed"
 
 cd web
 
+echo "-- svelte-kit sync"
+npx svelte-kit sync >/dev/null || fail "svelte-kit sync" "svelte-kit sync reported problems"
+
 echo "-- svelte-check"
 npm run check >/dev/null || fail "svelte-check" "svelte-check reported problems"
 
@@ -63,6 +66,9 @@ npm run lint >/dev/null || fail "eslint" "eslint reported problems"
 
 echo "-- vitest"
 npm run test >/dev/null || fail "vitest" "unit tests failed"
+
+echo "-- build"
+npm run build >/dev/null || fail "build" "web build reported problems"
 
 echo "-- playwright"
 npm run test:e2e >/dev/null || fail "playwright" "end-to-end tests failed"
