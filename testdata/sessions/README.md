@@ -19,7 +19,7 @@ Each directory holds one session with the same file set.
 `steady/` streams two lines back to back with no gaps. `pauses/`
 waits four seconds before the first line, six seconds between lines,
 and three seconds before ending. `bargein/` asks for a longer story,
-then cuts into the reply 2.5 seconds after the story audio starts.
+then cuts into the reply about 5.4 seconds after the story audio starts.
 
 ## Steady
 
@@ -29,8 +29,8 @@ exactly. Session duration 18.11 seconds.
 
 | File | ffprobe | SHA-256 |
 |---|---|---|
-| `steady/user-a.wav` | pcm_s16le, 22050 Hz, mono, 2.79 s | `30ba621da195a70d69a6d11ba783839c182b43ad0b1be8d3019ec4b5d7c4cdca` |
-| `steady/user-b.wav` | pcm_s16le, 22050 Hz, mono, 2.66 s | `f8b5e5dbc2ddd5a9cf3b9e4efa7b8c44e771635d454f70adb2d654e7d7470326` |
+| `steady/user-a.wav` | pcm_s16le, 22050 Hz, mono, 2.79 s | `d378f00005602c80bd318fc09ed4aa29a7572dbcdf7ce8dd1b18efe597c41fc1` |
+| `steady/user-b.wav` | pcm_s16le, 22050 Hz, mono, 2.66 s | `a7092d952d76f9c0d475112580900cd6954cdea2f9143963ed8fa7c63b74b76d` |
 | `steady/recording.ogg` | opus, 48000 Hz, stereo, 18.41 s | `9b8f6aa2d1011d89e5e8b4016a5d0a5d6bd31befa43644d5ba9110038ef11fbb` |
 | `steady/events.json` | 1168 events, JSON | `52b5bd4b58fc501163c8b0f365c2dca6f29e16abb64298a4c98d8393a3285d2b` |
 | `steady/timeline.json` | 3 turns, JSON | `a0a0b18bf60b68b1b8ca98fc184238c8ad1b060a383d485d4468d67237fef8fd` |
@@ -44,8 +44,8 @@ exactly. Session duration 30.38 seconds.
 
 | File | ffprobe | SHA-256 |
 |---|---|---|
-| `pauses/user-a.wav` | pcm_s16le, 22050 Hz, mono, 2.74 s | `03d38337490697da0a9e8b06dbd745bd86ed661a6b4d1a7293c524928b73d56f` |
-| `pauses/user-b.wav` | pcm_s16le, 22050 Hz, mono, 2.39 s | `a32fc9ac8f0271c4d7fd97cef89bd561ecedae0d01f2718aad78856cd1cebf8a` |
+| `pauses/user-a.wav` | pcm_s16le, 22050 Hz, mono, 2.74 s | `dc03b5c2a2a36b22aedd44c3c89602912dc808b028157ab9bda440ed0f80a90d` |
+| `pauses/user-b.wav` | pcm_s16le, 22050 Hz, mono, 2.39 s | `4f7ef2b02c62cf611dc084a761380de4edc99eb0f4cb1ee8d89ec15a2acce4af` |
 | `pauses/recording.ogg` | opus, 48000 Hz, stereo, 30.66 s | `b2b940a420accc71c8279146785f776d1c99942312e39c335537961402fd5d43` |
 | `pauses/events.json` | 1083 events, JSON | `938bb04fc33eb244fdbe217d522d7cb7dffecaba61f8f5634887ce208b5d9e67` |
 | `pauses/timeline.json` | 4 turns, JSON | `9dbc0ad37fe93953ec395f054f6a05697e38b9da2b7019c28054311917015997` |
@@ -60,8 +60,8 @@ Session duration 25.24 seconds.
 
 | File | ffprobe | SHA-256 |
 |---|---|---|
-| `bargein/user-trigger.wav` | pcm_s16le, 22050 Hz, mono, 2.87 s | `bfb1c5638505bd833bfdd6b9df8b576dcdc5c9415091693bd68cdcd5657baf6e` |
-| `bargein/user-bargein.wav` | pcm_s16le, 22050 Hz, mono, 3.41 s | `6d8f5f4a3908454ee6bafc19eda08dc26ec9989bf9ea777b1a86a3c192222a45` |
+| `bargein/user-trigger.wav` | pcm_s16le, 22050 Hz, mono, 2.87 s | `c2c04045568a91e44b30c61e3a10d0b9af4a381509ad0dfc6d5d24d2b3f79d38` |
+| `bargein/user-bargein.wav` | pcm_s16le, 22050 Hz, mono, 3.41 s | `e0b2c96feca1db939a454904debf4f40ea646967b84eff803cad083079c241cb` |
 | `bargein/recording.ogg` | opus, 48000 Hz, stereo, 25.56 s | `8f50435f1e0752dc532465a41ba0e98228caddb805aa3566fd7650962fe5d9f4` |
 | `bargein/events.json` | 1936 events, JSON | `1da18bc4197636175469b9b02e3c53b58d9532725f601e2e0496d33a44924b20` |
 | `bargein/timeline.json` | 3 turns, JSON | `08ad90aa4399a6c223b228b4eb6cf692cb33b3b59200f65a84f7534f1ff9b3cd` |
