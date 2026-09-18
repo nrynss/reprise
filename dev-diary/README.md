@@ -6,8 +6,8 @@ How work runs lives only in [`../AGENTS.md`](../AGENTS.md). This file holds fact
 - [`project.md`](project.md): the build, and every departure from the product spec.
 - [`libraries.md`](libraries.md): what Keel and Chaaya carry, and what Reprise builds.
 
-**Current status (Orchestrator-2):** Built on Keel `v0.3.0` and Chaaya `0.2.0`. T0.1, T1.5, T1.6, T1.1, T1.6a, T1.2, T1.3 and T1.4 are
-done. P1 foundations are complete. T0.2 and T0.4 are probing live against the AssemblyAI key (other orchestrator).
+**Current status (Orchestrator-2):** Built on Keel `v0.3.0` and Chaaya `0.2.0`. P1 foundations (T1.2, T1.3, T1.4) are
+done. T2.2 is done. T2.1 is in review. T0.2, T0.3 and T0.4 are live probes (other orchestrator).
 
 The libraries carry the general work. Chaaya `0.2.0` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered

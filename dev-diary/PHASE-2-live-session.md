@@ -30,7 +30,7 @@ requires:   T1.1, T1.4, T1.5
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/, internal/assemblyai/token.go
-status:     in-progress:implement:t2.1-impl
+status:     in-progress:review-r1:t2.1-rev-r1@e0a46229f219e03006d07a6d4b6b988a602e153b
 ```
 **Build on:** Keel `v0.3.0`. `keel/gate` for the route, `keel/cost/sqlitestore` for the global daily
 ceiling and the per-owner ceiling beneath it, `keel/flag` for the kill switch, `keel/lease` for the
@@ -65,7 +65,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/host/
-status:     in-progress:land:t2.2-impl@b49c31f6d04820143f25232a325e7195916e433f
+status:     done:d202492c3a528a429e5421cc9a01c1ad869f40a3
 ```
 Build the session config from stored rows only. It reads the `callbacks` and `mentions` tables from
 T1.1. T4.2 fills `callbacks` later, so this task tests against fixture rows.
@@ -196,8 +196,10 @@ within 40 ms.
 
 ## Handoff log
 
-### What exists now
-Not started.
+### What exists now (Orchestrator-2)
+
+T2.2 landed after a round 1 APPROVE with zero findings. `internal/host` builds the session config
+from stored rows only. The rebase onto current main kept the gate green.
 
 ### What surprised us
 Nothing yet.
