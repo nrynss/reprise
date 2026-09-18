@@ -490,6 +490,74 @@ func TestReconcileExpiredLeaseCompletesTail(t *testing.T) {
 	}
 }
 
+func TestReconcileOverCapAlertsOnce(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-c")
+	first, err := fx.rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	if !first.OverCap || first.NeedsReview {
+		t.Fatalf("first result %+v missed its over cap flag", first)
+	}
+	second, err := fx.rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if second.NeedsReview {
+		t.Fatalf("retry asked for review: %+v", second)
+	}
+	over := fx.alerter.ofKind(AlertOverCap)
+	if len(over) != 1 || over[0].SessionID != in.SessionID {
+		t.Fatalf("over cap alerts %v, want exactly one for this session", fx.alerter.alerts)
+	}
+	if got := recSpent(t, fx.costs); got != recRate*1920 {
+		t.Fatalf("spent %d, want exactly one settle", got)
+	}
+}
+
+func TestReconcileAlertColumnMigrates(t *testing.T) {
+	fx := newRecFixture(t)
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`ALTER TABLE reconcile_state DROP COLUMN over_cap_alerted`); err != nil {
+		t.Fatalf("drop alert column: %v", err)
+	}
+	if _, err := NewReconciler(ReconcilerConfig{
+		DB:        fx.db,
+		Sessions:  recReader{},
+		Artifacts: recFetcher{},
+		Budgets:   fx.budgets,
+		Leases:    fx.leases,
+		Diary:     fx.diary,
+		Media:     fx.media,
+	}); err != nil {
+		t.Fatalf("reopen reconciler: %v", err)
+	}
+	rows, err := fx.db.Reader().QueryContext(t.Context(), `PRAGMA table_info(reconcile_state)`)
+	if err != nil {
+		t.Fatalf("read columns: %v", err)
+	}
+	defer rows.Close()
+	restored := false
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, ctype string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		if name == "over_cap_alerted" {
+			restored = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read columns: %v", err)
+	}
+	if !restored {
+		t.Fatalf("alert column is missing after reopen")
+	}
+}
+
 func TestReconcileAmbiguousResumeSettlesNothing(t *testing.T) {
 	fx := newRecFixture(t)
 	in := fx.mintSession("prov-a")

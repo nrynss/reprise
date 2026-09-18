@@ -288,6 +288,7 @@ type claimRow struct {
 	settled          bool
 	connectedSeconds int
 	overCap          bool
+	overCapAlerted   bool
 	recordingMediaID string
 	recordingURL     string
 	timelineURL      string
@@ -348,6 +349,7 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 		connected_seconds INTEGER NOT NULL DEFAULT 0,
 		cost_nd INTEGER NOT NULL DEFAULT 0,
 		over_cap INTEGER NOT NULL DEFAULT 0,
+		over_cap_alerted INTEGER NOT NULL DEFAULT 0,
 		recording_media_id TEXT NOT NULL DEFAULT '',
 		recording_url TEXT NOT NULL DEFAULT '',
 		timeline_url TEXT NOT NULL DEFAULT '',
@@ -356,7 +358,40 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 	if _, err := r.db.Writer().ExecContext(context.Background(), schema); err != nil {
 		return nil, fmt.Errorf("broker: create reconcile state: %w", ErrState)
 	}
+	if err := r.ensureAlertColumn(context.Background()); err != nil {
+		return nil, err
+	}
 	return r, nil
+}
+
+// ensureAlertColumn adds the over cap alert flag to claim tables written
+// before the flag existed. Fresh tables already carry it from the schema,
+// so the common path changes nothing.
+func (r *Reconciler) ensureAlertColumn(ctx context.Context) error {
+	rows, err := r.db.Reader().QueryContext(ctx, `PRAGMA table_info(reconcile_state)`)
+	if err != nil {
+		return fmt.Errorf("broker: read reconcile columns: %w", ErrState)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, ctype string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+			return fmt.Errorf("broker: read reconcile columns: %w", ErrState)
+		}
+		if name == "over_cap_alerted" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("broker: read reconcile columns: %w", ErrState)
+	}
+	if _, err := r.db.Writer().ExecContext(ctx,
+		`ALTER TABLE reconcile_state ADD COLUMN over_cap_alerted INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("broker: add reconcile alert column: %w", ErrState)
+	}
+	return nil
 }
 
 // Kind returns the job kind reconciliation runs under. Reads repeat
@@ -459,13 +494,13 @@ func (r *Reconciler) ensureRow(ctx context.Context, sessionID string) error {
 // readRow loads the claim row. The caller ensures it first.
 func (r *Reconciler) readRow(ctx context.Context, sessionID string) (claimRow, error) {
 	var row claimRow
-	var claimed, settled, overCap int
+	var claimed, settled, overCap, overCapAlerted int
 	var seconds int
 	var mediaID, recordingURL, timelineURL string
 	err := r.db.Reader().QueryRowContext(ctx,
-		`SELECT claimed, settled, connected_seconds, over_cap, recording_media_id, recording_url, timeline_url
+		`SELECT claimed, settled, connected_seconds, over_cap, over_cap_alerted, recording_media_id, recording_url, timeline_url
 		FROM reconcile_state WHERE session_id = ?`, sessionID).Scan(
-		&claimed, &settled, &seconds, &overCap, &mediaID, &recordingURL, &timelineURL)
+		&claimed, &settled, &seconds, &overCap, &overCapAlerted, &mediaID, &recordingURL, &timelineURL)
 	if err != nil {
 		return claimRow{}, fmt.Errorf("broker: read reconcile row: %w", ErrState)
 	}
@@ -473,6 +508,7 @@ func (r *Reconciler) readRow(ctx context.Context, sessionID string) (claimRow, e
 	row.settled = settled != 0
 	row.connectedSeconds = seconds
 	row.overCap = overCap != 0
+	row.overCapAlerted = overCapAlerted != 0
 	row.recordingMediaID = mediaID
 	row.recordingURL = recordingURL
 	row.timelineURL = timelineURL
@@ -528,6 +564,17 @@ func (r *Reconciler) markRecording(ctx context.Context, sessionID, mediaID strin
 		`UPDATE reconcile_state SET recording_media_id = ?, updated_at = ? WHERE session_id = ?`,
 		mediaID, time.Now().UnixMilli(), sessionID); err != nil {
 		return fmt.Errorf("broker: mark reconcile recording: %w", ErrState)
+	}
+	return nil
+}
+
+// markOverCapAlerted records that the over cap alert fired. Later runs
+// skip it, so one session alerts once no matter how often it retries.
+func (r *Reconciler) markOverCapAlerted(ctx context.Context, sessionID string) error {
+	if _, err := r.db.Writer().ExecContext(ctx,
+		`UPDATE reconcile_state SET over_cap_alerted = 1, updated_at = ? WHERE session_id = ?`,
+		time.Now().UnixMilli(), sessionID); err != nil {
+		return fmt.Errorf("broker: mark reconcile alert: %w", ErrState)
 	}
 	return nil
 }
@@ -712,8 +759,9 @@ func (r *Reconciler) completeExpiredTail(ctx context.Context, in Input, read Pro
 }
 
 // finishArtifacts completes the idempotent tail: the session row update,
-// the recording persist, and the over cap alert. Money never moves here,
-// so retries finish the bytes without spending twice.
+// the recording persist, and the over cap alert. The alert fires once per
+// session on its durable flag, so retries stay silent. Money never moves
+// here, so retries finish the bytes without spending twice.
 func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow) (Result, error) {
 	res := Result{
 		SessionID:        in.SessionID,
@@ -737,9 +785,15 @@ func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow
 		}
 		res.RecordingMediaID = mediaID
 	}
-	if res.OverCap {
+	if res.OverCap && !row.overCapAlerted {
 		r.alert(ctx, &res, AlertOverCap, in.OwnerID,
 			fmt.Sprintf("session ran %d seconds past a %d second cap", res.ConnectedSeconds, in.TokenCapSeconds))
+		if res.AlertError != "" {
+			return res, nil
+		}
+		if err := r.markOverCapAlerted(ctx, in.SessionID); err != nil {
+			return res, err
+		}
 	}
 	return res, nil
 }
