@@ -63,6 +63,10 @@ export class VoiceSocket {
 		this.config = config;
 		this.events = events;
 		this.handle.onOpen(() => {
+			if (this.endSent) {
+				this.settleEnd();
+				return;
+			}
 			this.opened = true;
 			this.handle.send(
 				JSON.stringify({
@@ -101,7 +105,9 @@ export class VoiceSocket {
 	 * the close message. Every later call waits on the same answer, so the
 	 * end control, the page hide and the destroy path still send exactly once.
 	 * A call after the answer already arrived resolves at once, so ending a
-	 * take the page already closed never hangs.
+	 * take the page already closed never hangs. A call before the open sends
+	 * nothing, and its waiter settles when the open short-circuits instead of
+	 * starting a session, so no close message ever follows.
 	 */
 	end(): Promise<void> {
 		if (this.endedOk) return Promise.resolve();
@@ -115,6 +121,15 @@ export class VoiceSocket {
 			}
 		}
 		return waited;
+	}
+
+	private settleEnd(): void {
+		if (this.endedOk) return;
+		this.endedOk = true;
+		const waiters = this.endWaiters;
+		this.endWaiters = [];
+		for (const resolve of waiters) resolve();
+		this.handle.close();
 	}
 
 	private route(text: string): void {

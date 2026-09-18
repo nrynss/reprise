@@ -167,6 +167,24 @@ describe('VoiceSocket', () => {
 		const ends = handle.sent.filter((text) => JSON.parse(text).type === 'session.end');
 		expect(ends.length).toBe(1);
 	});
+
+	it('settles a pre-open end without starting a session', async () => {
+		const handle = new FakeHandle();
+		const { socket } = wire(handle);
+		const ended = socket.end();
+		handle.open();
+		await Promise.race([
+			ended,
+			new Promise<never>((_, reject) => {
+				setTimeout(() => reject(new Error('pre-open end never settled')), 2000);
+			})
+		]);
+		const types = handle.sent.map((text) => JSON.parse(text).type);
+		expect(types).not.toContain('session.update');
+		expect(types).not.toContain('session.end');
+		expect(handle.closed).toBe(1);
+		await socket.end();
+	});
 });
 
 describe('provider audio encoding', () => {
