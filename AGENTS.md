@@ -172,6 +172,18 @@ the tree ever reaches one.
   branch the task opened.
 - **One task, one landing.** Two approved tasks never land in one commit, and one task's work never
   rides along in another's.
+- **Two orchestrators share main through git, never through side files.** No gitignored flag, lock
+  file, or out-of-band signal coordinates orchestrators. An uncommitted marker is invisible in
+  every other clone and worktree, and check-then-act on it races. The status lines plus `main`
+  itself are the shared state.
+- **Re-read before every handoff.** Before writing a status line, dispatching any agent, or
+  landing, the orchestrator runs `git log --oneline -1`, `git status --short`, and
+  `git worktree list`, then re-reads the task's status line. If the head, the tree, or the line
+  moved under it, it stops and reconciles before touching anything.
+- **Land serially through rebase.** The rebase-then-fast-forward is the atomic step. Whoever lands
+  second resolves the conflict. A dirty file the tree does not attribute to your own status lines
+  is another orchestrator's work. Never restore it, delete it, rebase over it, or commit it.
+  Report it instead.
 
 ### Planning files stay out of worktrees
 

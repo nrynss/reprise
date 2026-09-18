@@ -95,7 +95,7 @@ requires:   T0.1, T1.5
 fixture-ok: no
 size:       S · frontier
 owns:       internal/gemini/live_test.go, dev-diary/probes/gemini.md
-status:     not-started
+status:     in-progress:implement:t0.3-impl
 **Build on:** `internal/gemini`, written against the `google.golang.org/genai` documentation. The
 credential comes through `keel/config` as a secret reference. The Hetzner box has no metadata
 server, so default credential discovery does not apply.
