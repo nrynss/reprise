@@ -178,7 +178,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       internal/api/routes.go, internal/api/routes_test.go, web/src/lib/api/types.ts,
             web/src/lib/api/types.test.ts, web/src/lib/api/testdata/
-status:     in-progress:land:t1.3-impl@6a383d0d6545faf12025e5726a1027c103a5800e
+status:     done:fffc7756cd57177d1c16e7b32a7d96ff43d858df
 ```
 **Build on:** `keel/wire` for every error and event. Chaaya's `api` client and `wire` parsers on the
 browser side read the same shapes, so Reprise writes no envelope code of its own.
@@ -215,7 +215,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/
-status:     in-progress:implement:t1.4-impl
+status:     in-progress:review-r1:t1.4-rev-r1@0d82641fd4f2067fea736c001f52dfae312f2e42
 ```
 Keel lists users as a non-goal, and that boundary holds, so identity is Reprise's.
 
@@ -257,7 +257,9 @@ T1.1 with zero findings. The missing `main` wiring is a contract change held for
 next owns that file. T1.6a strengthened both thinned pins, and its round 1 review
 approved with zero findings, so the box config and the credential source stay pinned. T1.2 landed
 (Orchestrator-2) after a round 1 APPROVE with zero findings. The rebase onto current main kept the
-gate green.
+gate green. T1.3 landed (Orchestrator-2) after a round 1 APPROVE with zero findings. Its owns
+ line now covers the golden companions the done criteria demand. The rebase onto current main kept
+ the gate green.
 
 ### What surprised us
 
