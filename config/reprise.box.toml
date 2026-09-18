@@ -1,5 +1,6 @@
-# Box settings for Reprise. Inline values only. Each secret names the
-# box env file and never carries a value.
+# Box settings for Reprise. Inline values only. Each secret names a source
+# and never carries a value. The Vertex key is a file at mode 0600, so its
+# reference names the path and the value is the file's contents.
 transcription_model = "universal-3.5-pro"
 editorial_model = "gemini-2.5-flash"
 session_max_seconds = 1800
@@ -9,6 +10,8 @@ daily_spend_cents = 2000
 render_concurrency = 1
 data_dir = "/var/lib/reprise/data"
 media_dir = "/var/lib/reprise/media"
+vertex_project = "nryn-personal"
+vertex_location = "us-central1"
 public_origin = "https://reprise.nryn.dev"
 
 [secrets.assemblyai_api_key]
@@ -17,9 +20,8 @@ path = "/etc/reprise/env"
 var = "ASSEMBLYAI_API_KEY"
 
 [secrets.gemini_credential]
-source = "env_file"
-path = "/etc/reprise/env"
-var = "GEMINI_CREDENTIAL"
+source = "file"
+path = "/etc/reprise/gemini-sa.json"
 
 [secrets.session_signing_key]
 source = "env_file"

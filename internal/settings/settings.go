@@ -1,7 +1,9 @@
 // Package settings loads the Reprise configuration for one environment.
 //
 // One TOML file holds inline settings and secret references. Each secret
-// names an env_file source and never carries a value. The loader resolves
+// names a source and never carries a value. Two read an env file. The
+// Gemini credential is a service account key, so it names a file source
+// and the value is the key's contents. The loader resolves
 // every secret at boot and returns a plan that names each source. Log the
 // plan on start so the running process shows where each secret came from.
 package settings
@@ -52,6 +54,10 @@ type Settings struct {
 	MediaDir string `toml:"media_dir"`
 	// PublicOrigin is the public base URL that serves the application.
 	PublicOrigin string `toml:"public_origin"`
+	// VertexProject names the Google Cloud project that bills Vertex AI.
+	VertexProject string `toml:"vertex_project"`
+	// VertexLocation names the Vertex AI region the client calls.
+	VertexLocation string `toml:"vertex_location"`
 	// Secrets holds the three secret references. Each resolves at load.
 	Secrets Secrets `toml:"secrets"`
 }
@@ -61,7 +67,9 @@ type Settings struct {
 type Secrets struct {
 	// AssemblyAIAPIKey authorizes AssemblyAI calls from the server only.
 	AssemblyAIAPIKey config.Secret `toml:"assemblyai_api_key" config:"required"`
-	// GeminiCredential authorizes the editorial model calls.
+	// GeminiCredential holds a Vertex AI service account key. Its value is
+	// the key file's JSON, because Vertex authenticates a service account
+	// and the box runs no metadata server to discover one.
 	GeminiCredential config.Secret `toml:"gemini_credential" config:"required"`
 	// SessionSigningKey signs the guest session cookies.
 	SessionSigningKey config.Secret `toml:"session_signing_key" config:"required"`
