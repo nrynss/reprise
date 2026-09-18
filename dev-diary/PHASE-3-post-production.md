@@ -35,7 +35,7 @@ requires:   T1.1, T0.4
 fixture-ok: yes
 size:       M · mid
 owns:       internal/assemblyai/batch.go, internal/transcript/
-status:     in-progress:review-r1:t3.1-rev-r1@3e6c08ea5e8ffe26fd8690cf00971248d7a98cab
+status:     in-progress:remediate-r1:t3.1-rem-r1
 ```
 **Mockup:** the `processing` view ([`mockup`](mockup), `#/processing`) draws this step and the
 ones around it, and its state lab replays a transcription failure. No task owns that route yet.
