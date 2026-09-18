@@ -192,7 +192,7 @@ fixture-ok: no
 size:       M · frontier
 owns:       internal/broker/sweep.go, internal/broker/reconcile.go,
             internal/assemblyai/terminate.go, internal/assemblyai/terminate_live_test.go
-status:     in-progress:land:t2.6-rem-r1@6c299d2393c47f0a756c811fda98b8dd8a9f5998
+status:     done:424199f0ef8ba687ecd1d1aa068b8f5dd454ec0e
 ```
 **Build on:** T0.2's record, which overturned the plan. The token cap does not end the session. Three
 idle runs held a 60 second cap open past 100 seconds with no close and no error, and billing ran
@@ -315,6 +315,10 @@ short-circuits open on the end latch. That landing opens T2.5 and T2.7, both cla
 T2.7 landed (Orchestrator-2) after round 1 APPROVE with zero findings. The timer unit is proved
 through the real socket on a fake clock, but the record page never constructs it, so T2.8 opens to
 wire the cap into the page with the two Playwright runs.
+T2.6 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. The live
+measurement stands: no server call ends a session, so the sweep settles first and deletes after,
+with shortfall settle and idempotent delete. Round 1 fixed the audit row on alert failure. Total
+live spend stayed near ten cents.
 
 ### What surprised us
 Nothing yet.
