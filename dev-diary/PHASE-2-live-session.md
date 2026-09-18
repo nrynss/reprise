@@ -185,10 +185,83 @@ within 40 ms.
 
 ---
 
+### T2.6: Abandoned session sweep ★
+```yaml
+requires:   T2.3
+fixture-ok: no
+size:       M · frontier
+owns:       internal/broker/sweep.go, internal/broker/reconcile.go,
+            internal/assemblyai/terminate.go, internal/assemblyai/terminate_live_test.go
+status:     not-started
+```
+**Build on:** T0.2's record, which overturned the plan. The token cap does not end the session. Three
+idle runs held a 60 second cap open past 100 seconds with no close and no error, and billing ran
+until the client sent `session.end`. A bare socket close leaves the session resumable and billable,
+and `expires_at` sits about an hour out whatever the cap says.
+
+T2.3 alerts on a session connected past its cap and calls that impossible. T0.2 proved it is the
+normal failure. A laptop that sleeps, a tab that crashes, or a dropped network leaves a paid socket
+open with nothing on the server able to close it.
+
+**Measure first, then build.** Nobody knows what ends a live session from the server side. A live
+tagged test answers it on a real session, under the same spend rules T0.2 kept, with every token
+capped at 120 seconds.
+
+* Does `DELETE /v1/sessions/{id}` end a connected session, and does billing stop at the delete?
+* Does the session still list, and what does `duration_seconds` read afterwards?
+* Is there any other server side end, and does the socket see `session.ended`?
+
+Record the answer in `dev-diary/probes/voice-agent.md` beside T0.2's findings.
+
+**Then the sweep.** A `sweep` job kind reads every session row still open past its cap plus a margin.
+It ends each one through whatever the measurement found, settles the lease and the reservation, and
+records the outcome on the row. The kind is idempotent, because ending an ended session must be safe.
+
+**If nothing ends a session from the server,** the record says so and the sweep settles and alerts
+instead. Then the browser timer in T2.7 is the only stop, and the cap the broker mints becomes the
+loss ceiling for one abandoned session. Write that down rather than leaving it implied.
+
+**Settlement is wrong today either way.** T2.1 reserves for the full cap, and an abandoned session
+bills past it, so the settle must handle a reservation that falls short instead of assuming headroom.
+Bill from `session_duration_seconds` alone. `audio_duration_seconds` reads null on every run,
+including runs that streamed audio.
+
+**Done when:** The record answers the three questions with raw responses. A fixture session past its
+cap sweeps, ends and settles exactly once, and sweeping it again changes nothing. A settle whose real
+cost exceeds its reservation lands on both ceilings and leaves nothing held.
+
+---
+
+### T2.7: The browser's own session cap ★
+```yaml
+requires:   T2.4
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/lib/voice/cap.ts
+status:     not-started
+```
+**Build on:** T2.4's socket and session guard. T0.2 proved the provider does not stop at the cap, so
+`project.md` now says the browser runs its own timer and ends first. No task owned that timer. This
+one does.
+
+* The page starts a timer at `session_max_seconds`, the same cap the broker minted the token with.
+* The timer ends the session the way the end control does. It sends `session.end`, waits for
+  `session.ended`, then closes.
+* The screen warns before the end arrives, so a guest is never cut off without notice.
+* A clock that jumps, from a sleeping laptop or a suspended tab, ends the session on the next wake
+  rather than waiting out the drift.
+
+**Done when:** A Playwright run against the mock socket holds a session past its cap and sees exactly
+one `session.end`, sent by the timer and not by a person. A second run wakes a suspended page past
+the cap and sees the same. Neither run needs a wall clock threshold, because the mock drives time.
+
+---
+
 ## Exit criteria
 
 - [ ] No path mints a token without passing gate, kill switch, quota, global budget and owner spend.
 - [ ] Every session's connected seconds come from the provider and settle every reservation.
+- [ ] No abandoned session bills unattended. Either the server ends it, or the record says why not.
 - [ ] The voice path is tested on generated input, with no microphone and no timer thresholds.
 - [ ] Stems align within 40 ms, measured against the provider's recording.
 
