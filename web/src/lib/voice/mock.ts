@@ -103,7 +103,7 @@ interface MockStoredUpload {
 	contentType: string;
 	visibility: string;
 	chunkSize: number;
-	chunks: Map<number, Uint8Array>;
+	chunks: Record<number, Uint8Array>;
 }
 
 // MockUploadServer answers the chunk upload protocol from memory. It holds
@@ -111,7 +111,7 @@ interface MockStoredUpload {
 // it and wraps them for the measuring tool.
 export class MockUploadServer {
 	readonly base: string;
-	private uploads = new Map<string, MockStoredUpload>();
+	private uploads: Record<string, MockStoredUpload> = {};
 	private nextId = 1;
 
 	constructor(base = '/api/uploads') {
@@ -120,20 +120,20 @@ export class MockUploadServer {
 
 	/** Every upload id the server has opened, in open order. */
 	ids(): string[] {
-		return [...this.uploads.keys()];
+		return Object.keys(this.uploads);
 	}
 
 	/** The assembled bytes of one upload, concatenated in index order. */
 	bytes(id: string): Uint8Array {
-		const upload = this.uploads.get(id);
+		const upload = this.uploads[id];
 		if (upload === undefined) return new Uint8Array(0);
-		const indices = [...upload.chunks.keys()].sort((a, b) => a - b);
+		const indices = Object.keys(upload.chunks).map(Number).sort((a, b) => a - b);
 		let total = 0;
-		for (const index of indices) total += (upload.chunks.get(index) ?? new Uint8Array(0)).length;
+		for (const index of indices) total += (upload.chunks[index] ?? new Uint8Array(0)).length;
 		const out = new Uint8Array(total);
 		let at = 0;
 		for (const index of indices) {
-			const chunk = upload.chunks.get(index) ?? new Uint8Array(0);
+			const chunk = upload.chunks[index] ?? new Uint8Array(0);
 			out.set(chunk, at);
 			at += chunk.length;
 		}
@@ -155,10 +155,10 @@ export class MockUploadServer {
 			contentType: record.contentType,
 			visibility: record.visibility,
 			chunkSize: record.chunkSize,
-			chunks: new Map()
+			chunks: {}
 		};
-		for (const chunk of chunks) upload.chunks.set(chunk.index, chunk.bytes);
-		this.uploads.set(id, upload);
+		for (const chunk of chunks) upload.chunks[chunk.index] = chunk.bytes;
+		this.uploads[id] = upload;
 	}
 
 	/** Answer one fetch call. Anything outside the base passes through. */
@@ -203,30 +203,30 @@ export class MockUploadServer {
 		const record = body as Record<string, unknown>;
 		const id = `up-${this.nextId}`;
 		this.nextId += 1;
-		this.uploads.set(id, {
+		this.uploads[id] = {
 			owner: typeof record['owner'] === 'string' ? record['owner'] : '',
 			contentType: typeof record['content_type'] === 'string' ? record['content_type'] : '',
 			visibility: typeof record['visibility'] === 'string' ? record['visibility'] : 'private',
 			chunkSize: typeof record['chunk_size'] === 'number' ? record['chunk_size'] : 65536,
-			chunks: new Map()
-		});
+			chunks: {}
+		};
 		return this.snapshot(id);
 	}
 
 	private async putChunk(id: string, index: number, bytes: Uint8Array): Promise<Response> {
-		const upload = this.uploads.get(id);
+		const upload = this.uploads[id];
 		if (upload === undefined) return this.refusal(404, 'not_found', 'no such upload');
-		upload.chunks.set(index, bytes);
+		upload.chunks[index] = bytes;
 		return this.snapshot(id);
 	}
 
 	private async state(id: string): Promise<Response> {
-		if (!this.uploads.has(id)) return this.refusal(404, 'not_found', 'no such upload');
+		if (this.uploads[id] === undefined) return this.refusal(404, 'not_found', 'no such upload');
 		return this.snapshot(id);
 	}
 
 	private async complete(id: string, text: string): Promise<Response> {
-		const upload = this.uploads.get(id);
+		const upload = this.uploads[id];
 		if (upload === undefined) return this.refusal(404, 'not_found', 'no such upload');
 		let body: unknown;
 		try {
@@ -249,9 +249,9 @@ export class MockUploadServer {
 	}
 
 	private async snapshot(id: string): Promise<Response> {
-		const upload = this.uploads.get(id);
+		const upload = this.uploads[id];
 		if (upload === undefined) return this.refusal(404, 'not_found', 'no such upload');
-		const indices = [...upload.chunks.keys()].sort((a, b) => a - b);
+		const indices = Object.keys(upload.chunks).map(Number).sort((a, b) => a - b);
 		return json(200, {
 			id,
 			owner: upload.owner,

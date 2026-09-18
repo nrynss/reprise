@@ -5,10 +5,10 @@
 	let snap = $state(emptySnapshot);
 
 	$effect(() => {
-		const params = new URLSearchParams(window.location.search);
+		const params = Object.fromEntries(new URLSearchParams(window.location.search).entries());
 		const controller = new RecordController({
-			mock: params.get('mock') === '1',
-			resume: params.get('resume') === '1',
+			mock: params['mock'] === '1',
+			resume: params['resume'] === '1',
 			onChange: (next) => {
 				snap = next;
 			}

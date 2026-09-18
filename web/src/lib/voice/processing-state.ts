@@ -61,13 +61,14 @@ export class ProcessingController {
 	constructor(query: URLSearchParams, onChange: (snapshot: ProcessingSnapshot) => void) {
 		this.onChange = onChange;
 		this.snapshot = emptyProcessing();
-		this.snapshot.episode = query.get('episode') ?? '';
-		this.mockMode = query.get('mock') === '1';
-		this.transcriptJob = query.get('transcript') ?? '';
-		this.editorialJob = query.get('editorial') ?? '';
-		if (query.get('uploads') === 'done') {
-			const userBytes = Number(query.get('userBytes') ?? '0');
-			const hostBytes = Number(query.get('hostBytes') ?? '0');
+		const params = Object.fromEntries(query.entries());
+		this.snapshot.episode = params['episode'] ?? '';
+		this.mockMode = params['mock'] === '1';
+		this.transcriptJob = params['transcript'] ?? '';
+		this.editorialJob = params['editorial'] ?? '';
+		if (params['uploads'] === 'done') {
+			const userBytes = Number(params['userBytes'] ?? '0');
+			const hostBytes = Number(params['hostBytes'] ?? '0');
 			this.snapshot.upload = {
 				name: 'Upload',
 				state: 'done',

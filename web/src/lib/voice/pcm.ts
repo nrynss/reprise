@@ -63,23 +63,38 @@ export function encodeBase64(bytes: Uint8Array): string {
 	return out;
 }
 
+const BASE64_VALUES = new Int8Array(128).fill(-1);
+for (let i = 0; i < BASE64_ALPHABET.length; i += 1) {
+	BASE64_VALUES[BASE64_ALPHABET.charCodeAt(i)] = i;
+}
+
+/** Read one required base64 character. It throws on anything outside the alphabet. */
+function base64Value(char: string | undefined): number {
+	if (char === undefined) throw new Error('the audio frame carries characters outside base64');
+	const code = char.charCodeAt(0);
+	const value = code < BASE64_VALUES.length ? BASE64_VALUES[code] : -1;
+	if (value < 0) {
+		throw new Error('the audio frame carries characters outside base64');
+	}
+	return value;
+}
+
+/** Read one trailing base64 character. A missing tail reads as zero. */
+function base64Tail(text: string, index: number): number {
+	if (index >= text.length) return 0;
+	return base64Value(text[index]);
+}
+
 /** Decode base64 into bytes. It throws on any character outside the alphabet. */
 export function decodeBase64(text: string): Uint8Array<ArrayBuffer> {
-	const values = new Map<string, number>();
-	for (let i = 0; i < BASE64_ALPHABET.length; i += 1) {
-		values.set(BASE64_ALPHABET[i], i);
-	}
 	const clean = text.endsWith('==') ? text.slice(0, -2) : text.endsWith('=') ? text.slice(0, -1) : text;
 	const out = new Uint8Array(Math.floor((clean.length * 3) / 4));
 	let position = 0;
 	for (let i = 0; i < clean.length; i += 4) {
-		const first = values.get(clean[i]);
-		const second = values.get(clean[i + 1]);
-		const third = i + 2 < clean.length ? values.get(clean[i + 2]) : 0;
-		const fourth = i + 3 < clean.length ? values.get(clean[i + 3]) : 0;
-		if (first === undefined || second === undefined || third === undefined || fourth === undefined) {
-			throw new Error('the audio frame carries characters outside base64');
-		}
+		const first = base64Value(clean[i]);
+		const second = base64Value(clean[i + 1]);
+		const third = base64Tail(clean, i + 2);
+		const fourth = base64Tail(clean, i + 3);
 		const triple = (first << 18) | (second << 12) | (third << 6) | fourth;
 		out[position] = (triple >> 16) & 255;
 		position += 1;
