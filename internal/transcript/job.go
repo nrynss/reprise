@@ -39,7 +39,7 @@ type Config struct {
 	// DB is the diary writer holding mentions, turns, and words.
 	DB *sql.DB
 	// Batch talks to the provider batch API.
-	Batch *assemblyai.Client
+	Batch *assemblyai.BatchClient
 	// Budgets refuses the call when the owner or global ceiling is full.
 	Budgets Budget
 	// OwnerID scopes the mentions read and the words written.

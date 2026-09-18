@@ -96,9 +96,9 @@ const deletedBody = `{"id":"tx-1","status":"completed",` +
 	`"confidence":null, "words":null}`
 
 // openClient points one test client at the scripted server.
-func openClient(t *testing.T, server *httptest.Server) *assemblyai.Client {
+func openClient(t *testing.T, server *httptest.Server) *assemblyai.BatchClient {
 	t.Helper()
-	client, err := assemblyai.NewClient(assemblyai.Config{
+	client, err := assemblyai.NewBatchClient(assemblyai.Config{
 		BaseURL: server.URL,
 		APIKey:  "test-key",
 		Client:  server.Client(),
@@ -267,7 +267,7 @@ func TestDeleteFailureSurfaces(t *testing.T) {
 // with its sentinel and no HTTP call.
 func TestClientRejectsEmptyKey(t *testing.T) {
 	t.Parallel()
-	if _, err := assemblyai.NewClient(assemblyai.Config{}); !errors.Is(err, assemblyai.ErrBatchInvalid) {
+	if _, err := assemblyai.NewBatchClient(assemblyai.Config{}); !errors.Is(err, assemblyai.ErrBatchInvalid) {
 		t.Fatalf("new client error = %v, want ErrBatchInvalid", err)
 	}
 }

@@ -164,7 +164,7 @@ func TestRunStoresOneTimeline(t *testing.T) {
 	flow := &providerFlow{replies: []string{`{"id":"tx-9","status":"processing"}`, `{"id":"tx-9","status":"processing"}`, completion, after}}
 	server := httptest.NewServer(flow.handler())
 	defer server.Close()
-	client, err := assemblyai.NewClient(assemblyai.Config{
+	client, err := assemblyai.NewBatchClient(assemblyai.Config{
 		BaseURL: server.URL,
 		APIKey:  "test-key",
 		Client:  server.Client(),
@@ -254,7 +254,7 @@ func TestWordsLandWithin50ms(t *testing.T) {
 	flow := &providerFlow{replies: []string{`{"id":"tx-9","status":"processing"}`, `{"id":"tx-9","status":"processing"}`, completion, after}}
 	server := httptest.NewServer(flow.handler())
 	defer server.Close()
-	client, err := assemblyai.NewClient(assemblyai.Config{
+	client, err := assemblyai.NewBatchClient(assemblyai.Config{
 		BaseURL: server.URL,
 		APIKey:  "test-key",
 		Client:  server.Client(),
@@ -306,7 +306,7 @@ func TestRunRefusesWithoutBudget(t *testing.T) {
 	flow := &providerFlow{replies: []string{`{"id":"tx-9","status":"processing"}`, `{"id":"tx-9","status":"processing"}`, completion, after}}
 	server := httptest.NewServer(flow.handler())
 	defer server.Close()
-	client, err := assemblyai.NewClient(assemblyai.Config{
+	client, err := assemblyai.NewBatchClient(assemblyai.Config{
 		BaseURL: server.URL,
 		APIKey:  "test-key",
 		Client:  server.Client(),
@@ -361,7 +361,7 @@ func TestRunKeepsProviderCopyOnReceiptFailure(t *testing.T) {
 	flow := &providerFlow{replies: []string{`{"id":"tx-9","status":"processing"}`, `{"id":"tx-9","status":"processing"}`, completion, after}}
 	server := httptest.NewServer(flow.handler())
 	defer server.Close()
-	client, err := assemblyai.NewClient(assemblyai.Config{
+	client, err := assemblyai.NewBatchClient(assemblyai.Config{
 		BaseURL: server.URL,
 		APIKey:  "test-key",
 		Client:  server.Client(),
@@ -412,7 +412,7 @@ func TestRunConfirmsDelete(t *testing.T) {
 	flow := &providerFlow{replies: []string{`{"id":"tx-9","status":"processing"}`, `{"id":"tx-9","status":"processing"}`, completion, completion}}
 	server := httptest.NewServer(flow.handler())
 	defer server.Close()
-	client, err := assemblyai.NewClient(assemblyai.Config{
+	client, err := assemblyai.NewBatchClient(assemblyai.Config{
 		BaseURL: server.URL,
 		APIKey:  "test-key",
 		Client:  server.Client(),

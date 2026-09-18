@@ -107,18 +107,18 @@ type Config struct {
 	Client *http.Client
 }
 
-// Client talks to the AssemblyAI batch API over plain HTTP. Create one with
-// NewClient, because the zero value carries no key.
-type Client struct {
+// BatchClient talks to the AssemblyAI batch API over plain HTTP. Create one
+// with NewBatchClient, because the zero value carries no key.
+type BatchClient struct {
 	base  string
 	key   string
 	model string
 	api   *http.Client
 }
 
-// NewClient validates cfg and returns the client. It defaults the origin,
+// NewBatchClient validates cfg and returns the client. It defaults the origin,
 // the model, and the HTTP client, so callers override only what tests need.
-func NewClient(cfg Config) (*Client, error) {
+func NewBatchClient(cfg Config) (*BatchClient, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, fmt.Errorf("assemblyai: new batch client: %w: empty key", ErrBatchInvalid)
 	}
@@ -134,15 +134,15 @@ func NewClient(cfg Config) (*Client, error) {
 	if api == nil {
 		api = &http.Client{Timeout: 90 * time.Second}
 	}
-	return &Client{base: base, key: cfg.APIKey, model: model, api: api}, nil
+	return &BatchClient{base: base, key: cfg.APIKey, model: model, api: api}, nil
 }
 
 // Model returns the transcription model this client creates with.
-func (c *Client) Model() string { return c.model }
+func (c *BatchClient) Model() string { return c.model }
 
 // request sends one JSON call and returns the raw body. It sets the key on
 // every call and reports provider error text without matching on it.
-func (c *Client) request(ctx context.Context, method, path string, body any) ([]byte, error) {
+func (c *BatchClient) request(ctx context.Context, method, path string, body any) ([]byte, error) {
 	if c == nil || c.api == nil || c.key == "" {
 		return nil, fmt.Errorf("assemblyai: batch call: %w: client not built", ErrBatchInvalid)
 	}
@@ -180,7 +180,7 @@ func (c *Client) request(ctx context.Context, method, path string, body any) ([]
 
 // Upload posts raw audio bytes and returns the URL the create call reads.
 // The caller uploads the user stem only, never the render.
-func (c *Client) Upload(ctx context.Context, audio io.Reader) (string, error) {
+func (c *BatchClient) Upload(ctx context.Context, audio io.Reader) (string, error) {
 	if audio == nil {
 		return "", fmt.Errorf("assemblyai: upload: %w: nil audio", ErrBatchInvalid)
 	}
@@ -218,7 +218,7 @@ func (c *Client) Upload(ctx context.Context, audio io.Reader) (string, error) {
 // Create starts one transcription and returns its id. Keyterms carry the
 // recurring names from past episodes. The status starts queued, so the
 // caller follows with Wait.
-func (c *Client) Create(ctx context.Context, req CreateRequest) (string, error) {
+func (c *BatchClient) Create(ctx context.Context, req CreateRequest) (string, error) {
 	if strings.TrimSpace(req.AudioURL) == "" {
 		return "", fmt.Errorf("assemblyai: create: %w: empty audio url", ErrBatchInvalid)
 	}
@@ -263,7 +263,7 @@ type transcriptBody struct {
 
 // Get fetches one transcript and keeps the raw body beside the parse. The
 // caller persists Raw on receipt, before any delete.
-func (c *Client) Get(ctx context.Context, id string) (Transcript, error) {
+func (c *BatchClient) Get(ctx context.Context, id string) (Transcript, error) {
 	if strings.TrimSpace(id) == "" {
 		return Transcript{}, fmt.Errorf("assemblyai: get: %w: empty id", ErrBatchInvalid)
 	}
@@ -300,7 +300,7 @@ func (c *Client) Get(ctx context.Context, id string) (Transcript, error) {
 // results because webhooks never reach this machine. The context bounds the
 // wait, and the interval sets the poll gap. A zero interval polls every
 // five seconds.
-func (c *Client) Wait(ctx context.Context, id string, interval time.Duration) (Transcript, error) {
+func (c *BatchClient) Wait(ctx context.Context, id string, interval time.Duration) (Transcript, error) {
 	if strings.TrimSpace(id) == "" {
 		return Transcript{}, fmt.Errorf("assemblyai: wait: %w: empty id", ErrBatchInvalid)
 	}
@@ -331,7 +331,7 @@ func (c *Client) Wait(ctx context.Context, id string, interval time.Duration) (T
 
 // Delete removes one transcript by id. Deletion is soft on the provider
 // side, so the caller confirms with Get and Deleted before settling.
-func (c *Client) Delete(ctx context.Context, id string) error {
+func (c *BatchClient) Delete(ctx context.Context, id string) error {
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("assemblyai: delete: %w: empty id", ErrBatchInvalid)
 	}
