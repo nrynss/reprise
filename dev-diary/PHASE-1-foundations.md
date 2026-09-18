@@ -177,7 +177,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       S · mid
 owns:       internal/api/routes.go, web/src/lib/api/types.ts
-status:     in-progress:implement:t1.3-impl
+status:     in-progress:review-r1:t1.3-rev-r1@6a383d0d6545faf12025e5726a1027c103a5800e
 ```
 **Build on:** `keel/wire` for every error and event. Chaaya's `api` client and `wire` parsers on the
 browser side read the same shapes, so Reprise writes no envelope code of its own.
