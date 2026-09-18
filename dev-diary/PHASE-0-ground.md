@@ -59,7 +59,7 @@ requires:   T0.1, T1.5
 fixture-ok: no
 size:       M · frontier
 owns:       internal/assemblyai/live_test.go, dev-diary/probes/voice-agent.md,
-status:     in-progress:implement:t0.2-impl
+status:     done:b3fc58aab1e9e5818d0598e2033cd68bb9b8ef1b
 ```
 **Read first:** AssemblyAI's `voice-agent-api` pages: browser integration, events reference, session
 history, session configuration. Download the Markdown versions again. Earlier copies were temporary.
@@ -193,10 +193,15 @@ minute Opus stem plays inline with no bucket, and the laughing take wins the tra
 listening test. About 30k tokens across three calls. The probe builds its client inline, so T3.2
 still needs a shared client owner for `internal/gemini`.
 
+T0.2 landed after round 1 approval with zero in-scope findings: five live sessions measured the
+token ranges, the unprompted greeting, the transcript shapes, the stereo recording, the DELETE
+proof, and the keyterm shift. The cap does not end the session, so the browser runs its own timer
+and `project.md` records that in the same commit. Spend about 14 cents final run, near 1.02
+dollars with exploration. The duplicate `doc.go` resolved to main's copy at landing.
+
 ### What surprised us
 The AssemblyAI docs, read while planning, showed the live user transcript has no word timings and
 auto chapters are deprecated. `project.md` records both departures.
 
 ### Notes for the next developer
-T0.2 still probes against the AssemblyAI key. T0.5 starts when T0.2 lands. The other
-orchestrator's tree held no dirt at this landing.
+T0.5 starts now that T0.2 landed. The other orchestrator's tree held no dirt at this landing.
