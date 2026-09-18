@@ -19,7 +19,7 @@ requires:   T0.1, T1.5, T2.1
 fixture-ok: no
 size:       M · mid
 owns:       deploy/, cmd/reprise/main.go, Dockerfile
-status:     in-progress:land:t6.1-rem-r1@b70a090ec26b4d8f2e26a2e2383f4ef4836e41f5
+status:     done:ca529d79afce44e8290bdb05250f681ea9f45acb
 ```
 **Build on:** the image from T0.1, `config/reprise.box.toml` from T1.5, and the session registry from
 T2.1, which is what a drain waits on. The box is documented in
@@ -173,8 +173,13 @@ file or a task id. The owner flips visibility.
 
 ## Handoff log
 
-### What exists now
-Not started.
+### What exists now (Orchestrator-2)
+T6.1 landed after round 2 APPROVE with zero residue against round 1. The deploy kit (run, redeploy
+with stop-then-remove drain, backup with manifest, docs), the settings-loading SIGTERM-draining
+binary, and the ffmpeg-baked image are on main with a green gate. Open owner/box items stand in the
+handoff: first deploy, workstation edge check, redeploy drill, backup cron plus restore drill, DNS.
+The dead CI ffmpeg URL stays an out-of-scope row on T0.1's workflow file. The other orchestrator's
+PHASE-0 dirt sat through this landing and was left untouched.
 
 ### What surprised us
 Nothing yet.

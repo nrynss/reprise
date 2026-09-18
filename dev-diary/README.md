@@ -7,7 +7,7 @@ How work runs lives only in [`../AGENTS.md`](../AGENTS.md). This file holds fact
 - [`libraries.md`](libraries.md): what Keel and Chaaya carry, and what Reprise builds.
 
 **Current status (Orchestrator-2):** Built on Keel `v0.3.0` and Chaaya `0.2.0`. P1 foundations plus T2.1, T2.2, T2.3 and T3.1 are
-done. T2.3 is done, T2.4 and T6.1 in implementation (T6.1 in review). T0.2 is probing and T0.3 is done (other orchestrator).
+done. T2.3 is done, T6.1 is done. T2.4 takeover implementing, T3.2 implementing. T0.2 is probing and T0.3 is done (other orchestrator).
 
 The libraries carry the general work. Chaaya `0.2.0` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered
