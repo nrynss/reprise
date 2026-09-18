@@ -1,0 +1,12 @@
+{
+  "session_id": "sess_f65198eb130344dab432599598e739df",
+  "started_at": "2026-09-18T19:18:20.820036+00:00",
+  "ended_at": "2026-09-18T19:18:48.264411+00:00",
+  "format": "ogg/opus",
+  "channels": 2,
+  "channel_layout": "stereo (left=user, right=agent)",
+  "sample_rate": 24000,
+  "file": "sess_f65198eb130344dab432599598e739df/recording/audio.ogg",
+  "uploaded_chunks": 4,
+  "dropped_chunks": 0
+}
