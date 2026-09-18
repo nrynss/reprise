@@ -388,6 +388,9 @@ func TestRunKeepsProviderCopyOnReceiptFailure(t *testing.T) {
 	if !errors.Is(err, receiptErr) {
 		t.Fatalf("run error = %v, want the receipt failure", err)
 	}
+	if !strings.Contains(err.Error(), "tx-9") {
+		t.Fatalf("run error = %v, want it to name tx-9 for the explicit retry", err)
+	}
 	flow.mu.Lock()
 	deletes := flow.deletes
 	flow.mu.Unlock()

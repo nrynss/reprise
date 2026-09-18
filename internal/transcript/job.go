@@ -126,7 +126,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		return Result{}, fmt.Errorf("transcript: run: %w", err)
 	}
 	if err := cfg.SaveRaw(ctx, tx.Raw); err != nil {
-		return Result{}, fmt.Errorf("transcript: run: receipt store: %w", err)
+		return Result{}, fmt.Errorf("transcript: run %s: receipt store: %w", transcriptID, err)
 	}
 	user := make([]assemblyai.Word, 0, len(tx.Words))
 	user = append(user, tx.Words...)
