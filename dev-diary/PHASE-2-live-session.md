@@ -30,7 +30,7 @@ requires:   T1.1, T1.4, T1.5
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/, internal/assemblyai/token.go
-status:     in-progress:land:t2.1-impl@e0a46229f219e03006d07a6d4b6b988a602e153b
+status:     done:34303aa637b351c901215e1883c6c66654364419
 ```
 **Build on:** Keel `v0.3.0`. `keel/gate` for the route, `keel/cost/sqlitestore` for the global daily
 ceiling and the per-owner ceiling beneath it, `keel/flag` for the kill switch, `keel/lease` for the
@@ -90,7 +90,7 @@ requires:   T2.1
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/reconcile.go
-status:     not-started
+status:     in-progress:implement:t2.3-impl
 ```
 **Build on:** `keel/job` with a kind named `reconcile`, and `keel/lease` for the settle and the
 reconciliation, which records both the measured duration and the provider's. Reading the Sessions API
@@ -114,7 +114,7 @@ requires:   T1.3, T2.1
 fixture-ok: yes
 size:       M · frontier
 owns:       web/src/routes/record/, web/src/routes/processing/, web/src/lib/voice/
-status:     not-started
+status:     in-progress:implement:t2.4-impl
 ```
 **Mockup:** the `preflight`, `live` and `processing` views ([`mockup`](mockup), `#/preflight`,
 `#/live`, `#/processing`).
@@ -199,7 +199,10 @@ within 40 ms.
 ### What exists now (Orchestrator-2)
 
 T2.2 landed after a round 1 APPROVE with zero findings. `internal/host` builds the session config
-from stored rows only. The rebase onto current main kept the gate green.
+from stored rows only. The rebase onto current main kept the gate green. T2.1 landed
+(Orchestrator-2) after a round 1 APPROVE with zero findings. The ConfigBuilder stub stands as a
+valid seam for the landed host shape, and the lease-to-session link waits on the store owner. The
+rebase onto current main kept the gate green. That landing opens T2.3 and T2.4, both claimed.
 
 ### What surprised us
 Nothing yet.
