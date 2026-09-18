@@ -11,6 +11,7 @@ package broker
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -153,13 +154,19 @@ type MediaWriter interface {
 type AlertKind string
 
 // Alert kinds. OverCap should never fire. NeedsReview fires when an
-// ambiguous resume leaves money unsettled for an operator.
+// ambiguous resume leaves money unsettled for an operator. SweepOpen fires
+// when the sweep settles a session the provider still reports open, so
+// spend may keep running past the settle.
 const (
 	// AlertOverCap marks a session connected past its cap plus margin.
 	AlertOverCap AlertKind = "over_cap"
 	// AlertNeedsReview marks a session whose resume could not prove the
 	// settle state, so it settled nothing.
 	AlertNeedsReview AlertKind = "needs_review"
+	// AlertSweepOpen marks a session the sweep settled while the provider
+	// still reported it open. The books close at the accrued cost, and
+	// the meter may run on.
+	AlertSweepOpen AlertKind = "sweep_open"
 )
 
 // Alert is one operator signal from reconciliation. Alerts are advisory.
@@ -629,6 +636,80 @@ func (r *Reconciler) Reconcile(ctx context.Context, in Input) (Result, error) {
 	if read.DurationSeconds < 0 {
 		return Result{}, fmt.Errorf("broker: reconcile: %w: provider duration is negative", ErrRead)
 	}
+	return r.settleRead(ctx, in, read)
+}
+
+// AbandonedSession is one session the sweep found past its cap whose money
+// never settled. DurationSeconds is the accrued cost to book: the provider
+// duration for a session that already closed, or the elapsed open time for
+// one that still runs. RecordingURL and TimelineURL ride along when the
+// provider still names them.
+type AbandonedSession struct {
+	// DurationSeconds is the connected time to settle in seconds.
+	DurationSeconds int
+	// RecordingURL is the expiring stereo recording URL, or empty.
+	RecordingURL string
+	// TimelineURL is the expiring timeline URL, or empty.
+	TimelineURL string
+}
+
+// ReconcileAbandoned settles one session the sweep found past its cap.
+// The provider read cannot serve here: an open session reports no
+// duration, and a deleted record reports nothing at all. The caller passes
+// the accrued seconds it measured, and the same claim guard, money path
+// and artifact tail run as a normal reconcile. A negative duration
+// reports ErrRead, because a settle prices nothing without one.
+func (r *Reconciler) ReconcileAbandoned(ctx context.Context, in Input, abandoned AbandonedSession) (Result, error) {
+	if err := validate(in); err != nil {
+		return Result{}, err
+	}
+	if abandoned.DurationSeconds < 0 {
+		return Result{}, fmt.Errorf("broker: reconcile abandoned: %w: provider duration is negative", ErrRead)
+	}
+	if err := r.ensureRow(ctx, in.SessionID); err != nil {
+		return Result{}, err
+	}
+	row, err := r.readRow(ctx, in.SessionID)
+	if err != nil {
+		return Result{}, err
+	}
+	if row.settled {
+		return r.finishArtifacts(ctx, in, row)
+	}
+	if row.claimed {
+		return r.resumeClaimed(ctx, in)
+	}
+	return r.settleRead(ctx, in, ProviderSession{
+		ID:              in.ProviderSessionID,
+		DurationSeconds: abandoned.DurationSeconds,
+		RecordingURL:    abandoned.RecordingURL,
+		TimelineURL:     abandoned.TimelineURL,
+	})
+}
+
+// IsSettled reports whether the session already settled. The sweep skips
+// settled sessions, so a second pass moves no money and raises no alert.
+func (r *Reconciler) IsSettled(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("broker: settled check: %w: session id must not be empty", ErrInvalid)
+	}
+	var settled int
+	err := r.db.Reader().QueryRowContext(ctx,
+		`SELECT settled FROM reconcile_state WHERE session_id = ?`, sessionID).Scan(&settled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("broker: read settle state: %w", ErrState)
+	}
+	return settled != 0, nil
+}
+
+// settleRead books one provider duration: the price at the session rate,
+// settled on both ceilings under the claim, the lease closed and
+// reconciled at that price, and the artifact tail after. A repeat after a
+// crash settles money at most once.
+func (r *Reconciler) settleRead(ctx context.Context, in Input, read ProviderSession) (Result, error) {
 	price, err := priceForSeconds(read.DurationSeconds)
 	if err != nil {
 		return Result{}, err
@@ -661,7 +742,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, in Input) (Result, error) {
 	if err := r.markSettled(ctx, in.SessionID, read.DurationSeconds, price, overCap, read.RecordingURL, read.TimelineURL); err != nil {
 		return r.review(ctx, in, fmt.Sprintf("hold settled to %s, state write failed: %v", price, err))
 	}
-	row, err = r.readRow(ctx, in.SessionID)
+	row, err := r.readRow(ctx, in.SessionID)
 	if err != nil {
 		return Result{}, err
 	}
