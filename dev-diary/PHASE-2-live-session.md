@@ -114,7 +114,7 @@ requires:   T1.3, T2.1
 fixture-ok: yes
 size:       M · frontier
 owns:       web/src/routes/record/, web/src/routes/processing/, web/src/lib/voice/
-status:     in-progress:implement:t2.4-impl
+status:     in-progress:review-r1:t2.4-rev-r1@eee9fb5bd105c76a73862cc3eaa40100f7b82395
 ```
 **Mockup:** the `preflight`, `live` and `processing` views ([`mockup`](mockup), `#/preflight`,
 `#/live`, `#/processing`).
