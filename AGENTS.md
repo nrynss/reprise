@@ -25,7 +25,8 @@ round returns APPROVE with zero findings across all severities. No task skips a 
 4. **Re-review.** Steps 2 and 3 repeat with fresh agents until a round returns APPROVE, with an
    explicit claim of zero residue against every prior round, severity by severity.
 5. **Land.** The orchestrator lands the approved commit on `main`, removes the worktrees, and marks
-   the task done with the landed hash.
+   the task done with the landed hash. It then records the landing in lambo, as "Memory" below
+   describes.
 
 "Task status" below defines every status the orchestrator writes.
 
@@ -441,14 +442,41 @@ tracked file. Locally they resolve from `/home/nryn/work/reprise/.env`, mode `06
 resolve from `/etc/reprise/env`, root-owned, mode `0600`. Never export one in an interactive shell,
 because it lands in `~/.zsh_history`.
 
-## Memory, where available
+## Memory
 
-If this machine exposes the lambo MCP server, call `lambo_recall` before you start and
-`lambo_derive` plus `lambo_record_action` after each meaningful change. Use one stable `agent_id` for
-the session. Treat lambo as an addition. This file holds everything you need.
+Lambo is the graph memory every session here shares. Several agents work this repository at once, so
+the graph is the only place one session learns what another decided. Every role uses it, the
+orchestrator included.
+
+**Recall before you read anything else.** Call `lambo_recall` before the read order below, before you
+open a file, and before you search the filesystem. The graph records what other agents actually did
+and why. The source files record only the result.
+
+**Recall again before you touch shared ground.** Reconfiguring infrastructure, renaming or deleting a
+resource, or opening a new workstream each start with a recall. A warning about blast radius means
+other work depends on that thing. Name the dependents in your handoff instead of proceeding.
+
+**Use one stable `agent_id` for the whole session.** Name the model you are running as, such as
+`claude-opus-5`. Never invent an id per task or per topic. Attribution and soft locks key on that id,
+and a one-off id fragments both.
+
+**The orchestrator recalls before it dispatches and writes after it lands.** Recall tells it whether
+another session already moved the ground a task stands on. After the landing it calls
+`lambo_derive` for the decision and `lambo_record_action` for what landed, with the hash.
+
+**Implementers and reviewers write what the plan does not already say.** Derive the decision and its
+reason, a departure a reviewer accepted, or a trap the next agent would fall into. Do not derive the
+activity. Git records that.
+
+**`lambo_derive` de-duplicates on resend. `lambo_record_action` does not.** Never resend a reworded
+action. Both return before the write lands, so do not read your own write back immediately.
+
+**Memory being down never blocks work.** Note the outage in your handoff file and carry on. This
+file still holds everything you need.
 
 ## Read order
 
+0. `lambo_recall` on your task, before you open anything.
 1. This file, in full.
 2. [`product.md`](product.md), then [`dev-diary/project.md`](dev-diary/project.md).
 3. Your task's block in its `dev-diary/PHASE-*.md`, and `dev-diary/libraries.md`.
