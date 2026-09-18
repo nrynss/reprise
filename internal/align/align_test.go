@@ -221,6 +221,13 @@ func TestDriftLimitBoundary(t *testing.T) {
 	if outside.Pass() {
 		t.Fatalf("50 ms drift passed")
 	}
+	exact := Align(clock, Lag{}, Lag{Samples: 320, Seconds: 0.04})
+	if !exact.Pass() {
+		t.Fatalf("40 ms drift failed, the limit includes the boundary")
+	}
+	if exact.Warning() != "" {
+		t.Fatalf("boundary check warned: %q", exact.Warning())
+	}
 }
 
 // TestAlignEndToEndOnSyntheticSession mirrors the fixture driver without
