@@ -70,7 +70,8 @@ type EditorialRequest struct {
 }
 
 // EditorialAnswer holds one parsed editorial answer with its token usage.
-// Usage prices the call for the budget settle.
+// The run settles the audio minute estimate. Usage stays recorded for a
+// later pass that prices tokens. No settle reads it today.
 type EditorialAnswer struct {
 	// JSON is the raw answer text, kept for the receipt store.
 	JSON string
