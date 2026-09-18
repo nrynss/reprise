@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,6 +240,42 @@ func TestSweepSettlesOpenSessionAtElapsed(t *testing.T) {
 	}
 	if len(sf.fx.alerter.alerts) != 2 {
 		t.Fatalf("alerts %v after resweep, want no new alert", sf.fx.alerter.alerts)
+	}
+}
+
+// failAlerter drops every alert with a fixed error. The settle stands
+// regardless, and the sweep row keeps the real outcome beside the note.
+type failAlerter struct {
+	err error
+}
+
+func (a failAlerter) Report(context.Context, Alert) error {
+	return a.err
+}
+
+func TestSweepAlertFailureKeepsOutcome(t *testing.T) {
+	sf := newSweepFixture(t, 4000)
+	sf.statuses.docs["prov-sweep"] = ProviderStatus{
+		ID: "prov-sweep", Status: "created", HasDuration: false, OpenSeconds: 3600,
+	}
+	sf.sweeper.alerter = failAlerter{err: errors.New("delivery down")}
+
+	out, err := sf.sweeper.Sweep(t.Context(), SweepInput{MarginSeconds: DefaultMarginSeconds})
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(out) != 1 || out[0].Skipped || out[0].ConnectedSeconds != 3600 {
+		t.Fatalf("sweep outcome %+v, want one settled 3600 second session", out)
+	}
+	if got := recSpent(t, sf.fx.costs); got != recRate*3600 {
+		t.Fatalf("global spent %d, want the elapsed cost %d", got, recRate*3600)
+	}
+	status, seconds, _, detail := sweepRow(t, sf.fx.db, sf.candidate.SessionID)
+	if status != "created" || seconds != 3600 {
+		t.Fatalf("sweep row %q/%d/%q, want created/3600 with the alert note", status, seconds, detail)
+	}
+	if !strings.Contains(detail, "alert failed: delivery down") {
+		t.Fatalf("sweep row detail %q misses the alert failure note", detail)
 	}
 }
 

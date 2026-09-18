@@ -363,7 +363,9 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 	detail := fmt.Sprintf("settled %d seconds at %s, provider record %s", res.ConnectedSeconds, res.Cost, ended.Detail)
 	if stillOpen {
 		detail += ", session still open at settle so spend may run on"
-		s.alert(ctx, candidate, AlertSweepOpen, detail)
+		if err := s.alert(ctx, candidate, AlertSweepOpen, detail); err != nil {
+			detail += " (alert failed: " + err.Error() + ")"
+		}
 	}
 	if err := s.markSwept(ctx, candidate.SessionID, status.Status, res.ConnectedSeconds, false, detail); err != nil {
 		return SweepOutcome{}, err
@@ -383,22 +385,26 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 // review, the same way an ambiguous resume settles nothing.
 func (s *Sweeper) reviewGone(ctx context.Context, candidate Candidate) (SweepOutcome, error) {
 	detail := fmt.Sprintf("provider record for session %s is gone, duration unknowable so nothing settled", candidate.SessionID)
-	s.alert(ctx, candidate, AlertNeedsReview, detail)
+	if err := s.alert(ctx, candidate, AlertNeedsReview, detail); err != nil {
+		detail += " (alert failed: " + err.Error() + ")"
+	}
 	if err := s.markSwept(ctx, candidate.SessionID, "gone", 0, false, detail); err != nil {
 		return SweepOutcome{}, err
 	}
 	return SweepOutcome{SessionID: candidate.SessionID, ProviderStatus: "gone", Detail: detail}, nil
 }
 
-// alert delivers one alert through the alerter when set. A delivery
-// failure lands on the sweep row, never on the settle.
-func (s *Sweeper) alert(ctx context.Context, candidate Candidate, kind AlertKind, detail string) {
+// alert delivers one alert through the alerter when set. It returns the
+// delivery failure so the caller records it beside the outcome. It writes
+// no row itself, so the outcome keeps its real status and seconds.
+func (s *Sweeper) alert(ctx context.Context, candidate Candidate, kind AlertKind, detail string) error {
 	if s.alerter == nil {
-		return
+		return nil
 	}
 	if err := s.alerter.Report(ctx, Alert{Kind: kind, SessionID: candidate.SessionID, OwnerID: candidate.OwnerID, Detail: detail}); err != nil {
-		_ = s.markSwept(ctx, candidate.SessionID, "", 0, false, detail+" (alert failed: "+err.Error()+")")
+		return err
 	}
+	return nil
 }
 
 // markSwept records the outcome on the sweep row. The first write wins, so
