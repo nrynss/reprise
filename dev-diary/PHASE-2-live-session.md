@@ -263,7 +263,7 @@ requires:   T2.4, T2.7
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/record/, web/src/routes/record/cap.spec.ts
-status:     in-progress:review-r1:t2.8-rev-r1@151fa898ad3b308da3cc52e812dea408954288b4
+status:     in-progress:remediate-r1:t2.8-rem-r1
 ```
 Opened from T2.7 round 1's out-of-scope rows. The cap unit landed unwired: the record page never
 constructs `SessionCap`, so no timer runs in the app and the Playwright remainder of T2.7's done
