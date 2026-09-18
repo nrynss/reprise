@@ -13,9 +13,10 @@
 #   IMAGE=reprise:abc1234 ./deploy/run.sh  # a named local build
 #   IMAGE=ghcr.io/example/reprise:abc1234 ./deploy/run.sh  # a registry ref
 #
-# To stop:
+# To stop gracefully so open sessions drain:
 #
-#   docker rm -f reprise
+#   docker stop reprise
+#   docker rm reprise
 #
 # SECRETS. The process reads every secret from two root-owned 0600 files on
 # the box, mounted read-only into the container:
@@ -162,7 +163,8 @@ if [[ "${IMAGE}" == *"/"* ]]; then
 fi
 if docker inspect "${NAME}" >/dev/null 2>&1; then
   echo "Replacing existing container ${NAME}..."
-  docker rm -f "${NAME}" >/dev/null
+  docker stop -t "${STOP_TIMEOUT}" "${NAME}" >/dev/null
+  docker rm "${NAME}" >/dev/null
 fi
 docker run "${DOCKER_ARGS[@]}" "${IMAGE}"
 
