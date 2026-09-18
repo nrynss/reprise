@@ -1,4 +1,4 @@
-# Reprise deployment — operator notes
+# Reprise deployment - operator notes
 
 These notes describe how the binary in this repository ships to the Hetzner
 box `foleyflow` and serves **https://reprise.nryn.dev**. They are written

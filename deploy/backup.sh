@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy/backup.sh — nightly backup of the Reprise diary and media.
+# deploy/backup.sh - nightly backup of the Reprise diary and media.
 #
 # Copies the SQLite file through its online backup API and then copies the
 # media directory beside it. The destination is a parameter, never a default
