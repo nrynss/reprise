@@ -168,7 +168,7 @@ requires:   T0.2
 fixture-ok: yes
 size:       S · mid
 owns:       testdata/speech/
-status:     in-progress:land:t0.6-impl@53656ca6697e9795db604cb6d669329f3e7e6c36
+status:     done:14d5b3cbdc2f2cefb5a1b9699be45b0b9a791822
 ```
 T0.2's review recorded two fixture defects out of scope. Both are real and neither changes a
 measurement, so the record stands. They are fixed here.
@@ -274,6 +274,11 @@ token ranges, the unprompted greeting, the transcript shapes, the stereo recordi
 proof, and the keyterm shift. The cap does not end the session, so the browser runs its own timer
 and `project.md` records that in the same commit. Spend about 14 cents final run, near 1.02
 dollars with exploration. The duplicate `doc.go` resolved to main's copy at landing.
+
+T0.6 landed after round 1 approval with zero findings: the generator pins the Ubuntu digest, the
+espeak-ng version, and the ffmpeg digest, writes seekable wavs, and scripts the pcm conversion.
+Regenerated pcm matches the streamed bytes exactly, so no record update was needed. ffprobe reads
+clean at 3.58 and 3.98 seconds.
 
 ### What surprised us
 The AssemblyAI docs, read while planning, showed the live user transcript has no word timings and
