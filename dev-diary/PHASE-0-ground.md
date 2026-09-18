@@ -145,7 +145,7 @@ requires:   T0.2
 fixture-ok: no
 size:       S · mid
 owns:       testdata/sessions/
-status:     in-progress:remediate-r1:t0.5-rem-r1
+status:     in-progress:review-r2:t0.5-rev-r2@a150012312dc78bd3b2f24e31e2e662fe37b3db2
 ```
 Run three short live sessions from generated speech and commit their artifacts. Downstream tasks
 build on these offline.
