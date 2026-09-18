@@ -1,0 +1,2413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reprise — Interactive Prototype</title>
+<meta name="auto-designer-preview-contract" type="application/json" content='{"artifactRole":"prototype","authoringViewport":"desktop","deviceAdaptation":"responsive"}'>
+<!--
+  Discovery:
+    deliverable: Reprise — interactive prototype (web app, desktop + mobile parity)
+    audience: hackathon judges + product owner; demo beat = host callback across episodes
+    direction: Night Studio — late-night radio booth, warm charcoal, amber glow
+    sections: welcome / preflight / live / processing / editor / episode / gallery / threads / admin / privacy / share
+    accent: amber #E8A33D on charcoal (semantic live-red reserved for recording)
+    rules honored: model proposes + you dispose (revertible cuts) · private by default ·
+      analysis = quotes + links, never a dashboard · explicit session end · episode as artifact
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #17130F;
+    --bg-deep: #100D0A;
+    --surface: #201A13;
+    --raised: #2A221A;
+    --line: rgba(242,234,217,.09);
+    --line-strong: rgba(242,234,217,.16);
+    --amber: #E8A33D;
+    --amber-soft: rgba(232,163,61,.13);
+    --amber-line: rgba(232,163,61,.38);
+    --sienna: #A5714B;
+    --cream: #F2EAD9;
+    --muted: rgba(242,234,217,.60);
+    --faint: rgba(242,234,217,.38);
+    --live: #D9543F;
+    --live-soft: rgba(217,84,63,.14);
+    --ok: #8FA874;
+    --ok-soft: rgba(143,168,116,.14);
+    --danger: #C65B4E;
+    --danger-soft: rgba(198,91,78,.13);
+    --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+    --radius: 10px;
+    --radius-lg: 16px;
+    --ease: cubic-bezier(.2, 0, 0, 1);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: auto; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--cream);
+    font: 15px/1.55 var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(1100px 520px at 18% -8%, rgba(232,163,61,.07), transparent 60%),
+      radial-gradient(900px 600px at 110% 110%, rgba(165,113,75,.06), transparent 55%);
+  }
+  body[data-view="share"]::before { background: radial-gradient(900px 480px at 50% -10%, rgba(232,163,61,.08), transparent 60%); }
+  ::selection { background: rgba(232,163,61,.32); }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  input, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 4px; }
+  a { color: var(--cream); }
+  .skip { position: absolute; left: -9999px; top: 8px; background: var(--raised); padding: 8px 14px; border-radius: 8px; z-index: 200; }
+  .skip:focus { left: 8px; }
+
+  /* ── mono label ─────────────────────────── */
+  .mlabel {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint);
+  }
+  .mlabel amber { color: var(--amber); }
+
+  /* ── topbar ─────────────────────────────── */
+  .topbar {
+    position: sticky; top: 0; z-index: 40;
+    display: flex; align-items: center; gap: 20px;
+    padding: 14px 28px;
+    background: rgba(23,19,15,.82);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  body[data-view="share"] .topbar { display: none; }
+  .brand { display: flex; align-items: baseline; gap: 10px; text-decoration: none; }
+  .brand-name { font-family: var(--font-display); font-size: 24px; letter-spacing: -0.01em; }
+  .brand-ep { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: var(--faint); }
+  .topnav { display: flex; gap: 4px; margin-left: 8px; overflow-x: auto; scrollbar-width: none; }
+  .topnav::-webkit-scrollbar { display: none; }
+  .topnav a {
+    text-decoration: none; color: var(--muted); font-size: 13.5px; font-weight: 500;
+    padding: 8px 12px; border-radius: 8px; white-space: nowrap;
+    transition: color .15s var(--ease), background .15s var(--ease);
+  }
+  .topnav a:hover { color: var(--cream); background: rgba(242,234,217,.05); }
+  .topnav a[aria-current="page"] { color: var(--cream); background: rgba(242,234,217,.07); }
+  .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .topbar-links { display: flex; gap: 2px; }
+  .topbar-links a { text-decoration: none; color: var(--faint); font-size: 12.5px; padding: 8px 10px; border-radius: 8px; }
+  .topbar-links a:hover { color: var(--muted); }
+
+  /* ── buttons ────────────────────────────── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 44px; padding: 10px 20px; border-radius: var(--radius);
+    font-size: 14.5px; font-weight: 600; letter-spacing: 0.01em;
+    transition: transform .12s var(--ease), background .15s var(--ease), border-color .15s var(--ease), opacity .15s var(--ease);
+    text-decoration: none;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--amber); color: #1A140D; }
+  .btn-primary:hover { background: #F0B055; }
+  .btn-secondary { border: 1px solid var(--line-strong); color: var(--cream); }
+  .btn-secondary:hover { border-color: rgba(242,234,217,.3); background: rgba(242,234,217,.04); }
+  .btn-ghost { color: var(--muted); padding: 10px 12px; }
+  .btn-ghost:hover { color: var(--cream); }
+  .btn-danger { border: 1px solid rgba(198,91,78,.4); color: #E5988C; }
+  .btn-danger:hover { background: var(--danger-soft); border-color: rgba(198,91,78,.6); }
+  .btn-sm { min-height: 34px; padding: 6px 12px; font-size: 12.5px; border-radius: 8px; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; }
+  .btn .ic { flex: none; }
+
+  /* ── icon ───────────────────────────────── */
+  .ic { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .ic-lg { width: 22px; height: 22px; }
+
+  /* ── view scaffold ──────────────────────── */
+  main { position: relative; z-index: 1; }
+  .view { display: none; }
+  .view.active { display: block; animation: viewin .26s var(--ease); }
+  @keyframes viewin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 40px 28px 88px; }
+  .wrap-narrow { max-width: 760px; }
+  .view-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 28px; flex-wrap: wrap; }
+  .view-head h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(30px, 4vw, 42px); line-height: 1.08; letter-spacing: -0.01em; margin: 6px 0 0; }
+  .view-head .sub { color: var(--muted); margin: 8px 0 0; max-width: 56ch; }
+
+  /* ── cards & panels ─────────────────────── */
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+  .card-raised { background: var(--raised); }
+  .card-pad { padding: 22px; }
+  .card h3 { margin: 0; font-size: 15.5px; font-weight: 600; letter-spacing: 0.01em; }
+
+  /* ── chips ──────────────────────────────── */
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.06em;
+    color: var(--muted); border: 1px solid var(--line); border-radius: 100px; padding: 4px 11px;
+    white-space: nowrap;
+  }
+  .chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+  .chip-live { color: #E88A78; border-color: rgba(217,84,63,.35); }
+  .chip-live .dot { background: var(--live); box-shadow: 0 0 8px rgba(217,84,63,.6); }
+  .chip-ok { color: #A9C294; border-color: rgba(143,168,116,.3); }
+  .chip-ok .dot { background: var(--ok); }
+  .chip-amber { color: var(--amber); border-color: var(--amber-line); }
+  .chip-amber .dot { background: var(--amber); }
+  .chip-danger { color: #E5988C; border-color: rgba(198,91,78,.35); }
+  .chip-danger .dot { background: var(--danger); }
+
+  /* ── on-air lamp ────────────────────────── */
+  .onair {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: 0.14em;
+    padding: 8px 16px; border-radius: 100px; border: 1px solid var(--line-strong); color: var(--faint);
+    transition: all .3s var(--ease);
+  }
+  .onair .lamp { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); transition: all .3s var(--ease); }
+  .onair.is-live { color: #F0907E; border-color: rgba(217,84,63,.55); background: var(--live-soft); }
+  .onair.is-live .lamp { background: var(--live); box-shadow: 0 0 14px rgba(217,84,63,.75); animation: lamppulse 2.2s ease-in-out infinite; }
+  @keyframes lamppulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+
+  /* ── VU meter ───────────────────────────── */
+  .vu { display: flex; align-items: flex-end; gap: 3px; height: 56px; }
+  .vu i {
+    width: 5px; border-radius: 2px; background: var(--sienna); opacity: .5;
+    height: calc(12% + var(--h) * 88%);
+    transform-origin: bottom;
+    transition: opacity .2s;
+  }
+  .vu.on i { background: var(--amber); opacity: .92; animation: vu 0.9s ease-in-out infinite alternate; animation-delay: var(--d); }
+  .vu.host.on i { background: var(--sienna); }
+  @keyframes vu { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
+
+  /* ── waveform ───────────────────────────── */
+  .wave { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 72px; cursor: pointer; }
+  .wave i { flex: 1; min-width: 2px; border-radius: 1px; background: rgba(242,234,217,.16); height: calc(14% + var(--h) * 86%); }
+  .wave .w-fill { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 2px; overflow: hidden; pointer-events: none; }
+  .wave .w-fill i { background: var(--amber); opacity: .85; }
+  .wave .w-cut { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(-45deg, rgba(198,91,78,.28) 0 4px, transparent 4px 8px); border-radius: 2px; }
+  .wave .w-cold { position: absolute; top: -6px; bottom: -6px; border: 1.5px solid var(--amber); border-radius: 4px; pointer-events: none; }
+  .wave .w-cold::after { content: 'COLD OPEN'; position: absolute; top: -18px; left: 0; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .12em; color: var(--amber); }
+  .wave-sm { height: 34px; }
+
+  /* ── cover ──────────────────────────────── */
+  .cover {
+    position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden;
+    background: radial-gradient(120% 90% at 30% 18%, rgba(232,163,61,.24), transparent 55%),
+                radial-gradient(100% 100% at 80% 90%, rgba(165,113,75,.28), transparent 60%),
+                var(--surface);
+    border: 1px solid var(--line);
+    display: flex; flex-direction: column; justify-content: space-between; padding: 12%;
+  }
+  .cover .ep { font-family: var(--font-mono); font-size: clamp(10px, 9cqw, 12px); letter-spacing: .16em; color: var(--amber); }
+  .cover .n { font-family: var(--font-display); font-size: clamp(38px, 34cqw, 96px); line-height: .9; color: var(--cream); }
+  .cover .miniwave { display: flex; align-items: flex-end; gap: 2px; height: 18%; }
+  .cover .miniwave i { flex: 1; border-radius: 1px; background: rgba(242,234,217,.35); height: calc(20% + var(--h) * 80%); }
+  .cover { container-type: inline-size; }
+
+  /* ── episode card (gallery) ─────────────── */
+  .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+  .ep-card { display: flex; flex-direction: column; text-align: left; padding: 16px; transition: border-color .18s var(--ease), transform .18s var(--ease); }
+  .ep-card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+  .ep-card .cover { margin-bottom: 14px; }
+  .ep-card .meta-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .ep-card h3 { font-family: var(--font-display); font-weight: 400; font-size: 21px; line-height: 1.15; margin: 0 0 6px; }
+  .ep-card .dur { font-family: var(--font-mono); font-size: 11.5px; color: var(--faint); }
+  .progress { height: 4px; border-radius: 100px; background: rgba(242,234,217,.1); overflow: hidden; margin-top: 10px; }
+  .progress i { display: block; height: 100%; background: var(--amber); border-radius: 100px; width: var(--p, 0%); transition: width .4s linear; }
+  .job-line { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 8px; letter-spacing: .04em; }
+
+  /* ── welcome ────────────────────────────── */
+  .welcome { min-height: calc(100vh - 65px); display: grid; place-items: center; padding: 48px 24px; }
+  .welcome-inner { max-width: 680px; width: 100%; text-align: center; }
+  .welcome-brand { font-family: var(--font-display); font-size: clamp(52px, 9vw, 84px); line-height: 1; letter-spacing: -0.015em; margin: 18px 0 10px; }
+  .welcome-tag { color: var(--muted); font-size: 17px; margin: 0 auto 34px; max-width: 44ch; }
+  .welcome-tag em { color: var(--cream); font-style: normal; }
+  .listen-card { text-align: left; padding: 20px; margin-bottom: 30px; }
+  .listen-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .play-btn {
+    width: 58px; height: 58px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--amber); color: #1A140D;
+    transition: transform .15s var(--ease), background .15s var(--ease);
+  }
+  .play-btn:hover { transform: scale(1.05); background: #F0B055; }
+  .play-btn:active { transform: scale(.98); }
+  .play-btn .ic { width: 24px; height: 24px; }
+  .listen-body { display: flex; gap: 16px; align-items: center; }
+  .listen-meta { flex: 1; min-width: 0; }
+  .listen-title { font-family: var(--font-display); font-size: 19px; margin: 2px 0 4px; }
+  .teaser { margin: 14px 0 0; padding: 14px 16px; border-left: 2px solid var(--amber-line); background: rgba(232,163,61,.06); border-radius: 0 10px 10px 0; text-align: left; }
+  .teaser p { margin: 0; font-size: 14.5px; color: var(--muted); line-height: 1.6; }
+  .teaser .t { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .1em; color: var(--amber); display: block; margin-bottom: 6px; }
+  .teaser p.on { color: var(--cream); }
+  .season-strip { display: flex; justify-content: center; gap: 12px; margin-top: 44px; flex-wrap: wrap; }
+  .season-strip .cover { width: 74px; }
+  .welcome-cta { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .welcome-note { font-size: 12.5px; color: var(--faint); margin-top: 4px; }
+
+  /* ── preflight ──────────────────────────── */
+  .preflight-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: 24px; align-items: start; }
+  .mic-stage { text-align: center; padding: 40px 24px; }
+  .mic-orb {
+    width: 118px; height: 118px; margin: 0 auto 22px; border-radius: 50%;
+    background: radial-gradient(circle at 34% 30%, rgba(232,163,61,.5), rgba(232,163,61,.08) 62%, transparent 75%), var(--raised);
+    border: 1px solid var(--line-strong);
+    display: flex; align-items: center; justify-content: center; color: var(--amber);
+    box-shadow: 0 0 60px rgba(232,163,61,.16);
+    transition: box-shadow .4s var(--ease);
+  }
+  .mic-orb.live { box-shadow: 0 0 80px rgba(232,163,61,.3); }
+  .mic-orb .ic { width: 44px; height: 44px; stroke-width: 1.4; }
+  .remember-card .quote { margin: 14px 0; padding: 14px 16px; border-left: 2px solid var(--amber-line); background: rgba(232,163,61,.06); border-radius: 0 10px 10px 0; }
+  .remember-card .quote p { margin: 0; font-size: 14.5px; color: var(--cream); font-family: var(--font-display); font-size: 17px; line-height: 1.5; }
+  .remember-card .src { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .1em; color: var(--faint); margin-top: 8px; }
+  .preflight-steps { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+  .pf-step { display: flex; gap: 12px; align-items: center; font-size: 14px; color: var(--muted); }
+  .pf-step .st { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line-strong); flex: none; display: grid; place-items: center; color: var(--ok); }
+  .pf-step.done .st { border-color: rgba(143,168,116,.5); }
+  .pf-step.done { color: var(--cream); }
+  .refuse-card { border-color: rgba(217,84,63,.4); background: var(--danger-soft); }
+  .refuse-card h3 { color: #E5988C; }
+
+  /* ── live room ──────────────────────────── */
+  .live-room {
+    min-height: calc(100vh - 65px);
+    display: grid; grid-template-rows: auto 1fr auto;
+    padding: 26px 28px 30px; max-width: 900px; margin: 0 auto; width: 100%;
+  }
+  .live-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  .live-timer { font-family: var(--font-mono); font-size: 30px; font-weight: 500; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+  .live-timer small { font-size: 12px; color: var(--faint); display: block; letter-spacing: .12em; font-weight: 400; margin-bottom: 2px; }
+  .live-stage { display: grid; place-items: center; padding: 30px 0 16px; }
+  .mic-large {
+    width: 190px; height: 190px; border-radius: 50%;
+    background: radial-gradient(circle at 36% 30%, rgba(232,163,61,.42), rgba(232,163,61,.06) 60%, transparent 78%), var(--raised);
+    border: 1px solid var(--line-strong);
+    display: flex; align-items: center; justify-content: center; color: var(--amber);
+    box-shadow: 0 0 110px rgba(232,163,61,.14);
+    transition: box-shadow .5s var(--ease), transform .5s var(--ease);
+  }
+  .mic-large.speaking { box-shadow: 0 0 150px rgba(232,163,61,.3); transform: scale(1.03); }
+  .mic-large .ic { width: 72px; height: 72px; stroke-width: 1.2; }
+  .live-status { text-align: center; margin-top: 22px; min-height: 54px; }
+  .live-status .who { font-family: var(--font-display); font-size: 24px; }
+  .live-status .hint { color: var(--faint); font-size: 12.5px; margin-top: 4px; }
+  .hold-btn {
+    margin-top: 18px; min-width: 220px; min-height: 58px; border-radius: 100px;
+    background: var(--amber); color: #1A140D; font-weight: 600; font-size: 15.5px;
+    box-shadow: 0 10px 34px rgba(232,163,61,.22);
+    transition: transform .12s var(--ease), background .15s;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  .hold-btn:hover { background: #F0B055; }
+  .hold-btn.holding { transform: scale(.97); background: #F6BC66; }
+  .live-transcript { max-width: 620px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; min-height: 120px; justify-content: flex-end; }
+  .lt-line { display: flex; gap: 12px; font-size: 14px; animation: ltin .3s var(--ease); }
+  @keyframes ltin { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .lt-line .r { font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; color: var(--faint); padding-top: 4px; width: 34px; flex: none; }
+  .lt-line.host .r { color: var(--amber); }
+  .lt-line p { margin: 0; color: var(--muted); }
+  .lt-line.host p { color: var(--cream); }
+  .live-bottom { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 22px; flex-wrap: wrap; }
+  .live-cap { font-family: var(--font-mono); font-size: 11.5px; color: var(--faint); letter-spacing: .06em; }
+
+  /* ── processing ─────────────────────────── */
+  .proc-list { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .proc-step { display: flex; gap: 16px; padding: 18px 4px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .proc-step:last-child { border-bottom: none; }
+  .proc-icon { width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--line-strong); flex: none; display: grid; place-items: center; margin-top: 2px; color: var(--faint); position: relative; }
+  .proc-step.running .proc-icon { border-color: var(--amber-line); color: var(--amber); }
+  .proc-step.running .proc-icon::after { content: ''; position: absolute; inset: -1.5px; border-radius: 50%; border: 1.5px solid transparent; border-top-color: var(--amber); animation: spin 1s linear infinite; }
+  .proc-step.done .proc-icon { border-color: rgba(143,168,116,.5); color: var(--ok); }
+  .proc-step.failed .proc-icon { border-color: rgba(198,91,78,.55); color: var(--danger); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .proc-body { flex: 1; min-width: 0; }
+  .proc-body h3 { font-size: 15px; font-weight: 600; color: var(--faint); }
+  .proc-step.running .proc-body h3, .proc-step.done .proc-body h3 { color: var(--cream); }
+  .proc-step.failed .proc-body h3 { color: #E5988C; }
+  .proc-body p { margin: 4px 0 0; font-size: 13px; color: var(--faint); }
+  .proc-step.running .proc-body p { color: var(--muted); }
+  .proc-step .progress { margin-top: 12px; }
+
+  /* ── editor ─────────────────────────────── */
+  .editor-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 24px; align-items: start; }
+  .ed-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; flex-wrap: wrap; }
+  .ed-head h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(26px, 3.4vw, 36px); margin: 4px 0 0; }
+  .ed-player { padding: 18px; margin-bottom: 18px; }
+  .ed-player-top { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .ed-time { font-family: var(--font-mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .transcript-card { padding: 6px 22px 18px; }
+  .turn { display: flex; gap: 14px; padding: 15px 0; border-bottom: 1px solid var(--line); }
+  .turn:last-child { border-bottom: none; }
+  .turn .r { font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; padding-top: 5px; width: 36px; flex: none; color: var(--faint); }
+  .turn.host .r { color: var(--amber); }
+  .turn p { margin: 0; font-size: 15.5px; line-height: 1.75; color: var(--muted); }
+  .turn.host p { color: var(--cream); }
+  .turn p .w { cursor: pointer; border-radius: 3px; padding: 0 1px; }
+  .turn p .w:hover { background: rgba(242,234,217,.08); }
+  .turn.now p .w { color: var(--cream); }
+  .turn .cut {
+    text-decoration: line-through; text-decoration-color: rgba(198,91,78,.65); text-decoration-thickness: 1.5px;
+    background: var(--danger-soft); border-radius: 4px; padding: 0 3px; cursor: pointer;
+    transition: background .15s;
+    position: relative;
+  }
+  .turn .cut:hover, .turn .cut:focus-visible { background: rgba(198,91,78,.22); }
+  .turn .cut.reverted { text-decoration: none; background: transparent; color: var(--cream); }
+  .turn .cut.reverted::after { content: ''; }
+  .cut-flag {
+    display: inline-flex; align-items: center; gap: 5px; vertical-align: middle;
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .06em; color: #E5988C;
+    border: 1px solid rgba(198,91,78,.4); border-radius: 4px; padding: 1px 6px; margin: 0 4px; cursor: pointer;
+    position: relative; text-decoration: none;
+  }
+  .cut-flag:hover { background: var(--danger-soft); }
+  .ed-rail { display: flex; flex-direction: column; gap: 18px; position: sticky; top: 84px; }
+  .rail-card { padding: 18px; }
+  .rail-card .mlabel { display: block; margin-bottom: 12px; }
+  .cut-row { display: flex; gap: 10px; align-items: flex-start; padding: 11px 0; border-bottom: 1px solid var(--line); }
+  .cut-row:last-child { border-bottom: none; }
+  .cut-row .x { margin-left: auto; }
+  .cut-row p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .cut-row .q { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); display: block; margin-top: 3px; }
+  .cold-open-card { border-color: var(--amber-line); background: linear-gradient(180deg, rgba(232,163,61,.07), transparent 60%), var(--surface); }
+  .cold-open-card blockquote { margin: 10px 0 6px; font-family: var(--font-display); font-size: 19px; line-height: 1.45; color: var(--cream); }
+  .ed-field { width: 100%; background: var(--bg-deep); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 14px; color: var(--cream); resize: vertical; }
+  .ed-field:focus { border-color: var(--amber-line); outline: none; }
+  .ed-donebar {
+    position: sticky; bottom: 0; margin-top: 22px;
+    display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+    background: rgba(23,19,15,.9); backdrop-filter: blur(12px);
+    border: 1px solid var(--line-strong); border-radius: var(--radius-lg); padding: 14px 18px;
+  }
+  .ed-donebar .note { font-size: 13px; color: var(--muted); }
+
+  /* ── episode detail ─────────────────────── */
+  .ep-grid { display: grid; grid-template-columns: 300px minmax(0,1fr); gap: 32px; align-items: start; }
+  .ep-side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 84px; }
+  .ep-side .cover { border-radius: var(--radius-lg); }
+  .ep-player { padding: 20px; }
+  .ep-player-top { display: flex; align-items: center; gap: 16px; }
+  .chapters { margin-top: 6px; }
+  .chap-row { display: flex; gap: 14px; width: 100%; text-align: left; padding: 11px 4px; border-bottom: 1px solid var(--line); align-items: baseline; transition: background .15s; border-radius: 6px; }
+  .chap-row:last-child { border-bottom: none; }
+  .chap-row:hover { background: rgba(242,234,217,.04); }
+  .chap-row .t { font-family: var(--font-mono); font-size: 12px; color: var(--amber); font-variant-numeric: tabular-nums; }
+  .chap-row .n { font-size: 14.5px; color: var(--muted); }
+  .chap-row.now .n { color: var(--cream); }
+  .notes-card p { color: var(--muted); font-size: 14.5px; line-height: 1.7; margin: 10px 0 0; font-family: var(--font-display); font-size: 16.5px; }
+  .ep-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+  .share-link { display: flex; gap: 8px; margin-top: 12px; }
+  .share-link input { flex: 1; min-width: 0; background: var(--bg-deep); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+  .ep-transcript .turn { padding: 12px 0; }
+  .drawer-backdrop { position: fixed; inset: 0; background: rgba(16,13,10,.66); z-index: 60; display: none; align-items: flex-end; justify-content: center; animation: fadein .2s var(--ease); }
+  .drawer-backdrop.open { display: flex; }
+  @keyframes fadein { from { opacity: 0; } }
+  .drawer {
+    background: var(--raised); border: 1px solid var(--line-strong); border-bottom: none;
+    border-radius: 18px 18px 0 0; width: min(680px, 100%); max-height: 78vh; overflow-y: auto;
+    padding: 26px 28px 34px; animation: drawerup .28s var(--ease);
+  }
+  @keyframes drawerup { from { transform: translateY(40px); opacity: 0; } }
+  .export-item { display: flex; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .export-item:last-child { border-bottom: none; }
+  .export-item .ic { color: var(--amber); margin-top: 2px; }
+  .export-item h4 { margin: 0; font-size: 14px; }
+  .export-item p { margin: 2px 0 0; font-size: 12.5px; color: var(--faint); }
+
+  /* ── threads ────────────────────────────── */
+  .thread-section { margin-bottom: 34px; }
+  .thread-section > .mlabel { display: block; margin-bottom: 14px; color: var(--amber); }
+  .thread-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+  .thread-card { padding: 18px; text-align: left; transition: border-color .18s; }
+  .thread-card:hover { border-color: var(--line-strong); }
+  .thread-card .head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+  .thread-card h3 { font-family: var(--font-display); font-weight: 400; font-size: 22px; }
+  .thread-card .who { font-size: 12.5px; color: var(--faint); }
+  .thread-card .facts { font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .03em; margin-bottom: 12px; }
+  .quote-chip {
+    display: block; width: 100%; text-align: left; margin-top: 8px;
+    background: var(--bg-deep); border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px;
+    transition: border-color .15s, background .15s;
+  }
+  .quote-chip:hover { border-color: var(--amber-line); background: rgba(232,163,61,.05); }
+  .quote-chip .t { font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; color: var(--amber); display: block; margin-bottom: 4px; }
+  .quote-chip p { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.55; }
+  .commit-status { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .08em; }
+  .commit-status.open { color: var(--amber); }
+  .commit-status.resolved { color: var(--ok); }
+
+  /* ── admin ──────────────────────────────── */
+  .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .switch-row:last-child { border-bottom: none; }
+  .switch-row .lbl h4 { margin: 0 0 3px; font-size: 14.5px; }
+  .switch-row .lbl p { margin: 0; font-size: 12.5px; color: var(--faint); }
+  .switch { width: 52px; height: 30px; border-radius: 100px; background: rgba(242,234,217,.12); border: 1px solid var(--line-strong); position: relative; flex: none; transition: background .2s var(--ease), border-color .2s; }
+  .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--cream); transition: transform .2s var(--ease); }
+  .switch[aria-checked="true"] { background: var(--live); border-color: rgba(217,84,63,.5); }
+  .switch[aria-checked="true"]::after { transform: translateX(22px); }
+  .spend-num { font-family: var(--font-mono); font-size: 34px; font-variant-numeric: tabular-nums; }
+  .spend-num small { font-size: 13px; color: var(--faint); }
+  .cap-input { width: 110px; background: var(--bg-deep); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-family: var(--font-mono); font-size: 13px; color: var(--cream); }
+
+  /* ── privacy ────────────────────────────── */
+  .priv-block { max-width: 640px; margin-bottom: 30px; }
+  .priv-block h2 { font-family: var(--font-display); font-weight: 400; font-size: 26px; margin: 0 0 10px; }
+  .priv-block p { color: var(--muted); line-height: 1.75; margin: 0 0 12px; }
+  .priv-block .card { padding: 16px 18px; margin-top: 14px; }
+
+  /* ── share (public) ─────────────────────── */
+  .share-wrap { max-width: 560px; margin: 0 auto; padding: 56px 24px 80px; text-align: center; }
+  .share-wrap .cover { max-width: 300px; margin: 0 auto 24px; border-radius: var(--radius-lg); }
+  .share-title { font-family: var(--font-display); font-weight: 400; font-size: clamp(28px, 5vw, 38px); margin: 10px 0 6px; }
+  .share-sub { color: var(--faint); font-size: 13px; font-family: var(--font-mono); letter-spacing: .06em; }
+  .share-player { margin-top: 26px; text-align: left; }
+  .share-foot { margin-top: 44px; color: var(--faint); font-size: 12.5px; }
+  .share-foot .brand-name { font-size: 19px; }
+
+  /* ── dialog ─────────────────────────────── */
+  .dlg-backdrop {
+    position: fixed; inset: 0; z-index: 80; background: rgba(16,13,10,.72);
+    display: none; align-items: center; justify-content: center; padding: 20px;
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  .dlg-backdrop.open { display: flex; animation: fadein .18s var(--ease); }
+  .dlg {
+    background: var(--raised); border: 1px solid var(--line-strong); border-radius: 18px;
+    width: min(480px, 100%); padding: 26px 26px 22px; box-shadow: var(--shadow-pop, 0 24px 64px rgba(0,0,0,.5));
+    animation: dlgin .22s var(--ease);
+  }
+  @keyframes dlgin { from { transform: translateY(14px) scale(.98); opacity: 0; } }
+  .dlg h2 { font-family: var(--font-display); font-weight: 400; font-size: 26px; margin: 12px 0 10px; }
+  .dlg p { color: var(--muted); line-height: 1.65; margin: 0 0 22px; }
+  .dlg p strong { color: var(--cream); font-weight: 600; }
+  .dlg-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+  /* ── toast ──────────────────────────────── */
+  .toasts { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 90; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+  .toast {
+    background: var(--raised); border: 1px solid var(--line-strong); border-radius: 100px;
+    padding: 10px 20px; font-size: 13.5px; color: var(--cream); box-shadow: 0 12px 40px rgba(0,0,0,.4);
+    display: flex; align-items: center; gap: 9px; animation: toastin .25s var(--ease);
+  }
+  .toast .ic { color: var(--ok); width: 16px; height: 16px; }
+  @keyframes toastin { from { opacity: 0; transform: translateY(10px); } }
+
+  /* ── state lab ──────────────────────────── */
+  .lab { position: fixed; right: 18px; bottom: 18px; z-index: 70; }
+  .lab-toggle {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .1em;
+    border: 1px solid var(--line-strong); border-radius: 100px; padding: 8px 14px; color: var(--faint);
+    background: rgba(23,19,15,.85); backdrop-filter: blur(8px);
+  }
+  .lab-toggle:hover { color: var(--muted); }
+  .lab-panel {
+    position: absolute; bottom: 46px; right: 0; width: 240px;
+    background: var(--raised); border: 1px solid var(--line-strong); border-radius: 14px; padding: 14px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .lab-panel .mlabel { display: block; margin-bottom: 10px; }
+  .lab-btn { display: block; width: 100%; text-align: left; padding: 9px 12px; border-radius: 8px; font-size: 13px; color: var(--muted); }
+  .lab-btn:hover { background: rgba(242,234,217,.06); color: var(--cream); }
+  body[data-view="share"] .lab, body[data-view="live"] .lab { display: none; }
+
+  /* ── responsive ─────────────────────────── */
+  @media (max-width: 960px) {
+    .editor-grid { grid-template-columns: 1fr; }
+    .ed-rail { position: static; }
+    .ep-grid { grid-template-columns: 1fr; }
+    .ep-side { position: static; max-width: 340px; }
+    .preflight-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    .topbar { padding: 10px 16px; gap: 10px; }
+    .topbar-links { display: none; }
+    /* The season line costs more width than it earns on a phone, and without
+       it the nav fits whole instead of scrolling "Threads" out of sight. */
+    .brand-ep { display: none; }
+    .topnav { margin-left: 4px; }
+    .wrap { padding: 28px 18px 72px; }
+    .live-room { padding: 18px 16px 24px; }
+    .live-timer { font-size: 22px; }
+    .mic-large { width: 150px; height: 150px; }
+    .mic-large .ic { width: 56px; height: 56px; }
+    .gallery-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+    .ep-card { padding: 10px; }
+    .ep-card h3 { font-size: 17px; }
+    .welcome { padding: 32px 16px; }
+    .season-strip .cover { width: 62px; }
+    .ed-donebar { position: static; }
+    .thread-grid { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    .vu.on i { animation: none; transform: scaleY(.8); }
+  }
+</style>
+</head>
+<body data-view="welcome">
+<a class="skip" href="#main">Skip to content</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-mic"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></g>
+    <g id="i-play"><path d="M7 4.5v15l13-7.5z" fill="currentColor" stroke="none"/></g>
+    <g id="i-pause"><path d="M7 4.5v15M17 4.5v15" stroke-width="2.6"/></g>
+    <g id="i-back15"><path d="M4 9a8 8 0 1 1 2.3 6.3M4 4v5h5"/><text x="12" y="16.5" font-size="8" fill="currentColor" stroke="none" font-family="monospace" text-anchor="middle">15</text></g>
+    <g id="i-check"><path d="M4.5 12.5l5 5L19.5 7"/></g>
+    <g id="i-x"><path d="M6 6l12 12M18 6L6 18"/></g>
+    <g id="i-scissors"><circle cx="6" cy="6" r="2.6"/><circle cx="6" cy="18" r="2.6"/><path d="M8.2 7.6 20 19M8.2 16.4 20 5"/></g>
+    <g id="i-undo"><path d="M4 10h9a5.5 5.5 0 1 1 0 11H8M4 10l5-5M4 10l5 5"/></g>
+    <g id="i-share"><path d="M12 3v13M7.5 7.5 12 3l4.5 4.5M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></g>
+    <g id="i-download"><path d="M12 3v12M7 11l5 5 5-5M4 20h16"/></g>
+    <g id="i-lock"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></g>
+    <g id="i-warn"><path d="M12 3 2.5 20h19zM12 9.5v4.5M12 17.5v.5"/></g>
+    <g id="i-trash"><path d="M4 6.5h16M9 6.5V4.8A1.8 1.8 0 0 1 10.8 3h2.4A1.8 1.8 0 0 1 15 4.8v1.7M6.5 6.5l1 13a1.8 1.8 0 0 0 1.8 1.5h5.4a1.8 1.8 0 0 0 1.8-1.5l1-13"/></g>
+    <g id="i-globe"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z"/></g>
+    <g id="i-external"><path d="M14 4h6v6M20 4 10.5 13.5M20 14v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5"/></g>
+    <g id="i-arrow"><path d="M4 12h15M13 6l6 6-6 6"/></g>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <a class="brand" href="#/gallery" data-nav="gallery">
+    <span class="brand-name">Reprise</span>
+    <span class="brand-ep" id="brand-ep">SEASON ONE</span>
+  </a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="#/gallery" data-nav="gallery">Gallery</a>
+    <a href="#/threads" data-nav="threads">Threads</a>
+  </nav>
+  <div class="topbar-right">
+    <div class="topbar-links">
+      <a href="#/admin" data-nav="admin">Admin</a>
+      <a href="#/privacy" data-nav="privacy">Privacy</a>
+    </div>
+    <button class="btn btn-primary btn-sm" data-goto="preflight">
+      <svg class="ic" viewBox="0 0 24 24"><use href="#i-mic"/></svg>
+      Record
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ═══ VIEW: WELCOME ═══ -->
+  <section class="view" id="view-welcome" aria-label="Welcome">
+    <div class="welcome">
+      <div class="welcome-inner">
+        <span class="mlabel">A PERSONAL PODCAST</span>
+        <h1 class="welcome-brand">Reprise</h1>
+        <p class="welcome-tag">You talk. A host asks. It becomes an episode. <em>And the host remembers what you said last time.</em></p>
+
+        <div class="card listen-card">
+          <div class="listen-head">
+            <div class="play-btn" id="wl-play" role="button" tabindex="0" aria-label="Play thirty seconds of episode four">
+              <svg class="ic" viewBox="0 0 24 24"><use href="#i-play"/></svg>
+            </div>
+            <div class="listen-meta">
+              <span class="mlabel" style="display:block">FROM EP.04 · “THREE WEEKS OF ALMOST”</span>
+              <div class="listen-title">Hear what remembering sounds like</div>
+            </div>
+            <span class="mlabel" id="wl-time">0:00 / 0:30</span>
+          </div>
+          <div class="wave wave-sm" id="wl-wave" aria-hidden="true"></div>
+          <div class="teaser">
+            <span class="t" id="wl-teaser-t">0:00 · EP.04</span>
+            <p id="wl-line-1">You've brought up June three times now. Three weeks. What's the shape of the thing you're not saying?</p>
+            <p id="wl-line-2">That if I call, the garden becomes hers. And if I don't, it stays mine. Which is worse, probably.</p>
+          </div>
+        </div>
+
+        <div class="welcome-cta">
+          <button class="btn btn-primary" style="min-height:54px; padding: 12px 34px; font-size: 16px;" data-goto="preflight">
+            <svg class="ic" viewBox="0 0 24 24"><use href="#i-mic"/></svg>
+            Record episode five
+          </button>
+          <p class="welcome-note">Four episodes are already here. The host has been listening.</p>
+        </div>
+
+        <div class="season-strip" id="season-strip" aria-label="The season so far"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: PREFLIGHT ═══ -->
+  <section class="view" id="view-preflight" aria-label="Before you record">
+    <div class="wrap">
+      <div class="view-head">
+        <div>
+          <span class="mlabel">EPISODE FIVE · BEFORE YOU RECORD</span>
+          <h1>Take a breath. The host is setting up.</h1>
+        </div>
+      </div>
+      <div class="preflight-grid">
+        <div class="card card-pad mic-stage" id="pf-stage">
+          <div class="mic-orb" id="pf-orb">
+            <svg class="ic" viewBox="0 0 24 24"><use href="#i-mic"/></svg>
+          </div>
+          <div id="pf-body">
+            <p style="color:var(--muted); margin: 0 0 18px;" id="pf-copy">Reprise records your voice and the host's, as separate takes, while you talk.</p>
+            <button class="btn btn-primary" id="pf-mic" style="width:100%">
+              <svg class="ic" viewBox="0 0 24 24"><use href="#i-mic"/></svg>
+              Enable microphone
+            </button>
+            <div class="preflight-steps" id="pf-steps">
+              <div class="pf-step" data-step="mic"><span class="st"><svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><use href="#i-check"/></svg></span> Microphone access</div>
+              <div class="pf-step" data-step="net"><span class="st"><svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><use href="#i-check"/></svg></span> Connection to the studio</div>
+              <div class="pf-step" data-step="mem"><span class="st"><svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><use href="#i-check"/></svg></span> The host's memory of episodes one to four</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:18px;">
+          <div class="card card-pad remember-card">
+            <span class="mlabel" style="display:block; margin-bottom:10px">WHAT THE HOST REMEMBERS</span>
+            <h3>Episode one planted something</h3>
+            <div class="quote">
+              <p>“I've been dreading calling June. The garden was ours before it was the landlord's.”</p>
+              <div class="src">SAID IN EP.01 · 0:47 · NOT RESOLVED IN 3 EPISODES SINCE</div>
+            </div>
+            <p style="font-size: 13.5px; color: var(--muted); margin: 0; line-height:1.6;">
+              The host will open with this. It is the oldest open thread in your season, so it goes first.
+              Interrupting is normal — the host will follow up, not wait politely.
+            </p>
+          </div>
+          <div class="card card-pad">
+            <span class="mlabel" style="display:block; margin-bottom:10px">HOUSE RULES</span>
+            <div class="pf-step done" style="padding:8px 0"><span class="st"><svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><use href="#i-lock"/></svg></span> Private by default. Publishing is a separate, deliberate act.</div>
+            <div class="pf-step" style="padding:8px 0"><span class="st"><svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><use href="#i-mic"/></svg></span> Headphones make the episode sound like a podcast, not a call.</div>
+            <div class="pf-step" style="padding:8px 0"><span class="st"><svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><use href="#i-back15"/></svg></span> Sessions cap at 20 minutes. Ending is always one explicit tap.</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="pf-ready" style="display:none; margin-top: 22px;">
+        <div class="card card-pad" style="border-color: var(--amber-line); background: linear-gradient(180deg, rgba(232,163,61,.07), transparent 70%), var(--surface);">
+          <div style="display:flex; align-items:center; gap:18px; justify-content: space-between; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:16px;">
+              <div class="vu on" id="pf-vu" aria-hidden="true"></div>
+              <div>
+                <h3 style="color:var(--cream)">Levels look good.</h3>
+                <p style="margin:4px 0 0; font-size:13px; color:var(--muted)">Speak like you're across the table. The host handles the rest.</p>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="min-height:52px; font-size:15.5px;" id="pf-begin">
+              Begin episode five
+              <svg class="ic" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="pf-refuse" style="display:none; margin-top: 22px;">
+        <div class="card card-pad refuse-card">
+          <div style="display:flex; gap:14px; align-items:flex-start;">
+            <svg class="ic ic-lg" viewBox="0 0 24 24" style="color: var(--live); margin-top:2px"><use href="#i-warn"/></svg>
+            <div>
+              <h3 id="pf-refuse-title">Recording is paused</h3>
+              <p id="pf-refuse-body" style="margin:6px 0 0; color: var(--muted); font-size:14px; line-height:1.6;">The studio has temporarily paused new sessions. Your four episodes are safe and fully playable.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: LIVE ═══ -->
+  <section class="view" id="view-live" aria-label="Live session">
+    <div class="live-room">
+      <div class="live-top">
+        <div class="onair is-live" id="live-onair"><span class="lamp"></span>ON AIR</div>
+        <div class="live-timer" style="text-align:right">
+          <small>SESSION · CAP 20:00</small>
+          <span id="live-elapsed">00:00</span>
+        </div>
+      </div>
+
+      <div class="live-stage">
+        <div>
+          <div class="mic-large" id="live-mic">
+            <svg class="ic" viewBox="0 0 24 24"><use href="#i-mic"/></svg>
+          </div>
+          <div class="live-status">
+            <div class="who" id="live-who">The host is speaking</div>
+            <div class="hint" id="live-hint">Hold the button below to answer. Interruptions are normal here.</div>
+          </div>
+          <div style="text-align:center">
+            <button class="hold-btn" id="hold-btn">Hold to speak</button>
+          </div>
+          <div class="live-transcript" id="live-transcript" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <div class="live-bottom">
+        <div class="vu host" id="live-vu-host" aria-label="Host level" role="img" style="height:34px"></div>
+        <div class="vu" id="live-vu-you" aria-label="Your level" role="img" style="height:34px"></div>
+        <button class="btn btn-secondary" id="end-session">
+          <svg class="ic" viewBox="0 0 24 24" style="width:15px;height:15px"><use href="#i-pause"/></svg>
+          End session
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: PROCESSING ═══ -->
+  <section class="view" id="view-processing" aria-label="Becoming an episode">
+    <div class="wrap wrap-narrow">
+      <div class="view-head">
+        <div>
+          <span class="mlabel" id="proc-mode">EPISODE FIVE · AFTER THE SESSION</span>
+          <h1 id="proc-title">That's a wrap.</h1>
+          <p class="sub" id="proc-sub">Both takes are safe. The episode is being built — each step runs once.</p>
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="proc-list" id="proc-list">
+          <div class="proc-step" data-proc="upload-you">
+            <div class="proc-icon"><svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-check"/></svg></div>
+            <div class="proc-body">
+              <h3>Your take is uploading</h3>
+              <p>Recorded at 48&nbsp;kHz, kept as its own stem.</p>
+              <div class="progress"><i></i></div>
+            </div>
+          </div>
+          <div class="proc-step" data-proc="upload-host">
+            <div class="proc-icon"><svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-check"/></svg></div>
+            <div class="proc-body">
+              <h3>The host's take is uploading</h3>
+              <p>Both stems land on one clock, so the edit is sample-accurate.</p>
+              <div class="progress"><i></i></div>
+            </div>
+          </div>
+          <div class="proc-step" data-proc="transcript">
+            <div class="proc-icon"><svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-check"/></svg></div>
+            <div class="proc-body">
+              <h3>Transcribing for the editor</h3>
+              <p>Word timings come from your stem. This serves the edit only.</p>
+              <div class="progress"><i></i></div>
+            </div>
+          </div>
+          <div class="proc-step" data-proc="editorial">
+            <div class="proc-icon"><svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-check"/></svg></div>
+            <div class="proc-body">
+              <h3>The editorial pass</h3>
+              <p>The edit model listens — laughs, pauses, a voice going thin — and proposes cuts, a cold open, a title, and one callback to plant.</p>
+              <div class="progress"><i></i></div>
+            </div>
+          </div>
+          <div class="proc-step" data-proc="draft">
+            <div class="proc-icon"><svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-check"/></svg></div>
+            <div class="proc-body">
+              <h3>Draft ready for your review</h3>
+              <p>Nothing is cut silently. Every proposal waits for you.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="proc-done" style="display:none; margin-top: 22px;">
+          <button class="btn btn-primary" style="width:100%; min-height:52px;" data-goto="editor">
+            Open the editor
+            <svg class="ic" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+          </button>
+        </div>
+
+        <div id="proc-fail" style="display:none; margin-top: 22px;">
+          <div class="card card-pad refuse-card" style="margin-bottom:16px">
+            <h3>The transcription step failed</h3>
+            <p style="margin:6px 0 0; color:var(--muted); font-size:13.5px; line-height:1.6">Your stems are kept — nothing recorded is lost. Analysis didn't run, so nothing was spent twice.</p>
+          </div>
+          <button class="btn btn-secondary" style="width:100%" id="proc-retry">
+            <svg class="ic" viewBox="0 0 24 24"><use href="#i-undo"/></svg>
+            Retry the failed step
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: EDITOR ═══ -->
+  <section class="view" id="view-editor" aria-label="Episode editor">
+    <div class="wrap">
+      <div class="ed-head">
+        <div>
+          <span class="mlabel">EPISODE FIVE · DRAFT · 2:28</span>
+          <h1 id="ed-title">The only place nobody needs anything</h1>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <span class="chip chip-amber"><span class="dot"></span><span id="ed-cutcount">3 cuts applied</span></span>
+        </div>
+      </div>
+
+      <div class="editor-grid">
+        <div>
+          <div class="card ed-player">
+            <div class="ed-player-top">
+              <div class="play-btn" style="width:48px;height:48px" id="ed-play" role="button" tabindex="0" aria-label="Play draft">
+                <svg class="ic" viewBox="0 0 24 24"><use href="#i-play"/></svg>
+              </div>
+              <div class="wave" id="ed-wave" aria-label="Draft waveform. Click to seek." role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="148" aria-valuenow="0"></div>
+              <span class="ed-time" id="ed-time">0:00 / 2:28</span>
+            </div>
+          </div>
+
+          <div class="card transcript-card" id="ed-transcript">
+            <div style="padding: 16px 0 4px; display:flex; justify-content: space-between; align-items: center; gap: 10px;">
+              <span class="mlabel">TRANSCRIPT · CLICK A WORD TO SEEK</span>
+              <span class="mlabel" style="letter-spacing:.04em">STRIKETHROUGH = PROPOSED CUT</span>
+            </div>
+            <div id="ed-turns"></div>
+          </div>
+
+          <div class="ed-donebar">
+            <div class="note" id="ed-donebar-note">Marking done renders the episode and runs the analysis pass — <strong style="color:var(--cream)">once</strong>. Every cut stays revertible until then.</div>
+            <button class="btn btn-primary" id="ed-markdone" style="min-height:50px; font-size:15px;">
+              Mark episode done
+              <svg class="ic" viewBox="0 0 24 24"><use href="#i-arrow"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <aside class="ed-rail" aria-label="Proposals">
+          <div class="card card-pad cold-open-card">
+            <span class="mlabel" style="color: var(--amber)">PROPOSED COLD OPEN · 0:14</span>
+            <blockquote>“It's the only place nobody needs anything from me.”</blockquote>
+            <p style="font-size: 12.5px; color: var(--muted); margin: 0 0 14px; line-height: 1.6">Chosen on delivery — the pause before it, and how the voice settles at the end. The model listened to the take, not just the words.</p>
+            <button class="btn btn-secondary btn-sm" id="ed-preview-cold" style="width:100%">
+              <svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-play"/></svg>
+              Preview the cold open
+            </button>
+          </div>
+
+          <div class="card card-pad">
+            <span class="mlabel">PROPOSED CUTS · APPLIED BY DEFAULT</span>
+            <div id="ed-cutlist"></div>
+          </div>
+
+          <div class="card card-pad">
+            <span class="mlabel">PLANTED FOR NEXT TIME</span>
+            <h3 style="margin: 0 0 6px; font-family: var(--font-display); font-weight:400; font-size: 19px;">“Will you go down for the harvest?”</h3>
+            <p style="font-size: 12.5px; color: var(--muted); margin: 0; line-height: 1.6">From this episode: <em>“Then she asked if I'd come down for the harvest.”</em> Episode six opens here, if it stays unresolved.</p>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: EPISODE ═══ -->
+  <section class="view" id="view-episode" aria-label="Episode">
+    <div class="wrap">
+      <div class="ep-grid">
+        <aside class="ep-side">
+          <div class="cover" id="ep-cover"></div>
+          <div class="card card-pad ep-actions" style="flex-direction:column; display:flex; align-items:stretch; gap:10px;">
+            <button class="btn btn-secondary btn-sm" id="ep-publish">
+              <svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-globe"/></svg>
+              Publish…
+            </button>
+            <button class="btn btn-secondary btn-sm" id="ep-export">
+              <svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-download"/></svg>
+              Export for YouTube
+            </button>
+            <button class="btn btn-ghost btn-sm" id="ep-erase" style="color: var(--danger); justify-content:flex-start">
+              <svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px"><use href="#i-trash"/></svg>
+              Erase this episode
+            </button>
+          </div>
+          <div id="ep-share-box" style="display:none" class="card card-pad">
+            <span class="mlabel" style="display:block; margin-bottom:10px">PUBLIC LINK</span>
+            <div class="share-link">
+              <input id="ep-share-url" readonly value="">
+              <button class="btn btn-secondary btn-sm" id="ep-copy" aria-label="Copy share link">Copy</button>
+              <button class="btn btn-secondary btn-sm" id="ep-open" aria-label="Open the public page as a visitor">Open</button>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="ep-unpublish" style="margin-top:8px; padding-left:0">Revoke link</button>
+          </div>
+        </aside>
+
+        <div>
+          <div class="view-head" style="margin-bottom: 20px;">
+            <div>
+              <span class="mlabel" id="ep-epnum">EP.04 · READY</span>
+              <h1 id="ep-title">Three weeks of almost</h1>
+              <p class="sub" id="ep-meta">Sep 2 · 18:24 · Chapters and show notes from the analysis pass</p>
+            </div>
+            <span class="chip chip-ok" id="ep-state"><span class="dot"></span>PRIVATE</span>
+          </div>
+
+          <div class="card ep-player">
+            <div class="ep-player-top">
+              <div class="play-btn" id="ep-play" role="button" tabindex="0" aria-label="Play episode">
+                <svg class="ic" viewBox="0 0 24 24"><use href="#i-play"/></svg>
+              </div>
+              <div class="wave" id="ep-wave" aria-label="Episode waveform. Click to seek." role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="1104" aria-valuenow="0"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:10px;">
+              <span class="ed-time" id="ep-time">0:00</span>
+              <button class="btn btn-ghost btn-sm" id="ep-back15" aria-label="Back fifteen seconds">
+                <svg class="ic" viewBox="0 0 24 24" style="width:16px;height:16px"><use href="#i-back15"/></svg>
+              </button>
+              <span class="ed-time">18:24</span>
+            </div>
+          </div>
+
+          <div class="card card-pad chapters" style="margin-top:18px;">
+            <span class="mlabel" style="display:block; margin-bottom:8px">CHAPTERS</span>
+            <div id="ep-chapters"></div>
+          </div>
+
+          <div class="card card-pad notes-card" style="margin-top:18px;">
+            <span class="mlabel" style="display:block; margin-bottom:4px">SHOW NOTES</span>
+            <p id="ep-notes"></p>
+          </div>
+
+          <div class="card transcript-card ep-transcript" style="margin-top:18px;">
+            <div style="padding: 16px 0 4px;">
+              <span class="mlabel">TRANSCRIPT · FOLLOWS PLAYBACK</span>
+            </div>
+            <div id="ep-turns"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: GALLERY ═══ -->
+  <section class="view" id="view-gallery" aria-label="Gallery">
+    <div class="wrap">
+      <div class="view-head">
+        <div>
+          <span class="mlabel">SEASON ONE · FIVE EPISODES</span>
+          <h1>The season so far</h1>
+          <p class="sub">Episodes are private until you publish them. A running job shows its progress right on the card.</p>
+        </div>
+        <button class="btn btn-primary" data-goto="preflight">
+          <svg class="ic" viewBox="0 0 24 24"><use href="#i-mic"/></svg>
+          Record episode six
+        </button>
+      </div>
+      <div class="gallery-grid" id="gallery-grid"></div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: THREADS ═══ -->
+  <section class="view" id="view-threads" aria-label="Threads">
+    <div class="wrap">
+      <div class="view-head">
+        <div>
+          <span class="mlabel">THE THREAD ACROSS EPISODES</span>
+          <h1>What keeps coming up</h1>
+          <p class="sub">People, promises and circling topics — each one links to the moment it was said. No scores, no gauges. Quotes and links, nothing else.</p>
+        </div>
+      </div>
+
+      <div class="thread-section">
+        <span class="mlabel">OPEN COMMITMENTS</span>
+        <div class="thread-grid" id="th-commitments"></div>
+      </div>
+
+      <div class="thread-section">
+        <span class="mlabel">PEOPLE WHO RECUR</span>
+        <div class="thread-grid" id="th-people"></div>
+      </div>
+
+      <div class="thread-section">
+        <span class="mlabel">CIRCLED TOPICS · MENTIONED 3+ TIMES, NEVER RESOLVED</span>
+        <div class="thread-grid" id="th-topics"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: ADMIN ═══ -->
+  <section class="view" id="view-admin" aria-label="Admin">
+    <div class="wrap">
+      <div class="view-head">
+        <div>
+          <span class="mlabel">STUDIO CONTROLS · OWNER</span>
+          <h1>Spend and switches</h1>
+          <p class="sub">Live sessions cost $4.50 per connected hour, billed per second. These are the brakes.</p>
+        </div>
+      </div>
+      <div class="admin-grid">
+        <div class="card card-pad">
+          <span class="mlabel" style="display:block; margin-bottom:6px">TODAY'S SPEND</span>
+          <div class="spend-num">$3.12 <small>/ $11.25 daily ceiling</small></div>
+          <div class="progress" style="margin-top:14px"><i style="--p: 27.7%"></i></div>
+          <p style="font-size:12.5px; color:var(--faint); margin:10px 0 0">One 20-minute session costs about $1.50. The ceiling refuses a session before it starts, never mid-take.</p>
+        </div>
+        <div class="card card-pad">
+          <span class="mlabel" style="display:block; margin-bottom:6px">SWITCHES</span>
+          <div class="switch-row">
+            <div class="lbl">
+              <h4>Mint new session tokens</h4>
+              <p>The kill switch. Off stops every new session at once, without a restart.</p>
+            </div>
+            <button class="switch" id="sw-kill" role="switch" aria-checked="true" aria-label="Mint new session tokens"></button>
+          </div>
+          <div class="switch-row">
+            <div class="lbl">
+              <h4>Accept guest recordings</h4>
+              <p>Visitors record episode five on the seeded season.</p>
+            </div>
+            <button class="switch" id="sw-guests" role="switch" aria-checked="true" aria-label="Accept guest recordings"></button>
+          </div>
+        </div>
+        <div class="card card-pad">
+          <span class="mlabel" style="display:block; margin-bottom:6px">GUEST LIMITS</span>
+          <div class="switch-row">
+            <div class="lbl"><h4>Sessions per guest</h4><p>1 of 2 used by today's visitor</p></div>
+            <input class="cap-input" value="2" inputmode="numeric" aria-label="Sessions per guest">
+          </div>
+          <div class="switch-row">
+            <div class="lbl"><h4>Session length cap</h4><p>Hard stop from the token itself</p></div>
+            <input class="cap-input" value="20:00" aria-label="Session length cap">
+          </div>
+          <div class="switch-row">
+            <div class="lbl"><h4>Guest data retained</h4><p>Then deleted, not hidden</p></div>
+            <input class="cap-input" value="30 days" aria-label="Guest data retention">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: PRIVACY ═══ -->
+  <section class="view" id="view-privacy" aria-label="Privacy">
+    <div class="wrap wrap-narrow">
+      <div class="view-head">
+        <div>
+          <span class="mlabel">DATA · IN PLAIN WORDS</span>
+          <h1>What Reprise keeps, and for how long</h1>
+        </div>
+      </div>
+      <div class="priv-block">
+        <h2>Private by default</h2>
+        <p>Every episode starts private. Stems, transcripts and threads never leave your account. Publishing is a separate, deliberate act per episode — and publishing shares only the finished render and its cover. The transcript stays yours.</p>
+      </div>
+      <div class="priv-block">
+        <h2>What an erase removes</h2>
+        <p>Erasing an episode deletes every row, both stems, the render and the cover from this studio — and it deletes the provider's copy of the session and every batch transcript we asked for.</p>
+        <div class="card">
+          <p style="font-size:13px; color:var(--muted); margin:0; line-height:1.65">
+            <strong style="color:var(--cream)">One honest caveat:</strong> the speech provider soft-deletes on its side. It stops being reachable, and we re-verify deletion on a schedule, but the provider's own retention policy governs their backups.
+          </p>
+        </div>
+      </div>
+      <div class="priv-block">
+        <h2>Guest recordings</h2>
+        <p>A visitor who records episode five gets a real account with one code path — not a lesser shadow of one. Their data expires on a timer the studio sets, and expiry deletes rather than hides.</p>
+      </div>
+      <div class="priv-block">
+        <h2>Sessions end explicitly</h2>
+        <p>Streaming bills on connected time, so the session ends the moment you tap End — and a token cap stops anything the browser abandons. Nothing runs open.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ VIEW: SHARE (public) ═══ -->
+  <section class="view" id="view-share" aria-label="Shared episode">
+    <div class="share-wrap">
+      <span class="mlabel">SHARED FROM A PERSONAL PODCAST</span>
+      <div class="cover" id="sh-cover" style="margin-top:16px"></div>
+      <h1 class="share-title" id="sh-title">Three weeks of almost</h1>
+      <div class="share-sub" id="sh-sub">EP.04 · 18:24</div>
+      <div class="card ep-player share-player">
+        <div class="ep-player-top">
+          <div class="play-btn" id="sh-play" role="button" tabindex="0" aria-label="Play shared episode">
+            <svg class="ic" viewBox="0 0 24 24"><use href="#i-play"/></svg>
+          </div>
+          <div class="wave" id="sh-wave" aria-label="Waveform. Click to seek." role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="1104" aria-valuenow="0"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:10px;">
+          <span class="ed-time" id="sh-time">0:00</span>
+          <span class="ed-time">18:24</span>
+        </div>
+      </div>
+      <div class="share-foot">
+        <div class="brand-name">Reprise</div>
+        <div>Published by the author. Only the finished episode is public — everything behind it stays private.</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ═══ DIALOG ═══ -->
+<div class="dlg-backdrop" id="dlg-backdrop">
+  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+    <span class="mlabel" id="dlg-eyebrow">BEFORE YOU CONTINUE</span>
+    <h2 id="dlg-title"></h2>
+    <p id="dlg-body"></p>
+    <div class="dlg-actions">
+      <button class="btn btn-ghost" id="dlg-cancel">Cancel</button>
+      <button class="btn btn-primary" id="dlg-confirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ EXPORT DRAWER ═══ -->
+<div class="drawer-backdrop" id="drawer-backdrop">
+  <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap: 12px;">
+      <div>
+        <span class="mlabel" style="display:block">ONE DOWNLOAD · EXACTLY WHAT YOUTUBE ASKS FOR</span>
+        <h2 id="drawer-title" style="font-family:var(--font-display); font-weight:400; font-size:28px; margin:8px 0 6px">The upload package</h2>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="drawer-close" aria-label="Close export drawer">
+        <svg class="ic" viewBox="0 0 24 24" style="width:16px;height:16px"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="export-item">
+      <svg class="ic" viewBox="0 0 24 24"><use href="#i-download"/></svg>
+      <div><h4>The episode, AAC</h4><p>The exact render people hear here. Loudness normalised to broadcast level.</p></div>
+    </div>
+    <div class="export-item">
+      <svg class="ic" viewBox="0 0 24 24"><use href="#i-download"/></svg>
+      <div><h4>Video, 1920×1080</h4><p>Cover art with the waveform animated over it — a real video track for channels that need one.</p></div>
+    </div>
+    <div class="export-item">
+      <svg class="ic" viewBox="0 0 24 24"><use href="#i-download"/></svg>
+      <div><h4>Captions, SRT + WebVTT</h4><p>Built from the rendered word timings, so captions upload as-is instead of being auto-generated.</p></div>
+    </div>
+    <div class="export-item">
+      <svg class="ic" viewBox="0 0 24 24"><use href="#i-download"/></svg>
+      <div><h4>Description with chapters</h4><p>Show notes, then chapter lines starting at 0:00. YouTube turns these into markers automatically.</p></div>
+    </div>
+    <div class="export-item">
+      <svg class="ic" viewBox="0 0 24 24"><use href="#i-download"/></svg>
+      <div><h4>Cover art, 1:1</h4><p>The episode's generated cover at full resolution.</p></div>
+    </div>
+    <button class="btn btn-primary" id="drawer-download" style="width:100%; margin-top:18px">
+      <svg class="ic" viewBox="0 0 24 24"><use href="#i-download"/></svg>
+      Download package
+    </button>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<div class="lab" id="lab">
+  <button class="lab-toggle" id="lab-toggle" aria-expanded="false">
+    <svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><use href="#i-scissors"/></svg>
+    PROTOTYPE STATES
+  </button>
+  <div class="lab-panel" id="lab-panel" style="display:none">
+    <span class="mlabel">CURRENT VIEW</span>
+    <div id="lab-actions"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ═══════════ utilities ═══════════ */
+const $ = (s, c) => (c || document).querySelector(s);
+const $$ = (s, c) => Array.from((c || document).querySelectorAll(s));
+const fmt = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const svgIcon = (id, cls) => `<svg class="ic ${cls || ''}" viewBox="0 0 24 24" aria-hidden="true"><use href="#${id}"/></svg>`;
+
+function seededBars(n, seed) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const h = Math.abs(Math.sin(i * 12.9898 + seed * 78.233) * 43758.5453) % 1;
+    out.push(0.08 + h * 0.92);
+  }
+  return out;
+}
+
+function toast(msg) {
+  const box = $('#toasts');
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = svgIcon('i-check') + `<span>${msg}</span>`;
+  box.appendChild(t);
+  setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, 2600);
+}
+
+/* ═══════════ state ═══════════ */
+const state = {
+  ep5: 'none',            // none | draft | rendering | ready
+  ep4Published: false,
+  ep5Published: false,
+  minting: true,
+  guests: true,
+  currentEpisode: 4,
+};
+
+/* ═══════════ data ═══════════ */
+const EPS = {
+  1: { n: 1, title: 'The garden was ours first', date: 'Aug 8', dur: 972, notes: 'The first take. June, the pear tree, and why calling feels like losing. The host asked what the garden asks of me. Nothing, apparently. That was the whole point.', chapters: [[0, 'The dread, named'], [201, 'Grandma’s shears'], [468, 'What avoiding costs']] },
+  2: { n: 2, title: 'Rent, and what it costs to stay', date: 'Aug 15', dur: 1307, notes: 'The arithmetic of the lease. Tomas’s fence, Margot’s tape, and a promise to ask June about the boundary — made out loud, so it counts now.', chapters: [[0, 'The letter from the landlord'], [318, 'The fence, whose job'], [742, 'Margot’s tape'], [1085, 'A promise, recorded']] },
+  3: { n: 3, title: 'June, in every other sentence', date: 'Aug 26', dur: 1025, notes: 'Three weeks in. The host stopped asking about June because I kept volunteering her. The weather exchange. The pear tree again. Coward arithmetic, itemized.', chapters: [[0, 'Nine mentions'], [264, 'The weather exchange'], [588, 'The pear tree, again']] },
+  4: { n: 4, title: 'Three weeks of almost', date: 'Sep 2', dur: 1104, notes: 'Recorded in one take on a Tuesday. June came up before the coffee was done. By the end the question wasn’t whether to call — it was what I’m afraid she’ll say when I do. The host kept the pauses in. That was the point.', chapters: [[0, 'The almost'], [161, 'What June heard'], [435, 'The arithmetic of staying'], [750, 'Margot’s tape'], [958, 'What tomorrow knows']] },
+  5: { n: 5, title: 'The only place nobody needs anything', date: 'Today', dur: 148, notes: 'She asked me to the harvest. I said yes on a Thursday, after a night of no sleep. The host kept the pause before I said it — that pause is the episode.', chapters: [[0, 'Cold open — the only place'], [14, 'Nine mentions, three weeks'], [46, 'And if you go'], [82, 'The year of avoiding']] },
+};
+
+const EP4_TURNS = [
+  { role: 'host', t: 0, text: 'Three weeks of almost. The garden is the only place nobody needs anything from you — your words, episode one. What’s actually been said since?' },
+  { role: 'you', t: 14, text: 'Nothing. She texted about the pear tree. I answered about the weather. That’s the whole exchange, three weeks of it.' },
+  { role: 'host', t: 40, text: 'The pear tree is doing its work, then. What do you think she’s carrying that you’re not?' },
+  { role: 'you', t: 55, text: 'The inheritance of it. Grandma’s shears, the shade cloth, the argument about the roses. I kept the garden. She kept the house that looks at it.' },
+  { role: 'host', t: 92, text: 'And the harvest in October?' },
+  { role: 'you', t: 101, text: 'I keep not thinking about it. Which is its own kind of thinking about it.' },
+];
+
+const ED_TURNS = [
+  { role: 'host', t: 0, text: 'Episode five. Four episodes in — you know what I’m opening with.' },
+  { role: 'you', t: 7, text: 'June.' },
+  { role: 'host', t: 9.5, text: 'June. Nine mentions, three weeks of almost. What changed this week?' },
+  { role: 'you', t: 16, text: 'She asked if I’d come down for the harvest. First time she’s — no. The first time she’s asked me for something. It’s the only place nobody needs anything from me. And now the place needs me to show up.' },
+  { role: 'host', t: 46, text: 'And if you go?' },
+  { role: 'you', t: 49, text: 'Then it becomes something we share again. I checked the train prices, by the way, it’s like forty euros now, which is absurd. If it goes badly, at least it’s over.' },
+  { role: 'host', t: 82, text: 'The year you avoided it. What were you doing instead?' },
+  { role: 'you', t: 88, text: 'Tomas’s fence. I mean I fixed it badly, but I fixed it. Keeping busy with things that can’t say no.' },
+];
+
+const ED_CUTS = [
+  { id: 'c1', turn: 3, start: 9, end: 13, reason: 'False start. The restart lands cleaner.' },
+  { id: 'c2', turn: 5, start: 7, end: 22, reason: 'A tangent that goes nowhere. The visit is the point, not the train fare.' },
+  { id: 'c3', turn: 7, start: 2, end: 11, reason: 'The aside steps on the line after it.' },
+];
+
+/* word timings, computed once at load */
+const edState = { cuts: { c1: true, c2: true, c3: true }, words: [], dur: 0, cold: { start: 0, end: 0 } };
+ED_TURNS.forEach(turn => {
+  let t = turn.t;
+  turn.words = turn.text.split(' ').map(w => {
+    const dur = 0.34 + w.length * 0.021 + (/[,.—?]/.test(w) ? 0.22 : 0);
+    const word = { w, t, d: dur, turn };
+    t += dur;
+    edState.words.push(word);
+    return word;
+  });
+});
+{
+  const last = ED_TURNS[ED_TURNS.length - 1];
+  edState.dur = last.t + last.words[last.words.length - 1].d + 6;
+  EPS[5].dur = Math.round(edState.dur);
+  const t3w = ED_TURNS[3].words;
+  let ci = t3w.findIndex(w => w.w.startsWith('It') && /s$/.test(w.w));
+  if (ci < 0) ci = 22;
+  const ce = t3w[Math.min(t3w.length - 1, ci + 8)] || t3w[t3w.length - 1];
+  edState.cold = { start: Math.max(0, t3w[ci].t - 1.1), end: ce.t + ce.d + 0.5 };
+}
+
+const EP_TURNS = {
+  1: [
+    { role: 'host', t: 0, text: 'First take. There’s no wrong way to do this — start anywhere. What’s been sitting with you?' },
+    { role: 'you', t: 8, text: 'The garden, I guess. June and I share the allotment, or we did. I’ve been dreading calling her.' },
+    { role: 'host', t: 22, text: 'Dreading calling your sister. Say more about the dread.' },
+    { role: 'you', t: 30, text: 'The garden was ours before it was the landlord’s. If I call, it becomes a conversation about the future. If I don’t, it stays a place I go on Sundays.' },
+    { role: 'host', t: 52, text: 'And the pear tree?' },
+    { role: 'you', t: 56, text: 'Grandma’s shears are still in the shed. I sharpen them every March whether anyone asks or not.' },
+  ],
+  2: [
+    { role: 'host', t: 0, text: 'A letter came this week. What did it say?' },
+    { role: 'you', t: 6, text: 'The lease on the house goes month-to-month in spring. The garden’s not in it — the garden was never in it.' },
+    { role: 'you', t: 24, text: 'Tomas says the fence leans like it’s tired of holding the line. I keep meaning to ask June whose job the fence is now.' },
+    { role: 'host', t: 44, text: 'You said “meaning to.” How long has that been true?' },
+    { role: 'you', t: 50, text: 'Since May. I promised Margot a tape of the allotment recordings, too — I record the birds there some mornings.' },
+  ],
+  3: [
+    { role: 'host', t: 0, text: 'June came up in every other sentence this week. I stopped counting halfway through.' },
+    { role: 'you', t: 8, text: 'She texted about the pear tree. I answered about the weather. That was the whole exchange.' },
+    { role: 'host', t: 20, text: 'What are you protecting with the weather talk?' },
+    { role: 'you', t: 28, text: 'Every October I do this arithmetic — stay another winter, or go down for the harvest and see what’s left. Every March I’m still here.' },
+  ],
+  4: EP4_TURNS,
+  5: ED_TURNS,
+};
+
+const THREADS_BASE = {
+  commitments: [
+    { name: 'Ask June about the fence', who: 'a promise, recorded', status: 'open', opened: 'EP.02', count: '3 mentions · never resolved', quotes: [
+      { ep: 2, t: 318, text: 'I keep meaning to ask her — the fence, whose job is it now.' },
+      { ep: 3, t: 264, text: 'Still haven’t asked. The fence is still standing. Coward arithmetic.' } ] },
+    { name: 'Send Margot the tape', who: 'a promise, kept', status: 'resolved', opened: 'EP.02', count: 'kept in EP.04', quotes: [
+      { ep: 2, t: 742, text: 'I promised Margot a tape of the allotment recordings.' },
+      { ep: 4, t: 750, text: 'I sent it. She cried on the phone — the good kind.' } ] },
+  ],
+  people: [
+    { name: 'June', who: 'your sister', count: '9 mentions · 4 episodes', quotes: [
+      { ep: 1, t: 47, text: 'I’ve been dreading calling June. The garden was ours before it was the landlord’s.' },
+      { ep: 4, t: 14, text: 'She texted about the pear tree. I answered about the weather.' } ] },
+    { name: 'Tomas', who: 'the neighbour at the allotment', count: '5 mentions · 3 episodes', quotes: [
+      { ep: 2, t: 318, text: 'Tomas says the fence leans like it’s tired of holding the line.' },
+      { ep: 5, t: 88, text: 'Tomas’s fence. Keeping busy with things that can’t say no.' } ] },
+    { name: 'Margot', who: 'an old friend', count: '3 mentions · 2 episodes', quotes: [
+      { ep: 2, t: 742, text: 'Margot left before the garden got good.' },
+      { ep: 4, t: 750, text: 'I sent it. She cried on the phone — the good kind.' } ] },
+  ],
+  topics: [
+    { name: 'The harvest in October', count: '4 mentions · 3 episodes · unresolved', quotes: [
+      { ep: 4, t: 92, text: 'I keep not thinking about it. Which is its own kind of thinking about it.' } ] },
+    { name: 'Another winter in the city', count: '5 mentions · 4 episodes · unresolved', quotes: [
+      { ep: 3, t: 588, text: 'Every October I do this arithmetic and every March I’m still here.' } ] },
+  ],
+};
+
+/* ═══════════ waveform ═══════════ */
+function buildWave(el, dur, opts = {}) {
+  const n = 64;
+  const seed = opts.seed || 3;
+  const bars = seededBars(n, seed);
+  el.innerHTML = '';
+  el.style.setProperty('--h', 0);
+  const base = document.createElement('div');
+  base.style.cssText = 'position:absolute;inset:0;display:flex;align-items:flex-end;gap:2px;';
+  bars.forEach(h => { const i = document.createElement('i'); i.style.setProperty('--h', h); base.appendChild(i); });
+  el.appendChild(base);
+  const fill = document.createElement('div');
+  fill.className = 'w-fill';
+  fill.style.cssText = 'position:absolute;inset:0;display:flex;align-items:flex-end;gap:2px;clip-path:inset(0 100% 0 0);';
+  bars.forEach(h => { const i = document.createElement('i'); i.style.setProperty('--h', h); fill.appendChild(i); });
+  el.appendChild(fill);
+  (opts.cuts || []).forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'w-cut';
+    d.style.left = (c.start / dur * 100) + '%';
+    d.style.width = ((c.end - c.start) / dur * 100) + '%';
+    el.appendChild(d);
+  });
+  if (opts.cold) {
+    const d = document.createElement('div');
+    d.className = 'w-cold';
+    d.style.left = (opts.cold.start / dur * 100) + '%';
+    d.style.width = (opts.cold.end - opts.cold.start) / dur * 100 + '%';
+    el.appendChild(d);
+  }
+  const set = t => {
+    const pct = Math.min(100, t / dur * 100);
+    fill.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
+  };
+  const seek = e => {
+    const r = el.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width;
+    opts.onSeek && opts.onSeek(Math.max(0, Math.min(1, x)) * dur);
+  };
+  el.addEventListener('click', seek);
+  el.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      const cur = opts.getT ? opts.getT() : 0;
+      opts.onSeek && opts.onSeek(Math.max(0, cur + (e.key === 'ArrowLeft' ? -5 : 5)));
+    }
+  });
+  return { set, el, dur };
+}
+
+function buildVU(el, n = 12) {
+  el.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const b = document.createElement('i');
+    b.style.setProperty('--h', 0.25 + Math.abs(Math.sin(i * 3.7)) * 0.75);
+    b.style.setProperty('--d', (i * 0.09 % 0.8).toFixed(2) + 's');
+    el.appendChild(b);
+  }
+}
+
+/* ═══════════ player engine ═══════════ */
+let activePlayer = null;
+function makePlayer({ wave, timeEl, dur, speed = 8, onTick, onEnd, segments }) {
+  let t = 0, raf = null, last = 0, playing = false;
+  const seekTo = nt => { t = Math.max(0, Math.min(dur, nt)); paint(); onTick && onTick(t); };
+  const w = buildWave(wave, dur, Object.assign({ onSeek: seekTo, getT: () => t }, wave._wopts || {}));
+  function stopRaf() { if (raf) cancelAnimationFrame(raf); raf = null; }
+  function loop(now) {
+    if (!playing) return;
+    t += (now - last) / 1000 * speed;
+    last = now;
+    if (segments && !segments.ok(t)) { t = segments.jump; }
+    if (t >= dur) { t = dur; paint(); playing = false; stopRaf(); onEnd && onEnd(); return; }
+    paint(); onTick && onTick(t);
+    raf = requestAnimationFrame(loop);
+  }
+  function paint() {
+    w.set(t);
+    if (timeEl) timeEl.textContent = fmt(t) + (timeEl._suffix || '');
+    wave.setAttribute('aria-valuenow', Math.round(t));
+  }
+  const player = {
+    wave: w,
+    get t() { return t; },
+    get playing() { return playing; },
+    play() { if (playing) return; if (t >= dur) t = 0; playing = true; last = performance.now(); activePlayer && activePlayer !== player && activePlayer.pause(); activePlayer = player; raf = requestAnimationFrame(loop); },
+    pause() { playing = false; stopRaf(); },
+    toggle() { playing ? player.pause() : player.play(); },
+    seek: seekTo,
+    destroy() { player.pause(); },
+  };
+  return player;
+}
+
+/* ═══════════ router ═══════════ */
+const VIEWS = ['welcome', 'preflight', 'live', 'processing', 'editor', 'episode', 'gallery', 'threads', 'admin', 'privacy', 'share'];
+let currentView = 'welcome';
+const inited = {};
+
+function showView(name) {
+  if (!VIEWS.includes(name)) name = 'gallery';
+  currentView = name;
+  activePlayer && activePlayer.pause();
+  document.body.dataset.view = name;
+  VIEWS.forEach(v => { const s = $('#view-' + v); if (s) s.classList.toggle('active', v === name); });
+  $$('.topnav a').forEach(a => {
+    const nav = a.dataset.nav;
+    a.setAttribute('aria-current', (name === nav || (nav === 'gallery' && ['episode', 'editor', 'processing', 'preflight'].includes(name))) ? 'page' : 'false');
+  });
+  resetPlayIcons();
+  if (!inited[name]) {
+    inited[name] = true;
+    ({ welcome: initWelcome, preflight: initPreflight, live: initLive, processing: () => {}, editor: initEditor, episode: initEpisode, gallery: renderGallery, threads: renderThreads, admin: initAdmin, privacy: () => {}, share: initShare })[name]?.();
+  }
+  if (name === 'gallery') renderGallery();
+  if (name === 'threads') renderThreads();
+  if (name === 'episode') populateEpisode(state.currentEpisode);
+  if (name === 'share') populateShare();
+  renderLab();
+  syncHash(name);
+  window.scrollTo(0, 0);
+}
+
+/* The address bar follows the view, so a reload or a shared link lands where it
+   says it does and Back steps through views instead of leaving the prototype. */
+function viewFromHash() {
+  const m = location.hash.match(/^#\/([a-z-]+)$/);
+  return m && VIEWS.includes(m[1]) ? m[1] : null;
+}
+
+function syncHash(name) {
+  const want = '#/' + name;
+  if (location.hash === want) return;
+  // The first view replaces the bare URL rather than pushing, so the first Back
+  // press moves between views instead of landing on a hashless dead entry.
+  if (!location.hash) history.replaceState(null, '', want);
+  else location.hash = want;
+}
+
+window.addEventListener('hashchange', () => {
+  const v = viewFromHash();
+  if (v && v !== currentView) showView(v);
+});
+
+function goto(name) { showView(name); }
+
+function resetPlayIcons() {
+  ['wl-play', 'ed-play', 'ep-play', 'sh-play'].forEach(id => {
+    const b = $('#' + id);
+    if (b) b.innerHTML = svgIcon('i-play');
+  });
+}
+
+document.addEventListener('click', e => {
+  const g = e.target.closest('[data-goto]');
+  if (g) { e.preventDefault(); goto(g.dataset.goto); return; }
+  const nv = e.target.closest('[data-nav]');
+  if (nv) { e.preventDefault(); goto(nv.dataset.nav); return; }
+});
+
+/* ═══════════ welcome ═══════════ */
+function initWelcome() {
+  const strip = $('#season-strip');
+  strip.innerHTML = '';
+  [1, 2, 3, 4].forEach(n => {
+    const c = document.createElement('div');
+    c.className = 'cover';
+    c.setAttribute('role', 'img');
+    c.setAttribute('aria-label', `Episode ${n}: ${EPS[n].title}`);
+    c.innerHTML = `<span class="ep">EP.${String(n).padStart(2, '0')}</span><div class="miniwave">${seededBars(9, n).map(h => `<i style="--h:${h.toFixed(2)}"></i>`).join('')}</div><span class="n">${n}</span>`;
+    c.style.cursor = 'pointer';
+    c.addEventListener('click', () => { state.currentEpisode = n; goto('episode'); });
+    strip.appendChild(c);
+  });
+  const ghost = document.createElement('div');
+  ghost.className = 'cover';
+  ghost.style.borderStyle = 'dashed';
+  ghost.style.cursor = 'pointer';
+  ghost.setAttribute('role', 'button');
+  ghost.setAttribute('aria-label', 'Record episode five');
+  ghost.innerHTML = `<span class="ep" style="color:var(--muted)">EP.05</span><div class="miniwave" style="opacity:.3">${seededBars(9, 5).map(h => `<i style="--h:${h * 0.4 + 0.05}"></i>`).join('')}</div><span class="n" style="color:var(--faint);font-size:clamp(20px,16cqw,34px)">YOURS</span>`;
+  ghost.addEventListener('click', () => goto('preflight'));
+  strip.appendChild(ghost);
+
+  const wave = $('#wl-wave');
+  wave._wopts = { seed: 7 };
+  const timeEl = $('#wl-time');
+  timeEl._suffix = ' / 0:30';
+  const p = makePlayer({ wave, timeEl, dur: 30, speed: 1.6, onTick: t => {
+    $('#wl-teaser-t').textContent = (t < 9 ? '0:0' + Math.floor(t) : '0:' + String(Math.floor(t)).padStart(2, '0')) + ' · EP.04';
+    $('#wl-line-1').classList.toggle('on', t >= 0.4 && t < 5.2);
+    $('#wl-line-2').classList.toggle('on', t >= 5.2 && t < 10.5);
+  }, onEnd: () => { $('#wl-play').innerHTML = svgIcon('i-play'); } });
+  welcomePlayer = p;
+  const btn = $('#wl-play');
+  const toggle = () => {
+    if (p.playing) { p.pause(); btn.innerHTML = svgIcon('i-play'); }
+    else { if (p.t >= 30) p.seek(0); p.play(); btn.innerHTML = svgIcon('i-pause'); }
+  };
+  btn.addEventListener('click', toggle);
+  btn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+}
+let welcomePlayer = null;
+
+/* ═══════════ covers ═══════════ */
+function coverHTML(n, opts = {}) {
+  const ep = EPS[n] || { n };
+  return `<span class="ep">EP.${String(n).padStart(2, '0')}</span><div class="miniwave" aria-hidden="true">${seededBars(9, n).map(h => `<i style="--h:${h.toFixed(2)}"></i>`).join('')}</div><span class="n">${n}</span>`;
+}
+
+/* ═══════════ preflight ═══════════ */
+function initPreflight() {
+  buildVU($('#pf-vu'), 10);
+  $('#pf-mic').addEventListener('click', () => {
+    const steps = $$('#pf-steps .pf-step');
+    steps[0].classList.add('done');
+    $('#pf-copy').textContent = 'Microphone ready. One more moment while the studio connects.';
+    $('#pf-mic').disabled = true;
+    $('#pf-mic').innerHTML = svgIcon('i-check') + ' Microphone enabled';
+    $('#pf-orb').classList.add('live');
+    setTimeout(() => steps[1].classList.add('done'), 900);
+    setTimeout(() => {
+      steps[2].classList.add('done');
+      $('#pf-ready').hidden = false;
+      $('#pf-ready').style.display = 'block';
+      $('#pf-vu').classList.add('on');
+    }, 1900);
+  });
+  $('#pf-begin').addEventListener('click', startLive);
+}
+
+function showRefusal(kind) {
+  goto('preflight');
+  $('#pf-ready').style.display = 'none';
+  const box = $('#pf-refuse');
+  box.style.display = 'block';
+  if (kind === 'paused') {
+    $('#pf-refuse-title').textContent = 'Recording is paused';
+    $('#pf-refuse-body').textContent = 'The studio has temporarily paused new sessions. Your four episodes are safe and fully playable.';
+  } else if (kind === 'guests') {
+    $('#pf-refuse-title').textContent = 'Guest recordings are paused';
+    $('#pf-refuse-body').textContent = 'Visitors can’t record right now. The four seeded episodes are still here, fully playable.';
+  } else {
+    $('#pf-refuse-title').textContent = 'Guest session limit reached';
+    $('#pf-refuse-body').textContent = 'Visitors record one episode on the seeded season. Yours is in the gallery — ready to play, edit and export.';
+  }
+}
+
+/* ═══════════ live session ═══════════ */
+let liveCtl = null;
+
+function createLiveSession() {
+  const mic = $('#live-mic'), who = $('#live-who'), hint = $('#live-hint');
+  const transcript = $('#live-transcript');
+  const onair = $('#live-onair');
+  buildVU($('#live-vu-host'), 14); buildVU($('#live-vu-you'), 14);
+  transcript.innerHTML = '';
+  onair.classList.add('is-live');
+  mic.classList.remove('speaking');
+  let t = 0, holding = false, holdRAF = null, ended = false, phase = 'host1', warned = false, hostTimer = null, tickTimer = null;
+
+  function line(role, text) {
+    const d = document.createElement('div');
+    d.className = 'lt-line ' + role;
+    d.innerHTML = `<span class="r">${role === 'host' ? 'HOST' : 'YOU'}</span><p></p>`;
+    d.querySelector('p').textContent = text;
+    transcript.appendChild(d);
+    while (transcript.children.length > 4) transcript.firstElementChild.remove();
+  }
+  function setVU(sel, on) { $(sel).classList.toggle('on', on); }
+
+  const script = [
+    { at: 0.6, do: () => { who.textContent = 'The host is speaking'; setVU('#live-vu-host', true); mic.classList.remove('speaking'); line('host', 'Episode five. Four episodes in — you know what I’m opening with.'); } },
+    { at: 5.4, do: () => line('host', 'June. Nine mentions, three weeks of almost. What changed this week?') },
+    { at: 10.2, do: () => { setVU('#live-vu-host', false); who.textContent = 'Your turn'; hint.textContent = 'Hold the button to speak. Interrupting the host is allowed — really.'; phase = 'you1'; } },
+    { at: 26, do: () => { if (phase === 'you1') hint.textContent = 'Take your time. Silence is part of the episode.'; } },
+  ];
+  let si = 0;
+
+  function tick() {
+    if (ended) return;
+    t += 0.25;
+    $('#live-elapsed').textContent = fmt(t).padStart(5, '0');
+    while (si < script.length && script[si].at <= t) { script[si++].do(); }
+    if (t > 120 && !warned) { warned = true; hint.textContent = 'Heads up — the session cap is 20:00. Ending is one tap.'; }
+    tickTimer = setTimeout(tick, 250);
+  }
+  tick();
+
+  function startHold() {
+    if (ended || phase.startsWith('wait')) return;
+    holding = true;
+    holdBtn.classList.add('holding');
+    mic.classList.add('speaking');
+    who.textContent = 'You’re speaking';
+    setVU('#live-vu-you', true);
+    if (phase === 'you1') {
+      holdRAF = setTimeout(() => {
+        line('you', 'She asked if I’d come down for the harvest.');
+        phase = 'wait-host2';
+      }, 1600);
+    } else if (phase === 'you2') {
+      holdRAF = setTimeout(() => {
+        line('you', 'A night of not sleeping. Then I said yes.');
+        phase = 'wait-host3';
+      }, 1500);
+    } else if (phase === 'free') {
+      holdRAF = setTimeout(() => { line('you', '…'); }, 2200);
+    } else if (phase.startsWith('host')) {
+      // barge-in: flush the host
+      clearTimeout(hostTimer);
+      setVU('#live-vu-host', false);
+      who.textContent = 'You cut in — that’s allowed';
+      hint.textContent = 'The host stops mid-word and follows you.';
+      holdRAF = setTimeout(() => {
+        line('you', 'Sorry — the harvest. She asked me to the harvest.');
+        phase = 'wait-host3';
+      }, 1400);
+    }
+  }
+  function endHold() {
+    if (!holding) return;
+    holding = false;
+    holdBtn.classList.remove('holding');
+    mic.classList.remove('speaking');
+    setVU('#live-vu-you', false);
+    clearTimeout(holdRAF);
+    respond();
+  }
+  function respond() {
+    if (phase === 'wait-host2') {
+      phase = 'host2';
+      who.textContent = 'The host is speaking';
+      setVU('#live-vu-host', true);
+      line('host', 'The harvest. When?');
+      hostTimer = setTimeout(() => {
+        setVU('#live-vu-host', false);
+        who.textContent = 'Your turn';
+        hint.textContent = 'Hold to speak.';
+        phase = 'you2';
+      }, 2600);
+    } else if (phase === 'wait-host3') {
+      phase = 'closing';
+      who.textContent = 'The host is speaking';
+      setVU('#live-vu-host', true);
+      line('host', 'You said yes. Then episode six opens in a garden. This is Reprise — I’ll remember.');
+      hostTimer = setTimeout(() => {
+        setVU('#live-vu-host', false);
+        who.textContent = 'That’s the shape of it';
+        hint.textContent = 'End the session when you’re ready. The upload starts after.';
+        phase = 'free';
+      }, 5200);
+    }
+  }
+  return {
+    get t() { return t; },
+    startHold, endHold,
+    end() {
+      ended = true;
+      clearTimeout(tickTimer); clearTimeout(hostTimer); clearTimeout(holdRAF);
+      setVU('#live-vu-host', false); setVU('#live-vu-you', false);
+      mic.classList.remove('speaking');
+      onair.classList.remove('is-live');
+      who.textContent = 'Session ended';
+      hint.textContent = 'Both takes are uploading.';
+    },
+  };
+}
+
+function initLive() {
+  const holdBtn = $('#hold-btn');
+  holdBtn.addEventListener('pointerdown', e => { e.preventDefault(); liveCtl && liveCtl.startHold(); });
+  holdBtn.addEventListener('pointerup', () => liveCtl && liveCtl.endHold());
+  holdBtn.addEventListener('pointerleave', () => liveCtl && liveCtl.endHold());
+  holdBtn.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); liveCtl && liveCtl.startHold(); } });
+  holdBtn.addEventListener('keyup', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); liveCtl && liveCtl.endHold(); } });
+
+  $('#end-session').addEventListener('click', () => {
+    if (!liveCtl) return;
+    dialog({
+      eyebrow: 'END THE SESSION',
+      title: 'Wrap episode five?',
+      body: `Both takes stop now and the upload begins. Connected time <strong>${fmt(liveCtl.t)}</strong> — billed per second, and the analysis pass runs once, after you approve the edit.`,
+      confirm: 'End session',
+      onConfirm: () => {
+        const ctl = liveCtl;
+        liveCtl = null;
+        ctl.end();
+        state.ep5 = 'draft';
+        runProcessing('draft');
+      },
+    });
+  });
+}
+
+function startLive() {
+  if (!state.minting) { showRefusal('paused'); return; }
+  if (!state.guests) { showRefusal('guests'); return; }
+  if (liveCtl) liveCtl.end();
+  liveCtl = createLiveSession();
+  goto('live');
+}
+
+/* ═══════════ processing ═══════════ */
+const PROC_STEPS = {
+  draft: [
+    ['upload-you', 'Your take is uploading', 1.6],
+    ['upload-host', 'The host’s take is uploading', 1.8],
+    ['transcript', 'Transcribing for the editor', 2.2],
+    ['editorial', 'The editorial pass', 2.6],
+  ],
+  final: [
+    ['render', 'Rendering the episode', 2.4],
+    ['analyse', 'Analysing the rendered audio', 2.0],
+    ['memory', 'Updating the threads', 1.4],
+    ['cover', 'Drawing the cover', 1.3],
+  ],
+};
+
+function runProcessing(mode, failStep) {
+  goto('processing');
+  const list = $('#proc-list');
+  const steps = PROC_STEPS[mode];
+  if (mode === 'final') {
+    $('#proc-mode').textContent = 'EPISODE FIVE · MARKED DONE';
+    $('#proc-title').textContent = 'Rendering, once.';
+    $('#proc-sub').textContent = 'The cut list is frozen, the render is built from it, and the analysis runs on what people will actually hear.';
+  } else {
+    $('#proc-mode').textContent = 'EPISODE FIVE · AFTER THE SESSION';
+    $('#proc-title').textContent = 'That’s a wrap.';
+    $('#proc-sub').textContent = 'Both takes are safe. The episode is being built — each step runs once.';
+  }
+  list.innerHTML = '';
+  steps.forEach(([id, label, dur]) => {
+    const d = document.createElement('div');
+    d.className = 'proc-step'; d.dataset.proc = id;
+    d.innerHTML = `<div class="proc-icon">${svgIcon('i-check')}</div><div class="proc-body"><h3>${label}</h3><div class="progress"><i></i></div></div>`;
+    list.appendChild(d);
+  });
+  const endD = document.createElement('div');
+  endD.className = 'proc-step';
+  endD.innerHTML = `<div class="proc-icon">${svgIcon('i-check')}</div><div class="proc-body"><h3>${mode === 'final' ? 'Episode ready' : 'Draft ready for your review'}</h3><p>${mode === 'final' ? 'Chapters, notes, threads and cover are in.' : 'Nothing is cut silently. Every proposal waits for you.'}</p></div>`;
+  list.appendChild(endD);
+  $('#proc-done').style.display = 'none';
+  $('#proc-fail').style.display = 'none';
+
+  let i = 0;
+  function runStep() {
+    if (i >= steps.length) {
+      endD.classList.add('done');
+      if (mode === 'final') {
+        state.ep5 = 'ready';
+        const b = $('#proc-done button');
+        b.innerHTML = 'Open the episode ' + svgIcon('i-arrow');
+        b.dataset.goto = 'episode';
+        b.onclick = () => { state.currentEpisode = 5; goto('episode'); };
+      } else {
+        $('#proc-done button').onclick = null;
+      }
+      $('#proc-done').style.display = 'block';
+      return;
+    }
+    const [id, label, dur] = steps[i];
+    const el = list.children[i];
+    el.classList.add('running');
+    const bar = $('.progress i', el);
+    const t0 = performance.now();
+    (function anim(now) {
+      const p = Math.min(1, (now - t0) / (dur * 1000));
+      bar.style.setProperty('--p', (p * 100) + '%');
+      if (failStep === id && p > 0.6) {
+        el.classList.remove('running');
+        el.classList.add('failed');
+        $('#proc-fail').style.display = 'block';
+        $('#proc-retry').onclick = () => {
+          $('#proc-fail').style.display = 'none';
+          el.classList.remove('failed');
+          el.classList.add('running');
+          failStep = null;
+          const t1 = performance.now();
+          (function anim2(now2) {
+            const p2 = Math.min(1, (now2 - t1) / (dur * 700));
+            bar.style.setProperty('--p', (p2 * 100) + '%');
+            if (p2 < 1) requestAnimationFrame(anim2);
+            else { el.classList.remove('running'); el.classList.add('done'); i++; setTimeout(runStep, 250); }
+          })(performance.now());
+        };
+        return;
+      }
+      if (p < 1) requestAnimationFrame(anim);
+      else { el.classList.remove('running'); el.classList.add('done'); i++; setTimeout(runStep, 300); }
+    })(t0);
+  }
+  setTimeout(runStep, 500);
+}
+
+/* ═══════════ editor ═══════════ */
+let edPlayer = null;
+
+function initEditor() {
+  $('.ed-head .mlabel').textContent = 'EPISODE FIVE · DRAFT · ' + fmt(edState.dur);
+  $('#ed-wave').setAttribute('aria-valuemax', Math.round(edState.dur));
+  $('.cold-open-card .mlabel').textContent = 'PROPOSED COLD OPEN · ' + fmt(edState.cold.end - edState.cold.start);
+
+  renderEditorTranscript();
+  renderCutList();
+  updateCutCount();
+
+  refreshEditorWave();
+
+  const playBtn = $('#ed-play');
+  const toggle = () => {
+    if (edPlayer.playing) { edPlayer.pause(); playBtn.innerHTML = svgIcon('i-play'); }
+    else { edPlayer.play(); playBtn.innerHTML = svgIcon('i-pause'); }
+  };
+  playBtn.addEventListener('click', toggle);
+  playBtn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+
+  const h1 = $('#ed-title');
+  h1.contentEditable = 'true';
+  h1.spellcheck = false;
+  h1.setAttribute('aria-label', 'Episode title — the model’s proposal, yours to change');
+  h1.addEventListener('blur', () => toast('Title saved'));
+  h1.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); h1.blur(); } });
+
+  $('#ed-preview-cold').addEventListener('click', () => {
+    edPlayer.seek(edState.cold.start);
+    edPlayer.play();
+    playBtn.innerHTML = svgIcon('i-pause');
+    toast('Playing the proposed cold open');
+    const stop = setInterval(() => {
+      if (edPlayer.t >= edState.cold.end || !edPlayer.playing) {
+        clearInterval(stop);
+        if (edPlayer.t >= edState.cold.end) { edPlayer.pause(); playBtn.innerHTML = svgIcon('i-play'); toast('Cold open ends here — the episode would continue'); }
+      }
+    }, 200);
+  });
+
+  $('#ed-markdone').addEventListener('click', () => {
+    dialog({
+      eyebrow: 'THE ONLY WAY OUT OF DRAFT',
+      title: 'Mark episode five done?',
+      body: 'This renders the episode and runs the analysis on the finished audio — <strong>once</strong>. After this, cuts are baked in and the episode becomes a thing people play.',
+      confirm: 'Mark done',
+      onConfirm: () => runProcessing('final'),
+    });
+  });
+}
+
+function edOnTick(t) {
+  $('#ed-time').textContent = fmt(t) + ' / ' + fmt(edState.dur);
+  let cur = null;
+  for (const w of edState.words) { if (t >= w.t && t < w.t + w.d) { cur = w; break; } }
+  $$('#ed-turns .turn').forEach(el => el.classList.remove('now'));
+  $$('#ed-turns .w.cur').forEach(el => el.classList.remove('cur'));
+  if (cur) {
+    cur.el && cur.el.classList.add('cur');
+    const turn = cur.el && cur.el.closest('.turn');
+    if (turn) turn.classList.add('now');
+  }
+}
+
+function refreshEditorWave() {
+  const cuts = ED_CUTS.filter(c => edState.cuts[c.id]).map(cutRange);
+  $('#ed-wave')._wopts = { seed: 5, cold: edState.cold, cuts };
+  const savedT = edPlayer ? edPlayer.t : 0;
+  const wasPlaying = edPlayer ? edPlayer.playing : false;
+  if (edPlayer) edPlayer.destroy();
+  const timeEl = $('#ed-time');
+  timeEl._suffix = '';
+  edPlayer = makePlayer({
+    wave: $('#ed-wave'),
+    timeEl,
+    dur: edState.dur,
+    speed: 5,
+    onTick: edOnTick,
+    onEnd: () => { $('#ed-play').innerHTML = svgIcon('i-play'); },
+  });
+  edPlayer.seek(savedT);
+  if (wasPlaying) edPlayer.play();
+}
+
+function cutRange(c) {
+  const turn = ED_TURNS[c.turn];
+  const ws = turn.words.slice(c.start, c.end + 1);
+  return { start: ws[0].t, end: ws[ws.length - 1].t + ws[ws.length - 1].d, id: c.id };
+}
+
+function renderEditorTranscript() {
+  const box = $('#ed-turns');
+  box.innerHTML = '';
+  ED_TURNS.forEach((turn, ti) => {
+    const div = document.createElement('div');
+    div.className = 'turn ' + turn.role;
+    const r = document.createElement('span'); r.className = 'r'; r.textContent = turn.role === 'host' ? 'HOST' : 'YOU';
+    const p = document.createElement('p');
+    div.append(r, p);
+    const cutsHere = ED_CUTS.filter(c => c.turn === ti);
+    turn.words.forEach((w, wi) => {
+      const cut = cutsHere.find(c => wi >= c.start && wi <= c.end);
+      if (cut) {
+        if (wi === cut.start) {
+          const s = document.createElement('button');
+          s.className = 'cut'; s.dataset.cut = cut.id;
+          s.title = 'Proposed cut — click to keep this';
+          s.setAttribute('aria-label', `Proposed cut: ${cut.reason} Click to keep.`);
+          p.appendChild(s);
+        }
+        $('.cut[data-cut="' + cut.id + '"]', p) && $('.cut[data-cut="' + cut.id + '"]', p).appendChild(wordSpan(w));
+      } else {
+        p.appendChild(wordSpan(w));
+      }
+    });
+    box.appendChild(div);
+  });
+
+  function wordSpan(w) {
+    const s = document.createElement('span');
+    s.className = 'w';
+    s.textContent = w.w + ' ';
+    s.dataset.t = w.t.toFixed(2);
+    w.el = s;
+    s.addEventListener('click', e => {
+      if (s.closest('.cut')) return;
+      edPlayer && edPlayer.seek(parseFloat(s.dataset.t));
+    });
+    return s;
+  }
+
+  $$('#ed-turns .cut').forEach(el => {
+    el.addEventListener('click', () => revertCut(el.dataset.cut));
+  });
+}
+
+function revertCut(id) {
+  edState.cuts[id] = false;
+  renderEditorTranscript();
+  renderCutList();
+  updateCutCount();
+  refreshEditorWave();
+  toast('Kept — the cut is undone');
+}
+function applyCut(id) {
+  edState.cuts[id] = true;
+  renderEditorTranscript();
+  renderCutList();
+  updateCutCount();
+  refreshEditorWave();
+  toast('Cut re-applied');
+}
+
+function renderCutList() {
+  const box = $('#ed-cutlist');
+  box.innerHTML = '';
+  ED_CUTS.forEach(c => {
+    const range = cutRange(c);
+    const applied = edState.cuts[c.id];
+    const row = document.createElement('div');
+    row.className = 'cut-row';
+    row.innerHTML = `<div><p>${c.reason}</p><span class="q">${fmt(range.start)} · ${applied ? 'APPLIED' : 'KEPT'}</span></div>`;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm x';
+    if (applied) { btn.innerHTML = svgIcon('i-undo'); btn.title = 'Keep this — undo the cut'; btn.setAttribute('aria-label', 'Keep, undo cut'); btn.onclick = () => revertCut(c.id); }
+    else { btn.innerHTML = svgIcon('i-scissors'); btn.title = 'Re-apply the cut'; btn.setAttribute('aria-label', 'Re-apply cut'); btn.onclick = () => applyCut(c.id); }
+    row.appendChild(btn);
+    box.appendChild(row);
+  });
+}
+
+function updateCutCount() {
+  const n = Object.values(edState.cuts).filter(Boolean).length;
+  const kept = 3 - n;
+  $('#ed-cutcount').textContent = kept ? `${n} cuts applied · ${kept} kept` : '3 cuts applied';
+}
+
+/* ═══════════ episode detail ═══════════ */
+let epPlayer = null;
+function initEpisode() {
+  $('#ep-play').addEventListener('click', () => {
+    if (!epPlayer) return;
+    epPlayer.toggle();
+    $('#ep-play').innerHTML = svgIcon(epPlayer.playing ? 'i-pause' : 'i-play');
+  });
+  $('#ep-back15').addEventListener('click', () => epPlayer && epPlayer.seek(epPlayer.t - 15));
+  $('#ep-publish').addEventListener('click', () => {
+    const n = state.currentEpisode;
+    dialog({
+      eyebrow: 'PUBLISHING IS DELIBERATE',
+      title: 'Make this episode public?',
+      body: 'Anyone with the link hears the <strong>finished render</strong> and sees the cover. The transcript, the stems and the threads stay private — permanently. You can revoke this at any time.',
+      confirm: 'Publish episode',
+      onConfirm: () => {
+        if (n === 4) state.ep4Published = true; else state.ep5Published = true;
+        toast('Published. The link is live.');
+        populateEpisode(n);
+      },
+    });
+  });
+  $('#ep-unpublish').addEventListener('click', () => {
+    const n = state.currentEpisode;
+    dialog({
+      eyebrow: 'REVOKE',
+      title: 'Make this private again?',
+      body: 'The link stops working immediately. Anyone who already downloaded the audio keeps their copy — the internet is the internet.',
+      confirm: 'Revoke link',
+      onConfirm: () => {
+        if (n === 4) state.ep4Published = false; else state.ep5Published = false;
+        toast('Private again. The link is dead.');
+        populateEpisode(n);
+      },
+    });
+  });
+  $('#ep-copy').addEventListener('click', () => {
+    const inp = $('#ep-share-url');
+    inp.select();
+    try { navigator.clipboard.writeText(inp.value); } catch (e) {}
+    toast('Link copied');
+  });
+  $('#ep-open').addEventListener('click', () => goto('share'));
+  $('#ep-export').addEventListener('click', () => {
+    $('#drawer-backdrop').classList.add('open');
+    $('#drawer-close').focus();
+  });
+  $('#drawer-close').addEventListener('click', () => $('#drawer-backdrop').classList.remove('open'));
+  $('#drawer-backdrop').addEventListener('click', e => { if (e.target === $('#drawer-backdrop')) $('#drawer-backdrop').classList.remove('open'); });
+  $('#drawer-download').addEventListener('click', () => {
+    $('#drawer-backdrop').classList.remove('open');
+    toast('Package ready — five files, one download');
+  });
+  $('#ep-erase').addEventListener('click', () => {
+    const n = state.currentEpisode;
+    const seeded = n <= 4;
+    dialog({
+      eyebrow: 'ERASE',
+      danger: true,
+      title: 'Erase this episode?',
+      body: `Every row, both stems, the render, the cover — plus the provider’s copy of the session and its transcripts.${seeded ? ' This is a seeded episode; re-importing the season restores it.' : ' <strong>This cannot be undone.</strong>'}`,
+      confirm: 'Erase everything',
+      onConfirm: () => {
+        if (n === 5) { state.ep5 = 'none'; goto('gallery'); }
+        else { delete EPS[n]; goto('gallery'); }
+        toast('Erased. Nothing recoverable.');
+      },
+    });
+  });
+}
+
+function populateEpisode(n) {
+  const ep = EPS[n];
+  if (!ep) { goto('gallery'); return; }
+  state.currentEpisode = n;
+  const pub = n === 4 ? state.ep4Published : n === 5 ? state.ep5Published : false;
+  $('#ep-epnum').textContent = `EP.${String(n).padStart(2, '0')} · READY`;
+  $('#ep-title').textContent = ep.title;
+  $('#ep-meta').textContent = `${ep.date} · ${fmt(ep.dur)} · Chapters and show notes from the analysis pass`;
+  const chip = $('#ep-state');
+  if (pub) { chip.className = 'chip chip-amber'; chip.innerHTML = '<span class="dot"></span>PUBLIC'; }
+  else { chip.className = 'chip chip-ok'; chip.innerHTML = '<span class="dot"></span>PRIVATE'; }
+  $('#ep-cover').innerHTML = coverHTML(n);
+  $('#ep-cover').setAttribute('aria-label', `Cover of episode ${n}`);
+
+  $('#ep-publish').style.display = pub ? 'none' : '';
+  $('#ep-share-box').style.display = pub ? 'block' : 'none';
+  if (pub) $('#ep-share-url').value = `https://reprise.nryn.dev/e/${n === 4 ? 'x7f2-9kdm' : 'q3j8-2mza'}`;
+
+  $('#ep-notes').textContent = ep.notes;
+  const ch = $('#ep-chapters');
+  ch.innerHTML = '';
+  ep.chapters.forEach(([t, name], i) => {
+    const b = document.createElement('button');
+    b.className = 'chap-row';
+    b.innerHTML = `<span class="t">${fmt(t)}</span><span class="n">${name}</span>`;
+    b.onclick = () => { epPlayer && epPlayer.seek(t); epPlayer && epPlayer.play(); $('#ep-play').innerHTML = svgIcon('i-pause'); };
+    ch.appendChild(b);
+  });
+
+  const turns = EP_TURNS[n] || EP4_TURNS;
+  const tbox = $('#ep-turns');
+  tbox.innerHTML = '';
+  turns.forEach(turn => {
+    const d = document.createElement('div');
+    d.className = 'turn ' + turn.role;
+    d.innerHTML = `<span class="r">${turn.role === 'host' ? 'HOST' : 'YOU'}</span><p>${turn.text}</p>`;
+    tbox.appendChild(d);
+  });
+
+  epPlayer && epPlayer.destroy();
+  const wave = $('#ep-wave');
+  wave._wopts = { seed: n };
+  epPlayer = makePlayer({ wave, timeEl: $('#ep-time'), dur: ep.dur, speed: 24, onTick: t => {
+    const rows = $$('#ep-chapters .chap-row');
+    let cur = 0;
+    ep.chapters.forEach(([ct], i) => { if (t >= ct) cur = i; });
+    rows.forEach((r, i) => r.classList.toggle('now', i === cur));
+  }, onEnd: () => { $('#ep-play').innerHTML = svgIcon('i-play'); } });
+  $('#ep-play').innerHTML = svgIcon('i-play');
+}
+
+/* ═══════════ gallery ═══════════ */
+function renderGallery() {
+  const grid = $('#gallery-grid');
+  grid.innerHTML = '';
+  const eps = Object.values(EPS).filter(e => e.n < 5);
+  const count = eps.length + (state.ep5 !== 'none' ? 1 : 0);
+  $('.view[aria-label="Gallery"] .mlabel').textContent = `SEASON ONE · ${count === 4 ? 'FOUR' : 'FIVE'} EPISODES`;
+  const all = [...eps];
+  if (state.ep5 !== 'none') all.push(EPS[5]);
+  all.reverse().forEach(ep => {
+    const n = ep.n;
+    const is5 = n === 5;
+    const pub = is5 ? state.ep5Published : state.ep4Published && n === 4;
+    const card = document.createElement('button');
+    card.className = 'card ep-card';
+    let stateChip, progressHTML = '', jobline = '';
+    if (is5 && state.ep5 === 'draft') {
+      stateChip = '<span class="chip"><span class="dot"></span>DRAFT</span>';
+      jobline = 'In the editor · proposals waiting';
+    } else if (is5 && state.ep5 === 'rendering') {
+      stateChip = '<span class="chip chip-amber"><span class="dot"></span>RENDERING</span>';
+      progressHTML = '<div class="progress"><i id="gal-job"></i></div>';
+      jobline = 'Rendering · 64%';
+    } else if (pub) {
+      stateChip = '<span class="chip chip-amber"><span class="dot"></span>PUBLIC</span>';
+    } else {
+      stateChip = '<span class="chip chip-ok"><span class="dot"></span>PRIVATE</span>';
+    }
+    card.innerHTML = `
+      <div class="cover" role="img" aria-label="Cover of episode ${n}">${coverHTML(n)}</div>
+      <div class="meta-row"><span class="chip">${is5 ? 'YOURS' : 'SEEDED'}</span>${stateChip}</div>
+      <h3>${ep.title}</h3>
+      <span class="dur">${ep.date} · ${fmt(ep.dur)}</span>
+      ${progressHTML}<div class="job-line">${jobline}</div>`;
+    card.onclick = () => {
+      if (is5 && state.ep5 === 'draft') { goto('editor'); return; }
+      if (is5 && state.ep5 === 'rendering') { toast('Still rendering — this bar never moves backwards'); return; }
+      state.currentEpisode = n;
+      goto('episode');
+    };
+    grid.appendChild(card);
+  });
+  const btn = $('.view[aria-label="Gallery"] .view-head .btn-primary');
+  if (btn) btn.innerHTML = svgIcon('i-mic') + ` Record episode ${state.ep5 === 'none' ? 'five' : 'six'}`;
+  const welcomeBtn = $('#view-welcome .welcome-cta .btn-primary');
+  if (welcomeBtn) welcomeBtn.innerHTML = svgIcon('i-mic') + ` Record episode ${state.ep5 === 'none' ? 'five' : 'six'}`;
+  if (state.ep5 === 'rendering') {
+    if (galJobIv) clearInterval(galJobIv);
+    let p = 0;
+    galJobIv = setInterval(() => {
+      const bar = $('#gal-job');
+      if (!bar || state.ep5 !== 'rendering') { clearInterval(galJobIv); galJobIv = null; return; }
+      p += 3 + Math.random() * 5;
+      if (p >= 100) {
+        clearInterval(galJobIv); galJobIv = null;
+        state.ep5 = 'ready';
+        renderGallery();
+        toast('Episode five is ready');
+      } else {
+        bar.style.setProperty('--p', p + '%');
+        const card = bar.closest('.ep-card');
+        const jl = card && card.querySelector('.job-line');
+        if (jl) jl.textContent = `Rendering · ${Math.round(p)}% · progress survives a reload`;
+      }
+    }, 260);
+  }
+}
+let galJobIv = null;
+
+/* ═══════════ threads ═══════════ */
+function renderThreads() {
+  const ep5 = state.ep5 === 'ready';
+  const data = JSON.parse(JSON.stringify(THREADS_BASE));
+  if (ep5) {
+    data.people[0].count = '10 mentions · 5 episodes';
+    data.people[0].quotes.push({ ep: 5, t: 16, text: 'She asked if I’d come down for the harvest.' });
+    data.commitments.unshift({
+      name: 'Go down for the harvest', who: 'a promise, fresh', status: 'open', opened: 'EP.05', count: 'made today · first weekend of October',
+      quotes: [{ ep: 5, t: 49, text: 'Then it becomes something we share again.' }],
+    });
+    data.topics[0].count = '5 mentions · 4 episodes · a date now exists';
+  }
+
+  const mk = (container, items, isCommit) => {
+    const box = $(container);
+    box.innerHTML = '';
+    items.forEach(it => {
+      const card = document.createElement('div');
+      card.className = 'card thread-card';
+      const status = isCommit ? `<span class="commit-status ${it.status}">${it.status === 'open' ? '● OPEN' : '✓ RESOLVED'}</span>` : '';
+      card.innerHTML = `
+        <div class="head"><h3>${it.name}</h3>${status}</div>
+        ${it.who ? `<div class="who">${it.who}</div>` : ''}
+        <div class="facts">${it.count}${it.opened ? ' · since ' + it.opened : ''}</div>
+        <div>${it.quotes.map((q, i) => `
+          <button class="quote-chip" data-ep="${q.ep}" data-t="${q.t}">
+            <span class="t">EP.${String(q.ep).padStart(2, '0')} · ${fmt(q.t)}</span>
+            <p>“${q.text}”</p>
+          </button>`).join('')}
+        </div>`;
+      box.appendChild(card);
+    });
+  };
+  mk('#th-commitments', data.commitments, true);
+  mk('#th-people', data.people, false);
+  mk('#th-topics', data.topics, false);
+
+  $$('.quote-chip').forEach(b => {
+    b.addEventListener('click', () => {
+      const ep = parseInt(b.dataset.ep, 10);
+      const t = parseFloat(b.dataset.t);
+      if (!EPS[ep]) { toast('That episode has been erased'); return; }
+      state.currentEpisode = ep;
+      goto('episode');
+      setTimeout(() => {
+        epPlayer && epPlayer.seek(t);
+        epPlayer && epPlayer.play();
+        $('#ep-play').innerHTML = svgIcon('i-pause');
+        toast(`Playing from ${fmt(t)}`);
+      }, 120);
+    });
+  });
+}
+
+/* ═══════════ admin ═══════════ */
+function initAdmin() {
+  const sw = (id, key, onChange) => {
+    const el = $('#' + id);
+    el.addEventListener('click', () => {
+      state[key] = !state[key];
+      el.setAttribute('aria-checked', String(state[key]));
+      onChange && onChange(state[key]);
+    });
+  };
+  sw('sw-kill', 'minting', v => toast(v ? 'Token minting resumed' : 'Kill switch on — no new sessions'));
+  sw('sw-guests', 'guests', v => toast(v ? 'Guest recordings accepted' : 'Guest recordings paused'));
+}
+
+/* ═══════════ share ═══════════ */
+let shPlayer = null;
+function initShare() {
+  const btn = $('#sh-play');
+  const toggle = () => {
+    if (!shPlayer) return;
+    shPlayer.toggle();
+    btn.innerHTML = svgIcon(shPlayer.playing ? 'i-pause' : 'i-play');
+  };
+  btn.addEventListener('click', toggle);
+  btn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  populateShare();
+}
+
+function populateShare() {
+  const n = state.ep5Published ? 5 : 4;
+  const ep = EPS[n];
+  if (!ep) return;
+  $('#sh-cover').innerHTML = coverHTML(n);
+  $('#sh-cover').setAttribute('aria-label', `Cover of episode ${n}`);
+  $('#sh-title').textContent = ep.title;
+  $('#sh-sub').textContent = `EP.${String(n).padStart(2, '0')} · ${fmt(ep.dur)}`;
+  shPlayer && shPlayer.destroy();
+  const wave = $('#sh-wave');
+  wave._wopts = { seed: n };
+  shPlayer = makePlayer({ wave, timeEl: $('#sh-time'), dur: ep.dur, speed: 24, onEnd: () => { $('#sh-play').innerHTML = svgIcon('i-play'); } });
+  $('#sh-play').innerHTML = svgIcon('i-play');
+}
+
+/* ═══════════ dialog ═══════════ */
+function dialog({ eyebrow, title, body, confirm = 'Confirm', cancel = 'Cancel', danger = false, onConfirm }) {
+  const bd = $('#dlg-backdrop');
+  $('#dlg-eyebrow').textContent = eyebrow || '';
+  $('#dlg-title').textContent = title;
+  $('#dlg-body').innerHTML = body;
+  const c = $('#dlg-confirm');
+  c.textContent = confirm;
+  c.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
+  bd.classList.add('open');
+  const close = () => { bd.classList.remove('open'); };
+  $('#dlg-cancel').onclick = close;
+  c.onclick = () => { close(); onConfirm && onConfirm(); };
+  bd.onclick = e => { if (e.target === bd) close(); };
+  c.focus();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    $('#dlg-backdrop').classList.remove('open');
+    $('#drawer-backdrop').classList.remove('open');
+    $('#lab-panel').style.display = 'none';
+    $('#lab-toggle').setAttribute('aria-expanded', 'false');
+  }
+});
+
+/* ═══════════ state lab ═══════════ */
+const LAB = {
+  welcome: [['Reset the prototype', () => location.reload()]],
+  preflight: [
+    ['Show “recording paused” refusal', () => showRefusal('paused')],
+    ['Show “guest limit reached” refusal', () => showRefusal('limit')],
+  ],
+  processing: [
+    ['Replay with transcription failure', () => runProcessing('draft', 'transcript')],
+  ],
+  editor: [
+    ['Revert every cut', () => { ED_CUTS.forEach(c => edState.cuts[c.id] = false); renderEditorTranscript(); renderCutList(); updateCutCount(); refreshEditorWave(); toast('Everything kept — the zero-edit episode'); }],
+    ['Re-apply every cut', () => { ED_CUTS.forEach(c => edState.cuts[c.id] = true); renderEditorTranscript(); renderCutList(); updateCutCount(); refreshEditorWave(); toast('Back to the model’s proposal'); }],
+  ],
+  gallery: [
+    ['Show EP.05 rendering with live job', () => { state.ep5 = 'rendering'; renderGallery(); }],
+    ['Show EP.05 as ready', () => { state.ep5 = 'ready'; renderGallery(); }],
+    ['Show EP.05 as draft', () => { state.ep5 = 'draft'; renderGallery(); }],
+    ['Back to four episodes', () => { state.ep5 = 'none'; renderGallery(); }],
+  ],
+  threads: [
+    ['After episode five is done', () => { state.ep5 = 'ready'; renderThreads(); toast('Threads updated — June: 10 mentions'); }],
+    ['Back to four episodes', () => { state.ep5 = 'none'; renderThreads(); }],
+  ],
+  episode: [
+    ['View as published', () => { if (state.currentEpisode === 4) state.ep4Published = true; else state.ep5Published = true; populateEpisode(state.currentEpisode); }],
+  ],
+  share: [],
+};
+
+function renderLab() {
+  const panel = $('#lab-panel');
+  const actions = LAB[currentView] || [];
+  const box = $('#lab-actions');
+  box.innerHTML = '';
+  if (!actions.length) {
+    box.innerHTML = '<div style="font-size:12px;color:var(--faint);padding:4px 0">No extra states for this view.</div>';
+  }
+  actions.forEach(([label, fn]) => {
+    const b = document.createElement('button');
+    b.className = 'lab-btn';
+    b.textContent = label;
+    b.onclick = () => { fn(); };
+    box.appendChild(b);
+  });
+}
+
+$('#lab-toggle').addEventListener('click', () => {
+  const p = $('#lab-panel');
+  const open = p.style.display === 'none';
+  p.style.display = open ? 'block' : 'none';
+  $('#lab-toggle').setAttribute('aria-expanded', String(open));
+});
+
+/* ═══════════ boot ═══════════ */
+showView(viewFromHash() || 'welcome');
+})();
+</script>
+</body>
+</html>

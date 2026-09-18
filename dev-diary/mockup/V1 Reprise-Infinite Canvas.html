@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reprise — Design Canvas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #14100C;
+    --bg-subtle: #1A1611;
+    --surface: #1F1A14;
+    --surface-raised: #262019;
+    --border: rgba(242,234,217,0.07);
+    --border-hover: rgba(242,234,217,0.15);
+    --accent: #E8A33D;
+    --accent-dim: rgba(232,163,61,0.14);
+    --text: #F2EAD9;
+    --text-secondary: rgba(242,234,217,0.62);
+    --text-tertiary: rgba(242,234,217,0.34);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.35), 0 2px 6px rgba(0,0,0,0.25);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,0.45), 0 4px 12px rgba(0,0,0,0.3);
+    --shadow-drag: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1.5px var(--accent);
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 20px;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-serif: "Instrument Serif", Georgia, serif;
+    --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+    --note-bg: #241D15;
+    --note-border: rgba(232,163,61,0.2);
+    --transition-fast: 120ms cubic-bezier(0.25, 0.1, 0.25, 1);
+    --transition-normal: 200ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: var(--font-sans);
+    color: var(--text);
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 512px 512px;
+    mix-blend-mode: overlay;
+  }
+
+  .canvas-viewport { position: fixed; inset: 0; overflow: hidden; cursor: grab; --grid-color: rgba(242,234,217,0.045); }
+  .canvas-viewport.panning { cursor: grabbing; }
+  .canvas-world { position: absolute; left: 0; top: 0; width: 20000px; height: 20000px; transform-origin: 0 0; will-change: transform; }
+
+  .canvas-el { position: absolute; cursor: grab; transition: box-shadow var(--transition-normal), transform var(--transition-fast); }
+  .canvas-el:hover { z-index: 10; }
+  .canvas-el.dragging { cursor: grabbing; z-index: 999; box-shadow: var(--shadow-drag) !important; transform: scale(1.01); transition: none; }
+
+  .section-header { position: absolute; pointer-events: none; display: flex; align-items: center; gap: 16px; white-space: nowrap; }
+  .section-header .section-num { font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: var(--accent); opacity: 0.8; }
+  .section-header .section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-tertiary); }
+  .section-header .section-line { flex: none; width: 48px; height: 1px; background: linear-gradient(90deg, var(--accent) 0%, transparent 100%); opacity: 0.3; }
+
+  .canvas-title { position: absolute; pointer-events: none; font-weight: 700; line-height: 1.1; letter-spacing: -0.025em; color: var(--text); }
+  .canvas-text { position: absolute; line-height: 1.7; letter-spacing: 0.005em; color: var(--text-secondary); min-width: 200px; max-width: 560px; white-space: pre-wrap; word-break: break-word; }
+
+  .canvas-tag { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 100px; font-size: 12px; font-weight: 500; letter-spacing: 0.02em; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border); white-space: nowrap; transition: border-color var(--transition-fast), background var(--transition-fast); }
+  .canvas-tag:hover { border-color: var(--border-hover); background: var(--surface-raised); }
+  .canvas-tag .tag-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+  .context-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; min-width: 220px; transition: border-color var(--transition-normal), box-shadow var(--transition-normal); }
+  .context-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow-md); }
+  .context-card .card-head { padding: 16px 20px 12px; display: flex; align-items: center; gap: 10px; }
+  .context-card .card-head .head-indicator { width: 3px; height: 16px; border-radius: 2px; background: var(--accent); flex-shrink: 0; }
+  .context-card .card-head h3 { font-size: 13px; font-weight: 600; letter-spacing: 0.01em; color: var(--text); }
+  .context-card .card-content { padding: 0 20px 20px; font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
+  .context-card .card-content ul { list-style: none; padding: 0; }
+  .context-card .card-content li { padding: 4px 0; padding-left: 12px; position: relative; }
+  .context-card .card-content li::before { content: ''; position: absolute; left: 0; top: 11px; width: 4px; height: 4px; border-radius: 50%; background: var(--text-tertiary); }
+
+  .ds-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; transition: border-color var(--transition-normal), box-shadow var(--transition-normal); }
+  .ds-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow-md); }
+  .ds-card .ds-head { padding: 16px 20px 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-tertiary); }
+  .ds-card .ds-body { padding: 0 20px 20px; }
+
+  .color-swatch-group { display: flex; flex-direction: row; flex-wrap: wrap; gap: 18px; }
+  .swatch-item { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .swatch-circle { width: 52px; height: 52px; border-radius: 50%; box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.06); transition: transform var(--transition-fast), box-shadow var(--transition-fast); }
+  .swatch-circle:hover { transform: scale(1.1); box-shadow: var(--shadow-md); }
+  .swatch-name { font-size: 10px; font-weight: 500; color: var(--text-secondary); text-align: center; }
+  .swatch-hex { font-family: var(--font-mono); font-size: 9px; color: var(--text-tertiary); text-align: center; }
+
+  .type-sample-group { display: flex; flex-direction: column; gap: 18px; min-width: 380px; }
+  .type-sample-row { display: flex; align-items: baseline; gap: 18px; }
+  .type-sample-meta { font-family: var(--font-mono); font-size: 9px; color: var(--text-tertiary); min-width: 52px; flex-shrink: 0; letter-spacing: 0.04em; }
+  .type-sample-text { color: var(--text); line-height: 1.25; }
+
+  .canvas-note { background: var(--note-bg); border: 1px solid var(--note-border); border-radius: var(--radius-md); padding: 16px 18px; min-width: 200px; max-width: 300px; box-shadow: var(--shadow-sm); transition: box-shadow var(--transition-normal), transform var(--transition-fast); }
+  .canvas-note:hover { box-shadow: var(--shadow-md); }
+  .canvas-note .note-tag { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); opacity: 0.75; margin-bottom: 8px; }
+  .canvas-note .note-body { font-size: 13px; line-height: 1.65; color: var(--text-secondary); }
+
+  .design-page { background: #fff; border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-lg); transition: box-shadow var(--transition-normal); }
+  .design-page:hover { box-shadow: 0 16px 56px rgba(0,0,0,0.5), 0 6px 16px rgba(0,0,0,0.35); }
+  .design-page .page-content { width: 100%; height: 100%; overflow: hidden; }
+  .page-label { position: absolute; bottom: -32px; left: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.02em; color: var(--text-tertiary); white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+  .page-label .label-num { font-family: var(--font-mono); font-size: 10px; color: var(--accent); opacity: 0.6; }
+
+  .canvas-diagram { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
+  .canvas-diagram .diagram-content { width: 100%; height: 100%; padding: 20px; }
+
+  .group-label { position: absolute; pointer-events: none; font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); opacity: 0.75; white-space: nowrap; }
+  .flow-arrow { position: absolute; pointer-events: none; display: flex; align-items: center; gap: 6px; }
+  .flow-arrow::before { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(232,163,61,0.12), rgba(232,163,61,0.5)); }
+  .flow-arrow::after { content: ''; width: 0; height: 0; border-left: 6px solid rgba(232,163,61,0.6); border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+
+  .zoom-controls { position: fixed; bottom: 24px; right: 24px; display: flex; align-items: center; gap: 1px; z-index: 100; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-md); }
+  .zoom-btn { width: 36px; height: 36px; background: transparent; border: none; color: var(--text-secondary); font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background var(--transition-fast), color var(--transition-fast); }
+  .zoom-btn:hover { background: rgba(242,234,217,0.06); color: var(--text); }
+  .zoom-label { min-width: 50px; height: 36px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+  .coord-indicator { position: fixed; bottom: 28px; left: 24px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--text-tertiary); z-index: 100; padding: 4px 10px; background: rgba(20,16,12,0.85); border: 1px solid var(--border); border-radius: var(--radius-sm); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  .kbd-hint { position: fixed; top: 20px; right: 24px; z-index: 100; font-size: 10px; color: var(--text-tertiary); display: flex; gap: 12px; opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
+  .canvas-viewport:hover ~ .kbd-hint { opacity: 1; }
+  .kbd-hint kbd { font-family: var(--font-mono); padding: 2px 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; font-size: 10px; }
+
+  /* ═══ product page styles (Row 3) ═══ */
+  .pg { width: 100%; height: 100%; background: #17130F; color: #F2EAD9; font-family: var(--font-sans); font-size: 12.5px; line-height: 1.5; display: flex; flex-direction: column; overflow: hidden; }
+  .pg-mono { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #8C8375; }
+  .pg-serif { font-family: var(--font-serif); font-weight: 400; }
+  .pg-dim { color: #A89C89; }
+  .pg-faint { color: #7A7264; }
+  .pg-card { background: #201A13; border: 1px solid rgba(242,234,217,0.09); border-radius: 12px; padding: 12px 14px; }
+  .pg-card-2 { background: #2A221A; border: 1px solid rgba(242,234,217,0.12); border-radius: 12px; padding: 12px 14px; }
+  .pg-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 8px 18px; border-radius: 10px; font-size: 12.5px; font-weight: 600; }
+  .pg-btn-amber { background: #E8A33D; color: #1A140D; }
+  .pg-btn-line { border: 1px solid rgba(242,234,217,0.18); color: #F2EAD9; }
+  .pg-btn-quiet { color: #A89C89; }
+  .pg-chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase; border: 1px solid rgba(242,234,217,0.12); border-radius: 100px; padding: 3px 9px; color: #A89C89; }
+  .pg-chip i { width: 5px; height: 5px; border-radius: 50%; background: #7A7264; }
+  .pg-chip.live { color: #E88A78; border-color: rgba(217,84,63,0.4); }
+  .pg-chip.live i { background: #D9543F; }
+  .pg-chip.ok { color: #A9C294; border-color: rgba(143,168,116,0.35); }
+  .pg-chip.ok i { background: #8FA874; }
+  .pg-chip.amber { color: #E8A33D; border-color: rgba(232,163,61,0.4); }
+  .pg-chip.amber i { background: #E8A33D; }
+  .pg-wave { display: flex; align-items: flex-end; gap: 2px; height: 30px; }
+  .pg-wave i { flex: 1; border-radius: 1px; background: rgba(242,234,217,0.16); height: calc(14% + var(--h) * 86%); }
+  .pg-wave i.on { background: rgba(232,163,61,0.75); }
+  .pg-vu { display: flex; align-items: flex-end; gap: 3px; height: 34px; }
+  .pg-vu i { width: 4px; border-radius: 2px; background: #E8A33D; opacity: .85; height: calc(14% + var(--h) * 86%); }
+  .pg-vu.host i { background: #A5714B; opacity: .7; }
+  .pg-topbar { display: flex; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid rgba(242,234,217,0.07); }
+  .pg-brand { font-family: var(--font-serif); font-size: 18px; }
+  .pg-nav { display: flex; gap: 10px; margin-left: 6px; }
+  .pg-nav span { font-size: 11px; color: #A89C89; }
+  .pg-nav span.cur { color: #F2EAD9; }
+  .pg-cover { width: 100%; aspect-ratio: 1; border-radius: 10px; background: #241C13; border: 1px solid rgba(242,234,217,0.1); display: flex; flex-direction: column; justify-content: space-between; padding: 10%; }
+  .pg-cover .n { font-family: var(--font-serif); font-size: 30px; line-height: .95; }
+  .pg-cover .mw { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
+  .pg-cover .mw i { flex: 1; border-radius: 1px; background: rgba(242,234,217,0.35); height: calc(20% + var(--h) * 80%); }
+  .pg-turn { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid rgba(242,234,217,0.06); }
+  .pg-turn .r { font-family: var(--font-mono); font-size: 8px; letter-spacing: .12em; color: #7A7264; width: 30px; flex: none; padding-top: 3px; }
+  .pg-turn.host .r { color: #E8A33D; }
+  .pg-turn p { margin: 0; color: #A89C89; font-size: 12px; line-height: 1.65; }
+  .pg-turn.host p { color: #F2EAD9; }
+  .pg-cut { text-decoration: line-through; text-decoration-color: rgba(198,91,78,.7); background: rgba(198,91,78,.14); border-radius: 3px; padding: 0 2px; }
+  .pg-prog { height: 4px; border-radius: 100px; background: rgba(242,234,217,0.1); overflow: hidden; }
+  .pg-prog i { display: block; height: 100%; background: #E8A33D; border-radius: 100px; }
+  .pg-step { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(242,234,217,0.06); align-items: flex-start; }
+  .pg-step .dot { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid rgba(242,234,217,0.18); flex: none; margin-top: 1px; }
+  .pg-step.done .dot { border-color: rgba(143,168,116,.5); background: rgba(143,168,116,.14); }
+  .pg-step.run .dot { border-color: rgba(232,163,61,.5); background: rgba(232,163,61,.14); }
+  .pg-step h4 { margin: 0; font-size: 12px; font-weight: 600; }
+  .pg-step p { margin: 2px 0 0; font-size: 10.5px; color: #7A7264; }
+  .pg-mic { width: 96px; height: 96px; border-radius: 50%; background: #2A221A; border: 1px solid rgba(242,234,217,0.14); display: grid; place-items: center; color: #E8A33D; margin: 0 auto; }
+  .pg-mic.big { width: 130px; height: 130px; }
+  .pg-mic svg { width: 34px; height: 34px; stroke: currentColor; stroke-width: 1.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .pg-grid { display: grid; gap: 12px; }
+  .pg-kv { display: flex; align-items: center; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid rgba(242,234,217,0.06); }
+  .pg-kv:last-child { border-bottom: none; }
+  .pg-switch { width: 40px; height: 23px; border-radius: 100px; background: #D9543F; position: relative; flex: none; }
+  .pg-switch::after { content: ''; position: absolute; top: 2.5px; right: 2.5px; width: 18px; height: 18px; border-radius: 50%; background: #F2EAD9; }
+  .pg-switch.off { background: rgba(242,234,217,0.14); }
+  .pg-switch.off::after { right: auto; left: 2.5px; }
+  .pg-quote { border-left: 2px solid rgba(232,163,61,0.4); background: rgba(232,163,61,0.06); border-radius: 0 10px 10px 0; padding: 10px 12px; }
+  .pg-quote p { margin: 0; color: #F2EAD9; font-family: var(--font-serif); font-size: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div class="canvas-viewport" id="viewport">
+  <div class="canvas-world" id="world"></div>
+</div>
+
+<div class="zoom-controls">
+  <button class="zoom-btn" id="zoomOut" aria-label="Zoom out">&#8722;</button>
+  <div class="zoom-label" id="zoomLabel">100%</div>
+  <button class="zoom-btn" id="zoomIn" aria-label="Zoom in">+</button>
+  <button class="zoom-btn" id="zoomReset" title="Reset view" aria-label="Reset view">&#8962;</button>
+</div>
+
+<div class="coord-indicator" id="coordIndicator">0, 0</div>
+
+<div class="kbd-hint" id="kbdHint"></div>
+
+<script>
+(() => {
+'use strict';
+
+const UI_STRINGS = {
+  docTitle: 'Reprise — Design Canvas',
+  zoom: { zoomIn: 'Zoom in', zoomOut: 'Zoom out', reset: 'Reset view' },
+  kbdHints: [['Scroll', 'pan'], ['⌘Scroll', 'zoom'], ['⌘Z', 'undo']],
+  sections: { context: '01 PROJECT CONTEXT', designSystem: '02 DESIGN SYSTEM', deliverables: '03 DESIGN DELIVERABLES' },
+};
+
+document.title = UI_STRINGS.docTitle;
+document.getElementById('zoomIn').setAttribute('aria-label', UI_STRINGS.zoom.zoomIn);
+document.getElementById('zoomOut').setAttribute('aria-label', UI_STRINGS.zoom.zoomOut);
+document.getElementById('zoomReset').setAttribute('aria-label', UI_STRINGS.zoom.reset);
+document.getElementById('zoomReset').title = UI_STRINGS.zoom.reset;
+document.getElementById('kbdHint').innerHTML = UI_STRINGS.kbdHints.map(([k, a]) => `<span><kbd>${k}</kbd> ${a}</span>`).join('');
+
+const viewport = document.getElementById('viewport');
+const world = document.getElementById('world');
+const zoomLabel = document.getElementById('zoomLabel');
+const coordIndicator = document.getElementById('coordIndicator');
+
+let panX = 0, panY = 0, zoom = 1;
+const MIN_ZOOM = 0.05, MAX_ZOOM = 8;
+
+function updateTransform() {
+  world.style.transform = `translate(${panX}px,${panY}px) scale(${zoom})`;
+  zoomLabel.textContent = Math.round(zoom * 100) + '%';
+  updateGrid();
+}
+function updateGrid() {
+  const g = 40 * zoom;
+  viewport.style.backgroundImage = `radial-gradient(circle, var(--grid-color) 0.8px, transparent 0.8px)`;
+  viewport.style.backgroundSize = `${g}px ${g}px`;
+  viewport.style.backgroundPosition = `${panX % g}px ${panY % g}px`;
+}
+
+let isPanning = false, panSX, panSY;
+viewport.addEventListener('pointerdown', e => {
+  if (e.target === viewport || e.target === world) {
+    isPanning = true;
+    panSX = e.clientX - panX; panSY = e.clientY - panY;
+    viewport.classList.add('panning');
+    viewport.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+});
+viewport.addEventListener('pointermove', e => {
+  if (!isPanning) return;
+  panX = e.clientX - panSX; panY = e.clientY - panSY;
+  updateTransform();
+});
+viewport.addEventListener('pointerup', () => { isPanning = false; viewport.classList.remove('panning'); });
+
+viewport.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = viewport.getBoundingClientRect();
+  if (e.ctrlKey || e.metaKey) {
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const wx = (mx - panX) / zoom, wy = (my - panY) / zoom;
+    const factor = e.deltaY > 0 ? 0.95 : 1.05;
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+    panX = mx - wx * zoom; panY = my - wy * zoom;
+  } else {
+    const hasX = Math.abs(e.deltaX) > 0.5;
+    if (hasX || Math.abs(e.deltaX) > Math.abs(e.deltaY) * 0.3) {
+      panX -= e.deltaX; panY -= e.deltaY;
+    } else {
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const wx = (mx - panX) / zoom, wy = (my - panY) / zoom;
+      const factor = e.deltaY > 0 ? 0.95 : 1.05;
+      zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+      panX = mx - wx * zoom; panY = my - wy * zoom;
+    }
+  }
+  updateTransform();
+}, { passive: false });
+
+function zoomAt(factor) {
+  const r = viewport.getBoundingClientRect();
+  const cx = r.width / 2, cy = r.height / 2;
+  const wx = (cx - panX) / zoom, wy = (cy - panY) / zoom;
+  zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+  panX = cx - wx * zoom; panY = cy - wy * zoom;
+  updateTransform();
+}
+document.getElementById('zoomIn').onclick = () => zoomAt(1.25);
+document.getElementById('zoomOut').onclick = () => zoomAt(0.8);
+document.getElementById('zoomReset').onclick = () => { zoom = 1; panX = 60; panY = 40; updateTransform(); };
+
+viewport.addEventListener('pointermove', e => {
+  if (isPanning) return;
+  const r = viewport.getBoundingClientRect();
+  coordIndicator.textContent = `${Math.round((e.clientX - r.left - panX) / zoom)}, ${Math.round((e.clientY - r.top - panY) / zoom)}`;
+});
+
+let lastPinchDist = null, lastPinchCenter = null;
+viewport.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    const t0 = e.touches[0], t1 = e.touches[1];
+    lastPinchDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    lastPinchCenter = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
+    e.preventDefault();
+  }
+}, { passive: false });
+viewport.addEventListener('touchmove', e => {
+  if (e.touches.length !== 2) return;
+  e.preventDefault();
+  const t0 = e.touches[0], t1 = e.touches[1];
+  const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+  const center = { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 };
+  if (lastPinchDist > 0) {
+    const r = viewport.getBoundingClientRect();
+    const mx = center.x - r.left, my = center.y - r.top;
+    const wx = (mx - panX) / zoom, wy = (my - panY) / zoom;
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * Math.pow(dist / lastPinchDist, 0.6)));
+    panX = mx - wx * zoom; panY = my - wy * zoom;
+  }
+  if (lastPinchCenter) { panX += center.x - lastPinchCenter.x; panY += center.y - lastPinchCenter.y; }
+  lastPinchDist = dist; lastPinchCenter = center;
+  updateTransform();
+}, { passive: false });
+viewport.addEventListener('touchend', e => { if (e.touches.length < 2) { lastPinchDist = null; lastPinchCenter = null; } });
+
+const undoStack = [];
+function saveUndo() {
+  const s = [];
+  world.querySelectorAll('.canvas-el').forEach(el => s.push({ id: el.id, left: el.style.left, top: el.style.top }));
+  undoStack.push({ panX, panY, zoom, assets: s });
+  if (undoStack.length > 60) undoStack.shift();
+}
+function undo() {
+  if (!undoStack.length) return;
+  const st = undoStack.pop();
+  panX = st.panX; panY = st.panY; zoom = st.zoom;
+  st.assets.forEach(a => { const el = document.getElementById(a.id); if (el) { el.style.left = a.left; el.style.top = a.top; } });
+  updateTransform();
+}
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
+});
+
+function makeDraggable(el) {
+  let dragging = false, sx, sy, ox, oy;
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    dragging = true;
+    el.classList.add('dragging');
+    saveUndo();
+    sx = e.clientX; sy = e.clientY;
+    ox = parseFloat(el.style.left); oy = parseFloat(el.style.top);
+    el.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+  });
+  el.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    el.style.left = (ox + (e.clientX - sx) / zoom) + 'px';
+    el.style.top = (oy + (e.clientY - sy) / zoom) + 'px';
+  });
+  el.addEventListener('pointerup', () => { if (dragging) { dragging = false; el.classList.remove('dragging'); } });
+}
+
+let _id = 0;
+const uid = p => (p || 'el') + '-' + (++_id);
+
+function addSection(rowY, label) {
+  const parts = label.split(' ');
+  const el = document.createElement('div');
+  el.className = 'section-header';
+  el.style.left = '60px';
+  el.style.top = rowY + 'px';
+  el.innerHTML = `<span class="section-line"></span><span class="section-num">${parts[0] || ''}</span><span class="section-label">${parts.slice(1).join(' ')}</span>`;
+  world.appendChild(el);
+  return rowY;
+}
+
+function addTitle(x, y, text, options = {}) {
+  const el = document.createElement('div');
+  el.className = 'canvas-title';
+  el.id = uid('title');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.style.fontSize = (options.fontSize || 48) + 'px';
+  if (options.fontWeight) el.style.fontWeight = options.fontWeight;
+  if (options.color) el.style.color = options.color;
+  if (options.maxWidth) el.style.maxWidth = options.maxWidth + 'px';
+  if (options.fontFamily) el.style.fontFamily = options.fontFamily;
+  el.textContent = text;
+  world.appendChild(el);
+  return el;
+}
+
+function addText(x, y, text, options = {}) {
+  const el = document.createElement('div');
+  el.className = 'canvas-text canvas-el';
+  el.id = uid('text');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.style.fontSize = (options.fontSize || 14) + 'px';
+  if (options.color) el.style.color = options.color;
+  if (options.maxWidth) el.style.maxWidth = options.maxWidth + 'px';
+  if (options.fontFamily) el.style.fontFamily = options.fontFamily;
+  el.textContent = text;
+  world.appendChild(el);
+  makeDraggable(el);
+  return el;
+}
+
+function addTag(x, y, label, options = {}) {
+  const el = document.createElement('div');
+  el.className = 'canvas-el';
+  el.id = uid('tag');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.innerHTML = `<div class="canvas-tag"><span class="tag-dot" style="background:${options.color || 'var(--accent)'}"></span>${label}</div>`;
+  world.appendChild(el);
+  makeDraggable(el);
+  return el;
+}
+
+function addContextCard(x, y, w, h, title, content) {
+  const el = document.createElement('div');
+  el.className = 'canvas-el';
+  el.id = uid('ctx');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.style.width = w + 'px';
+  if (h) el.style.height = h + 'px';
+  el.innerHTML = `<div class="context-card" style="width:100%;${h ? 'height:100%' : ''}">
+    <div class="card-head"><div class="head-indicator"></div><h3>${title}</h3></div>
+    <div class="card-content">${content}</div>
+  </div>`;
+  world.appendChild(el);
+  makeDraggable(el);
+  return el;
+}
+
+function addDesignSystemCard(x, y, w, h, type, data) {
+  const el = document.createElement('div');
+  el.className = 'canvas-el';
+  el.id = uid('ds');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.style.width = w + 'px';
+  if (h) el.style.height = h + 'px';
+  el.innerHTML = `<div class="ds-card" style="width:100%;${h ? 'height:100%' : ''}">
+    <div class="ds-head">${data.title || type}</div>
+    <div class="ds-body">${data.html || ''}</div>
+  </div>`;
+  world.appendChild(el);
+  makeDraggable(el);
+  return el;
+}
+
+function addColorSwatch(x, y, colors) {
+  const el = document.createElement('div');
+  el.className = 'canvas-el';
+  el.id = uid('swatch');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.innerHTML = `<div class="color-swatch-group">${colors.map(c => `<div class="swatch-item"><div class="swatch-circle" style="background:${c.hex}"></div><div class="swatch-name">${c.name || ''}</div><div class="swatch-hex">${c.hex}</div></div>`).join('')}</div>`;
+  world.appendChild(el);
+  makeDraggable(el);
+  return el;
+}
+
+function addTypeSample(x, y, samples) {
+  const el = document.createElement('div');
+  el.className = 'canvas-el';
+  el.id = uid('typesample');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.innerHTML = `<div class="type-sample-group">${samples.map(s => `<div class="type-sample-row"><span class="type-sample-meta">${s.label}<br>${s.size}px</span><span class="type-sample-text" style="font-size:${s.size}px;font-weight:${s.weight || 400};${s.font ? 'font-family:' + s.font : ''}">${s.text || 'The quick brown fox'}</span></div>`).join('')}</div>`;
+  world.appendChild(el);
+  makeDraggable(el);
+  return el;
+}
+
+let _pageNum = 0;
+function addPage(x, y, w, h, label, htmlContent) {
+  _pageNum++;
+  const el = document.createElement('div');
+  el.className = 'canvas-el';
+  el.id = uid('page');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.style.width = w + 'px';
+  el.style.height = (h + 40) + 'px';
+  el.innerHTML = `<div class="design-page" style="width:${w}px;height:${h}px;"><div class="page-content">${htmlContent}</div></div>
+    <div class="page-label"><span class="label-num">${String(_pageNum).padStart(2, '0')}</span>${label}</div>`;
+  world.appendChild(el);
+  makeDraggable(el);
+  return el;
+}
+
+function addNote(x, y, tag, text) {
+  const el = document.createElement('div');
+  el.className = 'canvas-el';
+  el.id = uid('note');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.innerHTML = `<div class="canvas-note"><div class="note-tag">${tag}</div><div class="note-body">${text}</div></div>`;
+  world.appendChild(el);
+  makeDraggable(el);
+  return el;
+}
+
+function addDiagram(x, y, w, h, htmlContent) {
+  const el = document.createElement('div');
+  el.className = 'canvas-el';
+  el.id = uid('diagram');
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.style.width = w + 'px'; el.style.height = h + 'px';
+  el.innerHTML = `<div class="canvas-diagram" style="width:100%;height:100%;"><div class="diagram-content">${htmlContent}</div></div>`;
+  world.appendChild(el);
+  makeDraggable(el);
+  return el;
+}
+
+function addGroupLabel(x, y, text) {
+  const el = document.createElement('div');
+  el.className = 'group-label';
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.textContent = text;
+  world.appendChild(el);
+  return el;
+}
+
+function addArrow(x, y) {
+  const el = document.createElement('div');
+  el.className = 'flow-arrow';
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  el.style.width = '56px'; el.style.height = '12px';
+  world.appendChild(el);
+  return el;
+}
+
+function below(el, gap) { return parseFloat(el.style.top) + el.offsetHeight + (gap === undefined ? 20 : gap); }
+function rightOf(el, gap) { return parseFloat(el.style.left) + el.offsetWidth + (gap === undefined ? 20 : gap); }
+function maxY(els, gap) { return Math.max(...els.map(e => parseFloat(e.style.top) + e.offsetHeight)) + (gap === undefined ? 20 : gap); }
+function maxX(els, gap) { return Math.max(...els.map(e => parseFloat(e.style.left) + e.offsetWidth)) + (gap === undefined ? 20 : gap); }
+
+window.canvas = { addSection, addTitle, addText, addTag, addContextCard, addDesignSystemCard, addColorSwatch, addTypeSample, addPage, addNote, addDiagram, addGroupLabel, addArrow, below, rightOf, maxY, maxX };
+
+/* SCENE */
+
+const bars = (n, seed) => {
+  let s = '';
+  for (let i = 0; i < n; i++) {
+    const h = Math.abs(Math.sin(i * 12.9898 + seed * 78.233) * 43758.5453) % 1;
+    s += '<i style="--h:' + (0.08 + h * 0.92).toFixed(2) + '"></i>';
+  }
+  return s;
+};
+const wave = (n, seed, onFrac) => {
+  let s = '';
+  const k = Math.round(n * (onFrac || 0));
+  for (let i = 0; i < n; i++) {
+    const h = Math.abs(Math.sin(i * 12.9898 + seed * 78.233) * 43758.5453) % 1;
+    s += '<i class="' + (i < k ? 'on' : '') + '" style="--h:' + (0.08 + h * 0.92).toFixed(2) + '"></i>';
+  }
+  return s;
+};
+const vuBars = n => {
+  let s = '';
+  for (let i = 0; i < n; i++) s += '<i style="--h:' + (0.25 + Math.abs(Math.sin(i * 3.7)) * 0.75).toFixed(2) + '"></i>';
+  return s;
+};
+const micSvg = () => '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+const miniCover = (n, ghost) => '<div class="pg-cover" style="' + (ghost ? 'border-style:dashed;' : '') + '"><span class="pg-mono" style="font-size:7px;' + (ghost ? 'color:#7A7264;' : 'color:#E8A33D;') + '">EP.0' + n + '</span><div class="mw">' + bars(6, n) + '</div><span class="n" style="font-size:15px;' + (ghost ? 'color:#7A7264;' : '') + '">' + (ghost ? '—' : n) + '</span></div>';
+const coverBig = n => '<div class="pg-cover" style="border-radius:12px;"><span class="pg-mono" style="font-size:9px;color:#E8A33D;">EP.0' + n + '</span><div class="mw">' + bars(9, n) + '</div><span class="n" style="font-size:44px;">' + n + '</span></div>';
+
+const PAGE_WELCOME = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-brand">Reprise</span><span class="pg-mono">SEASON ONE</span></div>
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 22px;text-align:center;">
+    <span class="pg-mono">A PERSONAL PODCAST</span>
+    <div class="pg-serif" style="font-size:44px;line-height:1;margin:12px 0 8px;">Reprise</div>
+    <p class="pg-dim" style="font-size:12.5px;margin:0 0 20px;max-width:250px;">You talk. A host asks. It becomes an episode. <span style="color:#F2EAD9">And the host remembers what you said last time.</span></p>
+    <div class="pg-card" style="width:100%;text-align:left;">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
+        <div style="width:38px;height:38px;border-radius:50%;background:#E8A33D;display:grid;place-items:center;color:#1A140D;flex:none;font-size:12px;">▶</div>
+        <div style="flex:1;min-width:0;"><span class="pg-mono">FROM EP.04 · “THREE WEEKS OF ALMOST”</span><div class="pg-serif" style="font-size:15px;">Hear what remembering sounds like</div></div>
+        <span class="pg-mono">0:00/0:30</span>
+      </div>
+      <div class="pg-wave">${wave(40, 7, 0.12)}</div>
+      <div class="pg-quote" style="margin-top:10px;"><span class="pg-mono">0:14 · EP.04</span><p>“You’ve brought up June three times now. Three weeks. What’s the shape of the thing you’re not saying?”</p></div>
+    </div>
+    <div class="pg-btn pg-btn-amber" style="width:100%;margin-top:16px;">Record episode five</div>
+    <div class="pg-faint" style="font-size:10px;margin-top:8px;">Four episodes are already here. The host has been listening.</div>
+    <div style="display:flex;gap:8px;margin-top:18px;">${[1, 2, 3, 4].map(n => '<div style="width:42px;">' + miniCover(n) + '</div>').join('')}<div style="width:42px;opacity:.45;">${miniCover(5, true)}</div></div>
+  </div>
+</div>`;
+
+const PAGE_PREFLIGHT = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-brand">Reprise</span><span class="pg-mono" style="margin-left:auto;">EPISODE FIVE</span></div>
+  <div style="padding:16px;display:flex;flex-direction:column;gap:11px;flex:1;overflow:hidden;">
+    <div><span class="pg-mono">BEFORE YOU RECORD</span><div class="pg-serif" style="font-size:21px;line-height:1.15;margin-top:5px;">Take a breath. The host is setting up.</div></div>
+    <div class="pg-card" style="text-align:center;padding:16px;">
+      <div class="pg-mic">${micSvg()}</div>
+      <p class="pg-dim" style="font-size:11px;margin:11px 0 9px;">Microphone ready. One more moment while the studio connects.</p>
+      <div class="pg-btn pg-btn-line" style="width:100%;min-height:32px;font-size:11.5px;">✓ Microphone enabled</div>
+      <div style="text-align:left;margin-top:10px;display:flex;flex-direction:column;gap:5px;">
+        <div style="display:flex;align-items:center;gap:8px;"><span style="width:13px;height:13px;border-radius:50%;background:rgba(143,168,116,.2);border:1.5px solid rgba(143,168,116,.6);display:inline-block;"></span><span style="font-size:10.5px;">Microphone access</span></div>
+        <div style="display:flex;align-items:center;gap:8px;"><span style="width:13px;height:13px;border-radius:50%;background:rgba(143,168,116,.2);border:1.5px solid rgba(143,168,116,.6);display:inline-block;"></span><span style="font-size:10.5px;">Connection to the studio</span></div>
+        <div style="display:flex;align-items:center;gap:8px;"><span style="width:13px;height:13px;border-radius:50%;background:rgba(143,168,116,.2);border:1.5px solid rgba(143,168,116,.6);display:inline-block;"></span><span style="font-size:10.5px;">The host’s memory of episodes one to four</span></div>
+      </div>
+    </div>
+    <div class="pg-card">
+      <span class="pg-mono">WHAT THE HOST REMEMBERS</span>
+      <div class="pg-quote" style="margin-top:8px;"><p>“I’ve been dreading calling June. The garden was ours before it was the landlord’s.”</p></div>
+      <div class="pg-mono" style="margin-top:7px;">SAID IN EP.01 · 0:47 · OPEN FOR THREE EPISODES</div>
+    </div>
+    <div class="pg-card-2" style="border-color:rgba(232,163,61,.35);margin-top:auto;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="pg-vu" style="height:22px;flex:none;">${vuBars(9)}</div>
+        <div style="flex:1;"><h4 style="margin:0;font-size:11.5px;">Levels look good.</h4><p class="pg-faint" style="margin:2px 0 0;font-size:10px;">Speak like you’re across the table.</p></div>
+      </div>
+      <div class="pg-btn pg-btn-amber" style="width:100%;margin-top:11px;min-height:34px;font-size:12px;">Begin episode five →</div>
+    </div>
+  </div>
+</div>`;
+
+const PAGE_LIVE = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-chip live"><i></i>ON AIR</span><span class="pg-mono" style="margin-left:auto;">SESSION · CAP 20:00</span><span class="pg-mono" style="color:#F2EAD9;">04:12</span></div>
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;text-align:center;">
+    <div class="pg-mic big">${micSvg()}</div>
+    <div class="pg-serif" style="font-size:19px;margin-top:16px;">You’re speaking</div>
+    <div class="pg-faint" style="font-size:10.5px;margin-top:4px;">Hold the button to speak. Interrupting is allowed.</div>
+    <div class="pg-btn pg-btn-amber" style="width:200px;min-height:42px;border-radius:100px;margin-top:14px;">Hold to speak</div>
+    <div style="width:100%;max-width:300px;margin-top:16px;display:flex;flex-direction:column;gap:7px;text-align:left;">
+      <div class="pg-turn host" style="border:none;padding:0;"><span class="r">HOST</span><p>June. Nine mentions, three weeks of almost. What changed this week?</p></div>
+      <div class="pg-turn" style="border:none;padding:0;"><span class="r">YOU</span><p>She asked if I’d come down for the harvest.</p></div>
+      <div class="pg-turn host" style="border:none;padding:0;"><span class="r">HOST</span><p>The harvest. When?</p></div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-top:1px solid rgba(242,234,217,0.07);">
+    <div class="pg-vu host" style="height:22px;">${vuBars(10)}</div>
+    <div class="pg-vu" style="height:22px;">${vuBars(8)}</div>
+    <div class="pg-btn pg-btn-line" style="margin-left:auto;min-height:32px;font-size:11px;">End session</div>
+  </div>
+</div>`;
+
+const PAGE_WRAP = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-brand">Reprise</span><span class="pg-mono" style="margin-left:auto;">EPISODE FIVE · AFTER THE SESSION</span></div>
+  <div style="padding:18px;flex:1;overflow:hidden;">
+    <div class="pg-serif" style="font-size:24px;">That’s a wrap.</div>
+    <p class="pg-dim" style="font-size:11.5px;margin:6px 0 14px;">Both takes are safe. The episode is being built — each step runs once.</p>
+    <div class="pg-card" style="padding:4px 14px;">
+      <div class="pg-step done"><span class="dot"></span><div><h4>Your take is uploading</h4><p>Recorded at 48 kHz, kept as its own stem.</p></div></div>
+      <div class="pg-step done"><span class="dot"></span><div><h4>The host’s take is uploading</h4><p>Both stems land on one clock.</p></div></div>
+      <div class="pg-step run"><span class="dot"></span><div style="flex:1;"><h4>Transcribing for the editor</h4><p>Word timings come from your stem.</p><div class="pg-prog" style="margin-top:7px;"><i style="width:58%"></i></div></div></div>
+      <div class="pg-step"><span class="dot"></span><div><h4>The editorial pass</h4><p>Proposes cuts, a cold open, a title, one callback.</p></div></div>
+      <div class="pg-step" style="border-bottom:none;"><span class="dot"></span><div><h4>Draft ready for your review</h4><p>Nothing is cut silently.</p></div></div>
+    </div>
+    <div class="pg-btn pg-btn-amber" style="width:100%;margin-top:14px;opacity:.45;">Open the editor →</div>
+  </div>
+</div>`;
+
+const PAGE_EDITOR = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-brand">Reprise</span><div class="pg-nav"><span class="cur">Gallery</span><span>Threads</span></div><span class="pg-chip amber" style="margin-left:auto;"><i></i>3 CUTS APPLIED</span></div>
+  <div style="padding:16px 18px;flex:1;overflow:hidden;">
+    <span class="pg-mono">EPISODE FIVE · DRAFT · 1:44</span>
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-top:2px;">
+      <div class="pg-serif" style="font-size:26px;flex:1;">The only place nobody needs anything</div>
+    </div>
+    <div class="pg-card" style="margin-top:12px;padding:12px 14px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:34px;height:34px;border-radius:50%;background:#E8A33D;display:grid;place-items:center;color:#1A140D;flex:none;font-size:11px;">▶</div>
+        <div style="position:relative;flex:1;">
+          <div class="pg-wave" style="height:40px;">${wave(84, 5, 0.06)}</div>
+          <div style="position:absolute;top:-4px;bottom:-4px;left:27%;width:7%;border:1.5px solid #E8A33D;border-radius:4px;"></div>
+          <div style="position:absolute;top:0;bottom:0;left:19%;width:5%;background:repeating-linear-gradient(-45deg, rgba(198,91,78,.32) 0 3px, transparent 3px 6px);border-radius:2px;"></div>
+          <div style="position:absolute;top:0;bottom:0;left:48%;width:9%;background:repeating-linear-gradient(-45deg, rgba(198,91,78,.32) 0 3px, transparent 3px 6px);border-radius:2px;"></div>
+          <div style="position:absolute;top:0;bottom:0;left:86%;width:6%;background:repeating-linear-gradient(-45deg, rgba(198,91,78,.32) 0 3px, transparent 3px 6px);border-radius:2px;"></div>
+        </div>
+        <span class="pg-mono" style="color:#A89C89;">0:12 / 1:44</span>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 320px;gap:14px;margin-top:12px;">
+      <div class="pg-card" style="padding:8px 14px;">
+        <div style="display:flex;justify-content:space-between;padding:6px 0;"><span class="pg-mono">TRANSCRIPT · CLICK A WORD TO SEEK</span><span class="pg-mono">STRIKETHROUGH = PROPOSED CUT</span></div>
+        <div class="pg-turn"><span class="r">HOST</span><p>June. Nine mentions, three weeks of almost. What changed this week?</p></div>
+        <div class="pg-turn"><span class="r">YOU</span><p>She asked if I’d come down for the harvest. <span class="pg-cut">First time she’s — no.</span> The first time she’s asked me for something. It’s the only place nobody needs anything from me. And now the place needs me to show up.</p></div>
+        <div class="pg-turn"><span class="r">YOU</span><p>Then it becomes something we share again. <span class="pg-cut">I checked the train prices, by the way, it’s like forty euros now, which is absurd.</span> If it goes badly, at least it’s over.</p></div>
+        <div class="pg-turn"><span class="r">YOU</span><p>Tomas’s fence. <span class="pg-cut">I mean I fixed it badly, but I fixed it.</span> Keeping busy with things that can’t say no.</p></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div class="pg-card-2" style="border-color:rgba(232,163,61,.4);">
+          <span class="pg-mono" style="color:#E8A33D;">PROPOSED COLD OPEN · 0:06</span>
+          <div class="pg-serif" style="font-size:15px;margin-top:6px;">“It’s the only place nobody needs anything from me.”</div>
+          <p class="pg-faint" style="font-size:9.5px;margin:6px 0 8px;">Chosen on delivery — the pause before it, and how the voice settles.</p>
+          <div class="pg-btn pg-btn-line" style="width:100%;min-height:28px;font-size:10.5px;">Preview cold open</div>
+        </div>
+        <div class="pg-card">
+          <span class="pg-mono">CUTS · APPLIED BY DEFAULT</span>
+          <div style="margin-top:6px;">
+            <div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(242,234,217,.06);"><div style="flex:1;"><p style="margin:0;font-size:10.5px;color:#A89C89;">False start. The restart lands cleaner.</p><span class="pg-mono" style="font-size:7.5px;">0:20 · APPLIED</span></div><span style="color:#A89C89;font-size:11px;">↺</span></div>
+            <div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(242,234,217,.06);"><div style="flex:1;"><p style="margin:0;font-size:10.5px;color:#A89C89;">Tangent. The visit is the point, not the fare.</p><span class="pg-mono" style="font-size:7.5px;">0:49 · APPLIED</span></div><span style="color:#A89C89;font-size:11px;">↺</span></div>
+            <div style="display:flex;gap:8px;align-items:center;padding:6px 0;"><div style="flex:1;"><p style="margin:0;font-size:10.5px;color:#A89C89;">The aside steps on the line after it.</p><span class="pg-mono" style="font-size:7.5px;">1:29 · APPLIED</span></div><span style="color:#A89C89;font-size:11px;">↺</span></div>
+          </div>
+        </div>
+        <div class="pg-card"><span class="pg-mono">PLANTED FOR NEXT TIME</span><div class="pg-serif" style="font-size:14px;margin-top:5px;">“Will you go down for the harvest?”</div></div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;border:1px solid rgba(242,234,217,.14);border-radius:12px;padding:10px 14px;background:#1D1811;">
+      <span class="pg-dim" style="font-size:10.5px;">Marking done renders the episode and runs the analysis — <b style="color:#F2EAD9">once</b>. Every cut stays revertible until then.</span>
+      <span class="pg-btn pg-btn-amber" style="min-height:32px;font-size:11.5px;white-space:nowrap;">Mark episode done →</span>
+    </div>
+  </div>
+</div>`;
+
+const PAGE_EPISODE = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-brand">Reprise</span><div class="pg-nav"><span class="cur">Gallery</span><span>Threads</span></div><span class="pg-mono" style="margin-left:auto;">ADMIN · PRIVACY</span></div>
+  <div style="display:grid;grid-template-columns:230px 1fr;gap:18px;padding:16px 18px;flex:1;overflow:hidden;">
+    <div>
+      ${coverBig(4)}
+      <div style="display:flex;flex-direction:column;gap:7px;margin-top:12px;">
+        <div class="pg-btn pg-btn-line" style="min-height:30px;font-size:10.5px;">Publish…</div>
+        <div class="pg-btn pg-btn-line" style="min-height:30px;font-size:10.5px;">Export for YouTube</div>
+        <div class="pg-btn pg-btn-quiet" style="min-height:30px;font-size:10.5px;justify-content:flex-start;color:#C65B4E;">Erase this episode</div>
+      </div>
+    </div>
+    <div style="min-width:0;">
+      <span class="pg-mono">EP.04 · READY</span>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:2px;"><div class="pg-serif" style="font-size:27px;flex:1;">Three weeks of almost</div><span class="pg-chip ok"><i></i>PRIVATE</span></div>
+      <div class="pg-mono" style="margin-top:5px;">SEP 2 · 18:24 · CHAPTERS AND NOTES FROM THE ANALYSIS PASS</div>
+      <div class="pg-card" style="margin-top:12px;padding:12px 14px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="width:34px;height:34px;border-radius:50%;background:#E8A33D;display:grid;place-items:center;color:#1A140D;flex:none;font-size:11px;">▶</div>
+          <div class="pg-wave" style="flex:1;height:34px;">${wave(96, 4, 0.32)}</div>
+          <span class="pg-mono" style="color:#A89C89;">5:53</span>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;">
+        <div class="pg-card" style="padding:10px 14px;">
+          <span class="pg-mono">CHAPTERS</span>
+          <div style="margin-top:5px;">
+            <div style="display:flex;gap:10px;padding:4px 0;border-bottom:1px solid rgba(242,234,217,.06);"><span class="pg-mono" style="color:#E8A33D;">0:00</span><span style="font-size:11px;color:#F2EAD9;">The almost</span></div>
+            <div style="display:flex;gap:10px;padding:4px 0;border-bottom:1px solid rgba(242,234,217,.06);"><span class="pg-mono" style="color:#E8A33D;">2:41</span><span style="font-size:11px;color:#A89C89;">What June heard</span></div>
+            <div style="display:flex;gap:10px;padding:4px 0;border-bottom:1px solid rgba(242,234,217,.06);"><span class="pg-mono" style="color:#E8A33D;">7:15</span><span style="font-size:11px;color:#A89C89;">The arithmetic of staying</span></div>
+            <div style="display:flex;gap:10px;padding:4px 0;border-bottom:1px solid rgba(242,234,217,.06);"><span class="pg-mono" style="color:#E8A33D;">12:30</span><span style="font-size:11px;color:#A89C89;">Margot’s tape</span></div>
+            <div style="display:flex;gap:10px;padding:4px 0;"><span class="pg-mono" style="color:#E8A33D;">15:58</span><span style="font-size:11px;color:#A89C89;">What tomorrow knows</span></div>
+          </div>
+        </div>
+        <div class="pg-card" style="padding:10px 14px;">
+          <span class="pg-mono">SHOW NOTES</span>
+          <p class="pg-serif" style="font-size:13px;margin-top:6px;line-height:1.5;">Recorded in one take on a Tuesday. June came up before the coffee was done. By the end the question wasn’t whether to call — it was what I’m afraid she’ll say when I do.</p>
+        </div>
+      </div>
+      <div class="pg-card" style="margin-top:12px;padding:8px 14px;">
+        <span class="pg-mono">TRANSCRIPT · FOLLOWS PLAYBACK</span>
+        <div class="pg-turn"><span class="r">HOST</span><p>Three weeks of almost. The garden is the only place nobody needs anything from you — your words, episode one. What’s actually been said since?</p></div>
+        <div class="pg-turn"><span class="r">YOU</span><p>Nothing. She texted about the pear tree. I answered about the weather. That’s the whole exchange, three weeks of it.</p></div>
+      </div>
+    </div>
+  </div>
+</div>`;
+
+const galCard = (n, title, date, dur, chip, job) => `
+<div class="pg-card" style="display:flex;gap:10px;align-items:center;">
+  <div style="width:52px;flex:none;">${miniCover(n)}</div>
+  <div style="flex:1;min-width:0;">
+    <div style="display:flex;align-items:center;gap:7px;"><span class="pg-mono" style="font-size:7.5px;">${n === 5 ? 'YOURS' : 'SEEDED'}</span>${chip}</div>
+    <div class="pg-serif" style="font-size:15px;line-height:1.2;margin-top:3px;">${title}</div>
+    <div class="pg-mono" style="font-size:8px;margin-top:3px;">${date} · ${dur}</div>
+    ${job ? '<div class="pg-mono" style="font-size:8px;color:#A89C89;margin-top:4px;">' + job + '</div>' : ''}
+  </div>
+</div>`;
+
+const PAGE_GALLERY = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-brand">Reprise</span><div class="pg-nav"><span class="cur">Gallery</span><span>Threads</span></div><span class="pg-mono" style="margin-left:auto;">ADMIN · PRIVACY</span></div>
+  <div style="padding:16px 18px;flex:1;overflow:hidden;">
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;">
+      <div><span class="pg-mono">SEASON ONE · FIVE EPISODES</span><div class="pg-serif" style="font-size:27px;">The season so far</div></div>
+      <div class="pg-btn pg-btn-amber" style="min-height:34px;font-size:11.5px;">Record episode six</div>
+    </div>
+    <p class="pg-dim" style="font-size:11px;margin:6px 0 14px;">Episodes are private until you publish them. A running job shows its progress right on the card.</p>
+    <div class="pg-grid" style="grid-template-columns:1fr 1fr;">
+      ${galCard(5, 'The only place nobody needs anything', 'Today', '1:44', '<span class="pg-chip"><i></i>DRAFT</span>', 'In the editor · proposals waiting')}
+      ${galCard(5, 'The only place nobody needs anything', 'Today', '—', '<span class="pg-chip amber"><i></i>RENDERING</span>', '')}
+      ${galCard(4, 'Three weeks of almost', 'Sep 2', '18:24', '<span class="pg-chip ok"><i></i>PRIVATE</span>', '')}
+      ${galCard(3, 'June, in every other sentence', 'Aug 26', '17:05', '<span class="pg-chip ok"><i></i>PRIVATE</span>', '')}
+      ${galCard(2, 'Rent, and what it costs to stay', 'Aug 15', '21:47', '<span class="pg-chip ok"><i></i>PRIVATE</span>', '')}
+      ${galCard(1, 'The garden was ours first', 'Aug 8', '16:12', '<span class="pg-chip ok"><i></i>PRIVATE</span>', '')}
+    </div>
+    <div class="pg-card" style="margin-top:12px;padding:10px 14px;">
+      <span class="pg-mono">LIVE JOB · EPISODE FIVE</span>
+      <div class="pg-prog" style="margin-top:8px;"><i style="width:64%"></i></div>
+      <div class="pg-mono" style="margin-top:6px;">RENDERING · 64% · THIS BAR NEVER MOVES BACKWARDS, RELOAD OR NOT</div>
+    </div>
+  </div>
+</div>`;
+
+const quoteChip = (ep, t, text) => '<div style="background:#16120D;border:1px solid rgba(242,234,217,.09);border-radius:9px;padding:7px 10px;margin-top:6px;"><span class="pg-mono" style="color:#E8A33D;font-size:7.5px;">EP.0' + ep + ' · ' + t + '</span><p style="margin:3px 0 0;font-size:10.5px;color:#A89C89;line-height:1.5;">“' + text + '”</p></div>';
+
+const PAGE_THREADS = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-brand">Reprise</span><div class="pg-nav"><span>Gallery</span><span class="cur">Threads</span></div><span class="pg-mono" style="margin-left:auto;">ADMIN · PRIVACY</span></div>
+  <div style="padding:16px 18px;flex:1;overflow:hidden;">
+    <span class="pg-mono">THE THREAD ACROSS EPISODES</span>
+    <div class="pg-serif" style="font-size:27px;">What keeps coming up</div>
+    <p class="pg-dim" style="font-size:11px;margin:6px 0 12px;">People, promises and circling topics — each links to the moment it was said. No scores, no gauges. Quotes and links, nothing else.</p>
+    <span class="pg-mono" style="color:#E8A33D;">OPEN COMMITMENTS</span>
+    <div class="pg-grid" style="grid-template-columns:1fr 1fr;margin-top:7px;">
+      <div class="pg-card"><div style="display:flex;justify-content:space-between;gap:8px;"><span class="pg-serif" style="font-size:17px;">Ask June about the fence</span><span class="pg-mono" style="color:#E8A33D;font-size:8px;">● OPEN</span></div><div class="pg-mono" style="margin-top:4px;">3 MENTIONS · NEVER RESOLVED · SINCE EP.02</div>${quoteChip(2, '5:18', 'I keep meaning to ask her — the fence, whose job is it now.')}</div>
+      <div class="pg-card"><div style="display:flex;justify-content:space-between;gap:8px;"><span class="pg-serif" style="font-size:17px;">Send Margot the tape</span><span class="pg-mono" style="color:#8FA874;font-size:8px;">✓ RESOLVED</span></div><div class="pg-mono" style="margin-top:4px;">KEPT IN EP.04 · PROMISED IN EP.02</div>${quoteChip(4, '12:30', 'I sent it. She cried on the phone — the good kind.')}</div>
+    </div>
+    <span class="pg-mono" style="color:#E8A33D;display:inline-block;margin-top:12px;">PEOPLE WHO RECUR</span>
+    <div class="pg-grid" style="grid-template-columns:1fr 1fr 1fr;margin-top:7px;">
+      <div class="pg-card"><span class="pg-serif" style="font-size:17px;">June</span><div class="pg-mono" style="margin-top:2px;">YOUR SISTER · 9 MENTIONS · 4 EPISODES</div>${quoteChip(1, '0:47', 'I’ve been dreading calling June.')}</div>
+      <div class="pg-card"><span class="pg-serif" style="font-size:17px;">Tomas</span><div class="pg-mono" style="margin-top:2px;">NEIGHBOUR · 5 MENTIONS · 3 EPISODES</div>${quoteChip(2, '5:18', 'Tomas says the fence leans like it’s tired.')}</div>
+      <div class="pg-card"><span class="pg-serif" style="font-size:17px;">Margot</span><div class="pg-mono" style="margin-top:2px;">OLD FRIEND · 3 MENTIONS · 2 EPISODES</div>${quoteChip(4, '12:30', 'I sent it. She cried on the phone.')}</div>
+    </div>
+    <span class="pg-mono" style="color:#E8A33D;display:inline-block;margin-top:12px;">CIRCLED TOPICS · MENTIONED 3+ TIMES, NEVER RESOLVED</span>
+    <div class="pg-grid" style="grid-template-columns:1fr 1fr;margin-top:7px;">
+      <div class="pg-card"><span class="pg-serif" style="font-size:17px;">The harvest in October</span><div class="pg-mono" style="margin-top:2px;">4 MENTIONS · 3 EPISODES · UNRESOLVED</div></div>
+      <div class="pg-card"><span class="pg-serif" style="font-size:17px;">Another winter in the city</span><div class="pg-mono" style="margin-top:2px;">5 MENTIONS · 4 EPISODES · UNRESOLVED</div></div>
+    </div>
+  </div>
+</div>`;
+
+const PAGE_ADMIN = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-brand">Reprise</span><span class="pg-mono" style="margin-left:auto;">STUDIO CONTROLS · OWNER</span></div>
+  <div style="padding:16px 18px;flex:1;overflow:hidden;">
+    <span class="pg-mono">STUDIO CONTROLS</span>
+    <div class="pg-serif" style="font-size:26px;">Spend and switches</div>
+    <p class="pg-dim" style="font-size:11px;margin:6px 0 14px;">Live sessions cost $4.50 per connected hour, billed per second. These are the brakes.</p>
+    <div class="pg-grid" style="grid-template-columns:1fr 1fr 1fr;">
+      <div class="pg-card">
+        <span class="pg-mono">TODAY’S SPEND</span>
+        <div style="font-family:var(--font-mono);font-size:26px;margin-top:6px;">$3.12 <span style="font-size:11px;color:#7A7264;">/ $11.25</span></div>
+        <div class="pg-prog" style="margin-top:10px;"><i style="width:28%"></i></div>
+        <p class="pg-faint" style="font-size:9.5px;margin:8px 0 0;">The ceiling refuses a session before it starts, never mid-take.</p>
+      </div>
+      <div class="pg-card">
+        <span class="pg-mono">SWITCHES</span>
+        <div class="pg-kv"><div><div style="font-size:11.5px;font-weight:600;">Mint new session tokens</div><div class="pg-faint" style="font-size:9.5px;">The kill switch, no restart needed.</div></div><span class="pg-switch"></span></div>
+        <div class="pg-kv"><div><div style="font-size:11.5px;font-weight:600;">Accept guest recordings</div><div class="pg-faint" style="font-size:9.5px;">Visitors record episode five.</div></div><span class="pg-switch"></span></div>
+      </div>
+      <div class="pg-card">
+        <span class="pg-mono">GUEST LIMITS</span>
+        <div class="pg-kv"><div><div style="font-size:11.5px;font-weight:600;">Sessions per guest</div><div class="pg-faint" style="font-size:9.5px;">1 of 2 used today</div></div><span style="font-family:var(--font-mono);font-size:11px;">2</span></div>
+        <div class="pg-kv"><div><div style="font-size:11.5px;font-weight:600;">Session length cap</div><div class="pg-faint" style="font-size:9.5px;">Hard stop from the token</div></div><span style="font-family:var(--font-mono);font-size:11px;">20:00</span></div>
+        <div class="pg-kv"><div><div style="font-size:11.5px;font-weight:600;">Guest data retained</div><div class="pg-faint" style="font-size:9.5px;">Then deleted, not hidden</div></div><span style="font-family:var(--font-mono);font-size:11px;">30 days</span></div>
+      </div>
+    </div>
+  </div>
+</div>`;
+
+const PAGE_PRIVACY = `
+<div class="pg">
+  <div class="pg-topbar"><span class="pg-brand">Reprise</span><span class="pg-mono" style="margin-left:auto;">DATA · IN PLAIN WORDS</span></div>
+  <div style="padding:18px 20px;flex:1;overflow:hidden;">
+    <div class="pg-serif" style="font-size:26px;">What Reprise keeps, and for how long</div>
+    <div class="pg-grid" style="grid-template-columns:1fr 1fr;margin-top:14px;">
+      <div><div class="pg-serif" style="font-size:17px;">Private by default</div><p class="pg-dim" style="font-size:10.5px;margin-top:5px;">Every episode starts private. Stems, transcripts and threads never leave your account. Publishing shares only the finished render and its cover.</p></div>
+      <div><div class="pg-serif" style="font-size:17px;">What an erase removes</div><p class="pg-dim" style="font-size:10.5px;margin-top:5px;">Every row, both stems, the render and the cover — plus the provider’s copy of the session and its transcripts.</p></div>
+      <div class="pg-card" style="margin-top:6px;"><span class="pg-mono">ONE HONEST CAVEAT</span><p class="pg-dim" style="font-size:10.5px;margin-top:5px;">The speech provider soft-deletes on its side. It stops being reachable and we re-verify on a schedule, but their backup retention governs.</p></div>
+      <div><div class="pg-serif" style="font-size:17px;">Guest recordings</div><p class="pg-dim" style="font-size:10.5px;margin-top:5px;">A visitor gets a real account with one code path. Their data expires on a timer the studio sets — expiry deletes rather than hides.</p></div>
+    </div>
+  </div>
+</div>`;
+
+const PAGE_SHARE = `
+<div class="pg">
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:26px 22px;text-align:center;">
+    <span class="pg-mono">SHARED FROM A PERSONAL PODCAST</span>
+    <div style="width:190px;margin-top:16px;">${coverBig(4)}</div>
+    <div class="pg-serif" style="font-size:28px;margin-top:16px;line-height:1.1;">Three weeks of almost</div>
+    <div class="pg-mono" style="margin-top:6px;">EP.04 · 18:24</div>
+    <div class="pg-card" style="width:100%;margin-top:18px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:36px;height:36px;border-radius:50%;background:#E8A33D;display:grid;place-items:center;color:#1A140D;flex:none;font-size:12px;">▶</div>
+        <div class="pg-wave" style="flex:1;height:30px;">${wave(40, 4, 0.18)}</div>
+        <span class="pg-mono" style="color:#A89C89;">3:21</span>
+      </div>
+    </div>
+    <div class="pg-faint" style="font-size:10px;margin-top:auto;padding-top:22px;">Only the finished episode is public — everything behind it stays private.<br><span class="pg-serif" style="font-size:15px;color:#F2EAD9;">Reprise</span></div>
+  </div>
+</div>`;
+
+const FLOW_HTML = `
+<div style="display:flex;flex-direction:column;gap:14px;height:100%;justify-content:center;">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <div style="background:#1A1611;border:1px solid var(--border);border-radius:10px;padding:9px 12px;"><div style="font-size:11.5px;font-weight:600;">Record</div><div style="font-family:var(--font-mono);font-size:8.5px;color:var(--text-tertiary);margin-top:3px;">LIVE HOST · ONE TAKE</div></div>
+    <span style="color:var(--accent);opacity:.7;">→</span>
+    <div style="background:#1A1611;border:1px solid var(--border);border-radius:10px;padding:9px 12px;"><div style="font-size:11.5px;font-weight:600;">Edit</div><div style="font-family:var(--font-mono);font-size:8.5px;color:var(--text-tertiary);margin-top:3px;">REVERTIBLE CUTS</div></div>
+    <span style="color:var(--accent);opacity:.7;">→</span>
+    <div style="background:#241D15;border:1px solid rgba(232,163,61,.35);border-radius:10px;padding:9px 12px;"><div style="font-size:11.5px;font-weight:600;">Mark done</div><div style="font-family:var(--font-mono);font-size:8.5px;color:var(--accent);margin-top:3px;">THE ONLY EXIT</div></div>
+    <span style="color:var(--accent);opacity:.7;">→</span>
+    <div style="background:#1A1611;border:1px solid var(--border);border-radius:10px;padding:9px 12px;"><div style="font-size:11.5px;font-weight:600;">Render</div><div style="font-family:var(--font-mono);font-size:8.5px;color:var(--text-tertiary);margin-top:3px;">ONCE · -16 LUFS</div></div>
+    <span style="color:var(--accent);opacity:.7;">→</span>
+    <div style="background:#1A1611;border:1px solid var(--border);border-radius:10px;padding:9px 12px;"><div style="font-size:11.5px;font-weight:600;">Analyse</div><div style="font-family:var(--font-mono);font-size:8.5px;color:var(--text-tertiary);margin-top:3px;">ON THE RENDER, NEVER RAW</div></div>
+    <span style="color:var(--accent);opacity:.7;">→</span>
+    <div style="background:#1A1611;border:1px solid var(--border);border-radius:10px;padding:9px 12px;"><div style="font-size:11.5px;font-weight:600;">Gallery &amp; Threads</div><div style="font-family:var(--font-mono);font-size:8.5px;color:var(--text-tertiary);margin-top:3px;">PLAY · QUOTES · EXPORT</div></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;border-top:1px dashed rgba(232,163,61,.25);padding-top:12px;">
+    <span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;color:var(--accent);">THE MEMORY LOOP</span>
+    <div style="background:#16120D;border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:10.5px;color:var(--text-secondary);">Mentions across episodes</div>
+    <span style="color:var(--accent);opacity:.7;">→</span>
+    <div style="background:#16120D;border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:10.5px;color:var(--text-secondary);">Callback selection</div>
+    <span style="color:var(--accent);opacity:.7;">→</span>
+    <div style="background:#241D15;border:1px solid rgba(232,163,61,.35);border-radius:8px;padding:6px 10px;font-size:10.5px;color:var(--text);">The next greeting</div>
+    <span style="font-size:10px;color:var(--text-tertiary);margin-left:4px;">— episode five opens on episode one</span>
+  </div>
+</div>`;
+
+/* ─── Row 1: project context ─── */
+addSection(40, UI_STRINGS.sections.context);
+
+const rTitle = addTitle(100, 92, 'Reprise', { fontSize: 64, fontWeight: 700, fontFamily: 'var(--font-serif)' });
+const rDesc = addText(100, below(rTitle, 12), 'A personal podcast. You talk, a live host asks, and it becomes an episode — cold open, chapters, show notes, a cover. The host remembers what you said last time, so episode five opens on the thing you were dreading in episode one. One responsive product, desktop and mobile.', { fontSize: 15, maxWidth: 540 });
+
+const tagsY = below(rDesc, 18);
+const tagEls = [];
+['Personal podcast', 'A host with memory', 'Episode as artifact', 'Private by default', 'Seeded season for guests', 'Desktop + mobile parity'].forEach((t, i) => {
+  tagEls.push(addTag(i === 0 ? 100 : rightOf(tagEls[i - 1], 8), tagsY, t));
+});
+
+const cardsY = maxY([tagEls[tagEls.length - 1]], 26) + 8;
+const c1 = addContextCard(100, cardsY, 320, null, 'What it is', '<ul><li>A guest lands on a four-episode season</li><li>They record episode five with a live AI host</li><li>The host opens on an unresolved thread from episode one</li><li>Every episode ships with chapters, notes and a cover</li></ul>');
+const c2 = addContextCard(452, cardsY, 320, null, 'Who it is for', '<ul><li>Anyone telling a story over months, not minutes</li><li>Judges: the demo is playing the callback</li><li>Guests: understood in ninety seconds, no explainer</li><li>Eventual market: life-story capture</li></ul>');
+const c3 = addContextCard(804, cardsY, 320, null, 'The problem it solves', '<ul><li>Journaling tools record what you chose to say</li><li>None ask the follow-up; none remember next week</li><li>A summary is a file; an episode is a thing people play</li><li>Memory across episodes is the whole product</li></ul>');
+
+const flowY = maxY([c1, c2, c3], 34);
+const flow = addDiagram(100, flowY, 1024, 230, FLOW_HTML);
+const flowNote = addNote(1150, flowY, 'The memory loop', 'Mentions across episodes build an index. It feeds two things: the host\'s opening question — the callback — and the keyterms, so the show hears the names that recur in your life more accurately the longer you use it.');
+
+const notesY = maxY([flow, flowNote], 30);
+const n1 = addNote(100, notesY, 'The demo beat', 'Play the episode where the host calls back. Everything else in the product exists to make that one moment land.');
+const n2 = addNote(420, notesY, 'Model proposes, you dispose', 'Cuts arrive as strikethrough ranges with reasons — applied by default, revertible with one tap. An unreviewable edit on somebody\'s diary is a trust breach, not a feature.');
+const n3 = addNote(740, notesY, 'Not a dashboard', 'The analysis surface is quotes and links: people, open promises, circled topics. No sentiment gauges, no charts, no scores.');
+const n4 = addNote(1060, notesY, 'Explicit by design', 'Sessions end with one tap. Publishing is a separate, deliberate act per episode. Erase deletes rather than hides — locally and at the provider.');
+
+/* ─── Row 2: design system ─── */
+const r2 = maxY([n1, n2, n3, n4], 90);
+addSection(r2, UI_STRINGS.sections.designSystem);
+
+const dsTone = addText(100, r2 + 58, 'Night Studio — a late-night radio booth. Warm charcoal, one amber glow, the microphone as the event. Episodes are artifacts; time is measured in mono.', { fontSize: 14, maxWidth: 620 });
+
+const dsY = below(dsTone, 26);
+const ds1 = addDesignSystemCard(100, dsY, 460, null, 'color', {
+  title: 'Colour palette',
+  html: '<div class="color-swatch-group">' + [
+    ['Background', '#17130F'], ['Surface', '#201A13'], ['Raised', '#2A221A'], ['Amber', '#E8A33D'],
+    ['Sienna', '#A5714B'], ['Cream', '#F2EAD9'], ['On air', '#D9543F'], ['Ready', '#8FA874']
+  ].map(([n, h]) => '<div class="swatch-item"><div class="swatch-circle" style="background:' + h + '"></div><div class="swatch-name">' + n + '</div><div class="swatch-hex">' + h + '</div></div>').join('') + '</div><p style="font-size:11px;color:var(--text-tertiary);margin-top:12px;line-height:1.6;">Amber is the only accent and appears at most twice per screen. Red is reserved for recording and destructive actions; green only marks a kept promise.</p>'
+});
+const ds2 = addDesignSystemCard(580, dsY, 400, null, 'typography', {
+  title: 'Typography',
+  html: '<div class="type-sample-group">' +
+    '<div class="type-sample-row"><span class="type-sample-meta">DISPLAY<br>44px</span><span class="type-sample-text" style="font-size:34px;font-family:var(--font-serif)">The only place</span></div>' +
+    '<div class="type-sample-row"><span class="type-sample-meta">HEADING<br>26px</span><span class="type-sample-text" style="font-size:24px;font-family:var(--font-serif)">Three weeks of almost</span></div>' +
+    '<div class="type-sample-row"><span class="type-sample-meta">BODY<br>15px</span><span class="type-sample-text" style="font-size:14px">You talk, a host asks, and it becomes an episode.</span></div>' +
+    '<div class="type-sample-row"><span class="type-sample-meta">MONO<br>11px</span><span class="type-sample-text" style="font-size:12px;font-family:var(--font-mono);letter-spacing:.06em">14:02 · EP.04 · 48 kHz</span></div>' +
+    '</div><p style="font-size:11px;color:var(--text-tertiary);margin-top:12px;line-height:1.6;">Instrument Serif speaks — titles and quotes. The system sans works, and JetBrains Mono measures: timecodes, durations, levels.</p>'
+});
+const ds3 = addDesignSystemCard(1000, dsY, 340, null, 'components', {
+  title: 'Components',
+  html: '<div style="display:flex;flex-direction:column;gap:10px;">' +
+    '<div style="display:flex;gap:8px;"><span class="pg-btn pg-btn-amber" style="min-height:30px;font-size:11.5px;">Record</span><span class="pg-btn pg-btn-line" style="min-height:30px;font-size:11.5px;">Publish…</span><span class="pg-btn pg-btn-quiet" style="min-height:30px;font-size:11.5px;color:#C65B4E;">Erase</span></div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;"><span class="pg-chip live"><i></i>ON AIR</span><span class="pg-chip ok"><i></i>PRIVATE</span><span class="pg-chip amber"><i></i>DRAFT</span></div>' +
+    '<div style="display:flex;gap:12px;align-items:center;"><div class="pg-vu" style="height:26px;">' + vuBars(10) + '</div><div class="pg-wave" style="flex:1;height:22px;">' + wave(30, 9, 0.4) + '</div></div>' +
+    '<div class="pg-card" style="padding:9px 11px;"><span class="pg-mono">PLAYER ROW</span><div style="display:flex;align-items:center;gap:8px;margin-top:6px;"><span style="width:26px;height:26px;border-radius:50%;background:#E8A33D;display:grid;place-items:center;color:#1A140D;font-size:9px;">▶</span><div class="pg-wave" style="flex:1;height:18px;">' + wave(26, 3, 0.25) + '</div><span class="pg-mono">2:41</span></div></div>' +
+    '<div style="font-size:11px;color:var(--text-secondary);line-height:1.6;">Every control ships default / hover / focus / disabled. Touch targets stay at 44px.</div>' +
+    '</div>'
+});
+const ds4 = addDesignSystemCard(1360, dsY, 300, null, 'custom', {
+  title: 'States & motion',
+  html: '<div style="display:flex;flex-direction:column;gap:8px;font-size:11.5px;color:var(--text-secondary);line-height:1.6;">' +
+    '<div><b style="color:var(--text);">Every surface:</b> loading · empty · error · populated · edge</div>' +
+    '<div><b style="color:var(--text);">Episode lifecycle:</b> recording → draft → rendering → analysing → ready · failed</div>' +
+    '<div><b style="color:var(--text);">Motion:</b> 150ms confirm, 240ms view change, one orchestrated load reveal</div>' +
+    '<div><b style="color:var(--text);">Reduced motion:</b> honoured — level meters and playheads settle to static</div>' +
+    '<div><b style="color:var(--text);">Progress:</b> never moves backwards, survives a reload</div>' +
+    '</div>'
+});
+
+/* ─── Row 3: deliverables ─── */
+const r3 = maxY([ds1, ds2, ds3, ds4], 90);
+addSection(r3, UI_STRINGS.sections.deliverables);
+
+const rowY = r3 + 62;
+let cx = 100;
+function place(label, w, h, html, group) {
+  if (group) addGroupLabel(cx, rowY - 26, group);
+  const p = addPage(cx, rowY, w, h, label, html);
+  addArrow(parseFloat(p.style.left) + w + 14, rowY + h / 2 - 6);
+  cx = rightOf(p, 86);
+  return p;
+}
+
+place('Welcome — first visit', 390, 780, PAGE_WELCOME, 'M1 · FIRST VISIT');
+place('Pre-flight', 390, 780, PAGE_PREFLIGHT, 'M2 · LIVE SESSION');
+place('Live room', 390, 780, PAGE_LIVE);
+place('Ending & upload', 390, 780, PAGE_WRAP);
+place('Editor — the draft', 1240, 760, PAGE_EDITOR, 'M3 · DRAFT & EDITOR');
+place('Episode — ready', 1240, 760, PAGE_EPISODE, 'M4 · EPISODE');
+place('Gallery', 1240, 720, PAGE_GALLERY, 'M5 · GALLERY');
+place('Threads — memory', 1240, 720, PAGE_THREADS, 'M6 · MEMORY');
+place('Admin', 1000, 640, PAGE_ADMIN, 'M7 · GUEST & ADMIN');
+place('Privacy', 1000, 560, PAGE_PRIVACY);
+place('Public share', 390, 780, PAGE_SHARE, 'M8 · PUBLIC SHARE');
+
+const stY = rowY + 880;
+const s1 = addNote(100, stY, 'Refusals', 'Two refusal states replace the pre-flight button: recording paused (the kill switch) and guest limit reached. Both keep the season fully playable.');
+const s2 = addNote(420, stY, 'Failed job', 'A failed step keeps both stems, marks the episode failed with the reason, and offers retry. Nothing was spent twice.');
+const s3 = addNote(740, stY, 'Publish gate', 'Publishing names exactly what becomes public — the render and the cover — and what never does: stems, transcript, threads.');
+const s4 = addNote(1060, stY, 'Erase', 'One confirmation, plain words: every row, both stems, the render, the cover, and the provider\'s copy.');
+const s5 = addNote(1380, stY, 'Guest landing', 'A visitor sees a season, not a microphone button. No empty states anywhere in the guest path.');
+
+const r = viewport.getBoundingClientRect();
+panX = 40; panY = 30;
+updateTransform();
+})();
+</script>
+</body>
+</html>

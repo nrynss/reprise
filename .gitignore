@@ -1,7 +1,10 @@
 # Planning stays out of the repository.
 AGENTS.md
 product.md
-dev-diary/
+dev-diary/*
+# The mockup is the exception: it is committed so it travels between machines.
+# A parent directory cannot be un-ignored, hence dev-diary/* rather than dev-diary/.
+!dev-diary/mockup/
 
 # Secrets never land here.
 .env
