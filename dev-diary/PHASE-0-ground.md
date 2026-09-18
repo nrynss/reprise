@@ -162,12 +162,51 @@ No real voice goes in, and no guest recording ever becomes a fixture.
 
 ---
 
+### T0.6: Repair the speech fixtures
+```yaml
+requires:   T0.2
+fixture-ok: yes
+size:       S · mid
+owns:       testdata/speech/
+status:     not-started
+```
+T0.2's review recorded two fixture defects out of scope. Both are real and neither changes a
+measurement, so the record stands. They are fixed here.
+
+**The committed wav files carry a corrupt header.** Both declare a RIFF size of 2147479588 and a
+data size of 2147479552, against real sizes of 157712 and 175346 bytes. `ffprobe` warns and
+estimates the duration from the bitrate. The cause is in `generate.sh`, which pipes `espeak-ng
+--stdout` into a file. Standard output does not seek, so the synthesizer never patches the
+placeholder sizes it wrote first. Writing with `-w` instead lets it seek and patch.
+
+**Nothing builds the bytes the probe actually streams.** The script writes wav only, while the test
+streams `exchange-24k.pcm` and `keyterm-24k.pcm`. Their provenance is by inspection today, because
+no committed step converts one to the other. The script does the conversion, so one command makes
+every file beside it.
+
+**The image is pinned by tag, not by content.** `ubuntu:24.04` moves, and `apt-get install
+espeak-ng` takes whatever version the index offers that day. The record claims byte for byte
+reproduction, which holds only while that version holds. Pin the package version, or the image
+digest, or both, and name what was pinned.
+
+**Regeneration must not move the measured bytes.** The probe measured these clips, so a regenerated
+pcm that differs byte for byte invalidates the record rather than repairing it. Compare before
+committing. If the bytes differ, say why in the record and replace both the pcm and the record's
+sizes and durations together.
+
+**Done when:** `ffprobe` reads each wav with no warning and a duration matching the record, 3.58 and
+3.98 seconds. Running `generate.sh` twice produces identical bytes for all four files. The
+regenerated pcm matches what the live probe streamed, or the record says why it moved.
+
+---
+
 ## Exit criteria
 
 - [ ] The image builds and serves the shell, and a clean clone passes the gate three times.
 - [ ] Every provider fact in `project.md` has a live measurement behind it.
 - [ ] The Gemini credential route, the chapter route and the result route are decided.
 - [ ] `testdata/sessions/` holds three recorded sessions made from generated speech.
+- [ ] Every committed fixture comes from its own script, and `ffprobe` reads it with no warning.
 
 ---
 
