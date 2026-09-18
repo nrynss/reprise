@@ -171,10 +171,7 @@ func writeDriverSession(
 	write("user.wav", [][]float64{user})
 	write("host.wav", [][]float64{host})
 	write("provider.wav", [][]float64{providerLeft, providerRight})
-	raw, err := json.Marshal(sessionOffsets{
-		UserStartSec: clock.UserStartSec,
-		HostStartSec: clock.HostStartSec,
-	})
+	raw, err := json.Marshal(sessionOffsets(clock))
 	if err != nil {
 		t.Fatalf("marshal offsets: %v", err)
 	}
