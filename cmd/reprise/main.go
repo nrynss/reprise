@@ -1,6 +1,6 @@
 // Command reprise serves the built web application and a health endpoint.
 // It is one static binary for one distroless container, so it reads the app
-// from disk instead of embedding it: the Docker build stages web/build next
+// from disk instead of embedding it. The Docker build stages web/build next
 // to the binary and the container needs no rebuild to ship a web change.
 package main
 
