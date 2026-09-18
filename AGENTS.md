@@ -448,6 +448,10 @@ Lambo is the graph memory every session here shares. Several agents work this re
 the graph is the only place one session learns what another decided. Every role uses it, the
 orchestrator included.
 
+**No lambo, no obligation.** If your environment exposes no lambo MCP server, skip this section and
+work from this file. It holds everything you need. The rest of this section binds every agent that
+has the tools.
+
 **Recall before you read anything else.** Call `lambo_recall` before the read order below, before you
 open a file, and before you search the filesystem. The graph records what other agents actually did
 and why. The source files record only the result.
@@ -476,7 +480,7 @@ file still holds everything you need.
 
 ## Read order
 
-0. `lambo_recall` on your task, before you open anything.
+0. `lambo_recall` on your task, before you open anything. Skip this step if you have no lambo.
 1. This file, in full.
 2. [`product.md`](product.md), then [`dev-diary/project.md`](dev-diary/project.md).
 3. Your task's block in its `dev-diary/PHASE-*.md`, and `dev-diary/libraries.md`.
