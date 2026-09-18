@@ -1,0 +1,507 @@
+// One live take and everything it touches. The record page owns the
+// template and nothing else. This controller owns the audio clock, the
+// stems, the socket and the ending, so the drain path stays identical in
+// production and under the mock harness. It holds no reactivity of its
+// own. It reports every change through one snapshot callback the page
+// renders.
+
+import { api } from '@nrynss/chaaya/api';
+import {
+	AudioRecorder,
+	ChunkUploader,
+	PcmStreamPlayer,
+	measureBlock,
+	type CaptureChunk
+} from '@nrynss/chaaya/audio';
+import { SessionGuard } from '@nrynss/chaaya/guard';
+import {
+	MockSocketHandle,
+	MockUploadServer,
+	rehydrateServerFromBrowser,
+	type MockScript
+} from '$lib/voice/mock';
+import { drainHostBlock, drainUserBlock, type HostMark } from '$lib/voice/take';
+import { makeTestTone } from '$lib/voice/pcm';
+import { parseSessionStart, socketUrl, type SessionStart } from '$lib/voice/session';
+import { browserSocket, VoiceSocket, type SocketHandle } from '$lib/voice/socket';
+
+export type RecordPhase = 'preflight' | 'starting' | 'live' | 'ending' | 'recovering';
+
+export interface RecordTurn {
+	role: 'user' | 'host';
+	text: string;
+}
+
+// RecordSnapshot carries everything the page renders. The controller emits
+// a fresh one after every change, and the page swaps it in wholesale.
+export interface RecordSnapshot {
+	phase: RecordPhase;
+	notice: string;
+	turns: RecordTurn[];
+	levelDb: number;
+	elapsed: string;
+	armed: boolean;
+	greeting: string;
+}
+
+// MockVoiceHarness drives the take without fixtures. The page exposes it
+// on the window under the mock flag, and the end to end run calls it.
+export interface MockVoiceHarness {
+	feedBlocks(count: number): void;
+	heapBytes(): number | null;
+	rate(): number;
+	markerEveryBlocks(): number;
+	fedBlocks(): number;
+	sessionEndCount(): number;
+	httpEndCount(): number;
+	serverIds(): string[];
+	serverBytes(id: string): number[];
+	userUploadId(): string | undefined;
+	hostUploadId(): string | undefined;
+	marks(): HostMark[];
+	turns(): RecordTurn[];
+	uploadState(): { user: string; host: string; userError: string; hostError: string };
+	finishUploads(): Promise<{ userBytes: number; hostBytes: number }>;
+	finishTake(): Promise<void>;
+}
+
+export interface MockRecovered {
+	sessions: number;
+	chunks: number;
+	receipts: Array<{ id: string; sizeBytes: number }>;
+}
+
+interface HeapPerformance extends Performance {
+	memory?: { usedJSHeapSize: number };
+}
+
+const UPLOAD_BASE = '/api/uploads';
+const CHUNK_FRAMES = 4096;
+const TONE_SECONDS = 2;
+
+// emptySnapshot gives the page an initial render with no session behind it.
+export const emptySnapshot: RecordSnapshot = {
+	phase: 'preflight',
+	notice: 'Check the microphone, then start the take.',
+	turns: [],
+	levelDb: -100,
+	elapsed: '0:00',
+	armed: false,
+	greeting: ''
+};
+
+function mockScript(): MockScript {
+	return {
+		greetingText: 'Last time you mentioned the loft. Did you ever go back?',
+		greetingAudio: makeTestTone(24000, TONE_SECONDS, 60),
+		replyAfterBlocks: 4,
+		replyAudio: makeTestTone(24000, TONE_SECONDS, 60),
+		replyText: 'Say more about that.',
+		interrupted: true
+	};
+}
+
+// RecordController runs one take from the first gesture to the draft.
+// The mock flag swaps the provider and the upload server for doubles and
+// feeds generated input through the same drain. The resume flag skips the
+// take and completes whatever the store still holds.
+export class RecordController {
+	private readonly mockMode: boolean;
+	private readonly resumeOnly: boolean;
+	private readonly onChange: (snapshot: RecordSnapshot) => void;
+	private phase: RecordPhase = 'preflight';
+	private notice = emptySnapshot.notice;
+	private turns: RecordTurn[] = [];
+	private levelDb = -100;
+	private elapsed = '0:00';
+	private armed = false;
+	private greeting = '';
+	private context: AudioContext | null = null;
+	private recorder: AudioRecorder | null = null;
+	private player: PcmStreamPlayer | null = null;
+	private userUpload: ChunkUploader | null = null;
+	private hostUpload: ChunkUploader | null = null;
+	private voice: VoiceSocket | null = null;
+	private guard: SessionGuard | null = null;
+	private session: SessionStart | null = null;
+	private owner = 'guest';
+	private takeStart = 0;
+	private replyCount = 0;
+	private timer: number | null = null;
+	private marks: HostMark[] = [];
+	private mockServer: MockUploadServer | null = null;
+	private mockHandle: MockSocketHandle | null = null;
+	private httpEndCount = 0;
+	private feedOffset = 0;
+	private feedTime = 0;
+	private fedBlockCount = 0;
+	private ending: Promise<void> | null = null;
+	private hideListener: (() => void) | null = null;
+
+	constructor(options: {
+		mock: boolean;
+		resume: boolean;
+		onChange: (snapshot: RecordSnapshot) => void;
+	}) {
+		this.mockMode = options.mock;
+		this.resumeOnly = options.resume;
+		this.onChange = options.onChange;
+	}
+
+	/** Start the take or the recovery, depending on the resume flag. */
+	mount(): void {
+		if (this.mockMode && this.resumeOnly) {
+			void this.recoverMockUploads();
+			return;
+		}
+		this.emit();
+		this.hideListener = () => {
+			if (this.phase === 'live') void this.voice?.end();
+		};
+		window.addEventListener('pagehide', this.hideListener);
+	}
+
+	/** Stop timers and listeners, and end a take the page walks away from. */
+	destroy(): void {
+		if (this.hideListener !== null) {
+			window.removeEventListener('pagehide', this.hideListener);
+			this.hideListener = null;
+		}
+		if (this.timer !== null) {
+			window.clearInterval(this.timer);
+			this.timer = null;
+		}
+		this.guard?.destroy();
+		if (this.phase === 'live') void this.voice?.end();
+	}
+
+	/** Open the session from the start control. A gesture must wrap this. */
+	async start(): Promise<void> {
+		if (this.phase !== 'preflight') return;
+		this.phase = 'starting';
+		this.notice = 'Opening the session.';
+		this.emit();
+		try {
+			if (this.mockMode) {
+				await this.startMockTake();
+			} else {
+				await this.startRealTake();
+			}
+			this.takeStart = this.context?.currentTime ?? 0;
+			this.phase = 'live';
+			this.notice = 'On air. The host hears you.';
+			this.emit();
+			this.timer = window.setInterval(() => {
+				if (this.context !== null) {
+					this.elapsed = formatElapsed(this.context.currentTime, this.takeStart);
+					this.emit();
+				}
+			}, 500);
+		} catch (error) {
+			this.phase = 'preflight';
+			this.notice = error instanceof Error ? error.message : 'The session did not open.';
+			this.emit();
+		}
+	}
+
+	/** Drive the end control. The first press arms, the second press ends. */
+	endControl(): void {
+		if (this.phase !== 'live') return;
+		if (!this.armed) {
+			this.armed = true;
+			this.notice = 'Press end again to stop the take.';
+			this.emit();
+			return;
+		}
+		void this.endTake();
+	}
+
+	/** End the take and hand the session to the processing screen. */
+	async endTake(): Promise<void> {
+		if (this.ending !== null) {
+			await this.ending;
+			return;
+		}
+		if (this.voice === null || this.session === null) return;
+		this.phase = 'ending';
+		this.armed = false;
+		this.notice = 'Ending the session.';
+		this.emit();
+		const voice = this.voice;
+		const session = this.session;
+		this.ending = (async () => {
+			await voice.end();
+			await this.recorder?.stop();
+			if (this.userUpload !== null) await this.userUpload.finish();
+			if (this.hostUpload !== null) await this.hostUpload.finish();
+			try {
+				await api<unknown>(`/api/sessions/${session.session_id}/end`, { method: 'POST' });
+			} catch {
+				// The end record lands when its handler exists. The socket
+				// close above already stopped the billing clock.
+			}
+			this.guard?.close();
+			const userBytes = this.userUpload?.receipt?.sizeBytes ?? 0;
+			const hostBytes = this.hostUpload?.receipt?.sizeBytes ?? 0;
+			const suffix = this.mockMode ? '&mock=1' : '';
+			window.location.assign(
+				`/processing?episode=${encodeURIComponent(session.episode_id)}&uploads=done&userBytes=${userBytes}&hostBytes=${hostBytes}${suffix}`
+			);
+		})();
+		await this.ending;
+	}
+
+	harness(): MockVoiceHarness | null {
+		if (!this.mockMode || this.mockHandle === null || this.mockServer === null) return null;
+		const handle = this.mockHandle;
+		const server = this.mockServer;
+		if (handle === null || server === null) return null;
+		return {
+			feedBlocks: (count: number) => this.feedBlocks(count),
+			heapBytes: () => this.heapBytes(),
+			rate: () => this.context?.sampleRate ?? 0,
+			markerEveryBlocks: () =>
+				Math.max(1, Math.round(((this.context?.sampleRate ?? 48000) * 2) / CHUNK_FRAMES)),
+			fedBlocks: () => this.fedBlockCount,
+			sessionEndCount: () => handle.log.filter((entry) => entry === 'session.end').length,
+			httpEndCount: () => this.httpEndCount,
+			serverIds: () => server.ids(),
+			serverBytes: (id: string) => [...server.bytes(id)],
+			userUploadId: () => this.userUpload?.id,
+			hostUploadId: () => this.hostUpload?.id,
+			marks: () => [...this.marks],
+			turns: () => [...this.turns],
+			uploadState: () => ({
+				user: `${this.userUpload?.state ?? 'none'} ack=${this.userUpload?.acknowledged ?? -1} pending=${this.userUpload?.pending ?? -1} retries=${this.userUpload?.retries ?? -1}`,
+				host: `${this.hostUpload?.state ?? 'none'} ack=${this.hostUpload?.acknowledged ?? -1} pending=${this.hostUpload?.pending ?? -1} retries=${this.hostUpload?.retries ?? -1}`,
+				userError: this.userUpload?.error?.code ?? '',
+				hostError: this.hostUpload?.error?.code ?? ''
+			}),
+			finishUploads: () => this.finishUploads(),
+			finishTake: () => this.endTake()
+		};
+	}
+
+	/** Finish both uploads without ending the socket. Tests read stems off this. */
+	private async finishUploads(): Promise<{ userBytes: number; hostBytes: number }> {
+		if (this.userUpload !== null) await this.userUpload.finish();
+		if (this.hostUpload !== null) await this.hostUpload.finish();
+		return {
+			userBytes: this.userUpload?.receipt?.sizeBytes ?? 0,
+			hostBytes: this.hostUpload?.receipt?.sizeBytes ?? 0
+		};
+	}
+
+	private feedBlocks(count: number): void {
+		if (this.context === null || !this.mockMode) return;
+		const rate = this.context.sampleRate;
+		const period = Math.max(1, Math.round((rate * 2) / CHUNK_FRAMES));
+		for (let i = 0; i < count; i += 1) {
+			const samples = new Float32Array(CHUNK_FRAMES);
+			for (let frame = 0; frame < samples.length; frame += 1) {
+				samples[frame] = 0.3 * Math.sin((2 * Math.PI * 440 * (this.feedOffset + frame)) / rate);
+			}
+			if (this.fedBlockCount > 0 && this.fedBlockCount % period === 0) {
+				samples[0] = 0.9;
+			}
+			this.handleUserBlock({ samples, offset: this.feedOffset, contextTime: this.feedTime });
+			this.feedOffset += samples.length;
+			this.feedTime += samples.length / rate;
+			this.fedBlockCount += 1;
+		}
+	}
+
+	private heapBytes(): number | null {
+		const perf = performance as HeapPerformance;
+		if (perf.memory === undefined) return null;
+		return perf.memory.usedJSHeapSize;
+	}
+
+	private async startRealTake(): Promise<void> {
+		const data = await api<unknown>('/api/sessions', { method: 'POST' });
+		this.session = parseSessionStart(JSON.stringify(data));
+		this.greeting = this.session.config.greeting;
+		this.owner = this.session.episode_id;
+		this.context = new AudioContext();
+		await this.context.resume();
+		this.player = new PcmStreamPlayer({ context: this.context, streamRate: 24000 });
+		await this.openUploads();
+		this.voice = this.wireVoice(browserSocket(socketUrl(this.session.token)));
+		this.guard = new SessionGuard({ url: `/api/sessions/${this.session.session_id}/end` });
+		this.guard.attach();
+		this.recorder = new AudioRecorder({
+			mode: 'pcm',
+			context: this.context,
+			autoStopSeconds: 0,
+			echoCancellation: true,
+			noiseSuppression: false,
+			autoGainControl: false,
+			retain: false,
+			onChunk: (chunk) => this.handleUserBlock(chunk)
+		});
+		await this.recorder.start();
+	}
+
+	private async startMockTake(): Promise<void> {
+		this.context = new AudioContext();
+		await this.context.resume();
+		this.session = {
+			session_id: 'mock-session',
+			episode_id: 'mock-episode',
+			token: 'mock-token',
+			expires_in_seconds: 60,
+			max_session_duration_seconds: 1200,
+			config: {
+				system_prompt: 'mock host',
+				greeting: 'Last time you mentioned the loft. Did you ever go back?',
+				keyterms: ['the loft']
+			}
+		};
+		this.greeting = this.session.config.greeting;
+		this.mockServer = new MockUploadServer(UPLOAD_BASE);
+		this.installMockFetch(this.mockServer);
+		this.player = new PcmStreamPlayer({ context: this.context, streamRate: 24000 });
+		await this.openUploads();
+		this.mockHandle = new MockSocketHandle(mockScript());
+		this.voice = this.wireVoice(this.mockHandle);
+		this.guard = new SessionGuard({ url: `/api/sessions/${this.session.session_id}/end` });
+		this.guard.attach();
+		this.mockHandle.open();
+		this.pushTurn('host', this.session.config.greeting);
+		this.exposeMockHandle();
+	}
+
+	private wireVoice(handle: SocketHandle): VoiceSocket {
+		if (this.session === null) throw new Error('the take opened with no session');
+		return new VoiceSocket(handle, this.session.config, {
+			onHostAudio: (samples) => this.handleHostAudio(samples),
+			onReplyDone: (interrupted) => this.handleReplyDone(interrupted),
+			onUserTranscript: (text) => this.pushTurn('user', text),
+			onHostTranscript: (text) => this.pushTurn('host', text),
+			onEnded: () => {}
+		});
+	}
+
+	private async openUploads(): Promise<void> {
+		this.userUpload = new ChunkUploader({
+			url: UPLOAD_BASE,
+			owner: this.owner,
+			contentType: 'audio/pcm'
+		});
+		this.hostUpload = new ChunkUploader({
+			url: UPLOAD_BASE,
+			owner: this.owner,
+			contentType: 'audio/pcm'
+		});
+		await this.userUpload.start();
+		await this.hostUpload.start();
+	}
+
+	private handleUserBlock(chunk: CaptureChunk): void {
+		if (this.context === null || this.userUpload === null || this.voice === null) return;
+		const drained = drainUserBlock(chunk.samples, this.context.sampleRate);
+		this.userUpload.append(drained.upload);
+		this.voice.sendAudio(drained.socket);
+		this.levelDb = measureBlock(chunk.samples).rmsDb;
+	}
+
+	private handleHostAudio(samples: Float32Array): void {
+		if (this.player === null || this.hostUpload === null) return;
+		this.player.push(samples);
+		this.hostUpload.append(drainHostBlock(samples));
+	}
+
+	private handleReplyDone(interrupted: boolean): void {
+		if (this.player === null) return;
+		const cut = this.player.flush();
+		this.marks.push({ reply: this.replyCount, cutTime: cut, interrupted });
+		this.replyCount += 1;
+	}
+
+	private pushTurn(role: 'user' | 'host', text: string): void {
+		this.turns = [...this.turns.slice(-49), { role, text }];
+	}
+
+	private emit(): void {
+		this.onChange({
+			phase: this.phase,
+			notice: this.notice,
+			turns: [...this.turns],
+			levelDb: this.levelDb,
+			elapsed: this.elapsed,
+			armed: this.armed,
+			greeting: this.greeting
+		});
+	}
+
+	private installMockFetch(server: MockUploadServer): void {
+		const realFetch = window.fetch.bind(window);
+		window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+			if (url.includes(UPLOAD_BASE)) {
+				return server.handle(url, init);
+			}
+			if (url.includes('/api/sessions/') && url.endsWith('/end')) {
+				this.httpEndCount += 1;
+				return new Response(JSON.stringify({ ok: true }), {
+					status: 200,
+					headers: { 'content-type': 'application/json' }
+				});
+			}
+			return realFetch(input, init);
+		}) as typeof window.fetch;
+		const realBeacon = navigator.sendBeacon.bind(navigator);
+		const countHttpEnd = () => {
+			this.httpEndCount += 1;
+		};
+		navigator.sendBeacon = ((url: string | URL) => {
+			const text = typeof url === 'string' ? url : url.href;
+			if (text.includes('/api/sessions/') && text.endsWith('/end')) {
+				countHttpEnd();
+				return true;
+			}
+			return realBeacon(url);
+		}) as Navigator['sendBeacon'];
+	}
+
+	private exposeMockHandle(): void {
+		const target = window as unknown as Record<string, unknown>;
+		target['__mockVoice'] = this.harness();
+	}
+
+	private async recoverMockUploads(): Promise<void> {
+		this.phase = 'recovering';
+		this.notice = 'Recovering the persisted upload.';
+		this.emit();
+		const server = new MockUploadServer(UPLOAD_BASE);
+		this.installMockFetch(server);
+		const found = await rehydrateServerFromBrowser(server);
+		const receipts: MockRecovered['receipts'] = [];
+		for (;;) {
+			const resumed = await ChunkUploader.resume();
+			if (resumed === undefined) break;
+			await resumed.finish();
+			if (resumed.receipt !== undefined) {
+				receipts.push({ id: resumed.receipt.id, sizeBytes: resumed.receipt.sizeBytes });
+			}
+		}
+		const target = window as unknown as Record<string, unknown>;
+		target['__mockVoice'] = {
+			recovered: (): MockRecovered => ({				sessions: found.sessions,
+				chunks: found.chunks,
+				receipts
+			}),
+			serverBytes: (id: string) => [...server.bytes(id)],
+			serverIds: () => server.ids()
+		};
+		this.notice = `Recovered ${receipts.length} uploads over persisted bytes.`;
+		this.emit();
+	}
+}
+
+function formatElapsed(now: number, start: number): string {
+	const total = Math.max(0, Math.floor(now - start));
+	const minutes = Math.floor(total / 60);
+	const seconds = total % 60;
+	return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
