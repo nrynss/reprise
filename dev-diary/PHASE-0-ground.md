@@ -145,7 +145,7 @@ requires:   T0.2
 fixture-ok: no
 size:       S · mid
 owns:       testdata/sessions/
-status:     in-progress:land:t0.5-rem-r1@a150012312dc78bd3b2f24e31e2e662fe37b3db2
+status:     done:d84fc8cd059f1dffc8a19f89c413721234d8fe2e
 ```
 Run three short live sessions from generated speech and commit their artifacts. Downstream tasks
 build on these offline.
@@ -238,12 +238,12 @@ naming the pin.
 
 ## Exit criteria
 
-- [ ] The image builds and serves the shell, and a clean clone passes the gate three times.
-- [ ] Every provider fact in `project.md` has a live measurement behind it.
-- [ ] The Gemini credential route, the chapter route and the result route are decided.
-- [ ] `testdata/sessions/` holds three recorded sessions made from generated speech.
-- [ ] Every committed fixture comes from its own script, and `ffprobe` reads it with no warning.
-- [ ] CI reaches the gate, and `ffmpeg` is the 9.0.1 build Keel measures with, pinned by digest.
+- [x] The image builds and serves the shell, and a clean clone passes the gate three times.
+- [x] Every provider fact in `project.md` has a live measurement behind it.
+- [x] The Gemini credential route, the chapter route and the result route are decided.
+- [x] `testdata/sessions/` holds three recorded sessions made from generated speech.
+- [x] Every committed fixture comes from its own script, and `ffprobe` reads it with no warning.
+- [x] CI reaches the gate, and `ffmpeg` is the 9.0.1 build Keel measures with, pinned by digest.
 
 ---
 
@@ -280,9 +280,18 @@ espeak-ng version, and the ffmpeg digest, writes seekable wavs, and scripts the 
 Regenerated pcm matches the streamed bytes exactly, so no record update was needed. ffprobe reads
 clean at 3.58 and 3.98 seconds.
 
+T0.5 landed after round 2 approval with zero residue: three sessions (steady 18.11s, pauses
+30.38s, barge-in 25.24s) hold user stems, stereo recordings, event logs with local clocks, and
+timelines. Round 1 found corrupt wav headers, an unpinned toolchain, a non-recreating script,
+and a wrong barge number. All four fixed with zero live re-spend. P3 tasks read these offline.
+
 ### What surprised us
 The AssemblyAI docs, read while planning, showed the live user transcript has no word timings and
 auto chapters are deprecated. `project.md` records both departures.
 
+The token cap does not end the session: three idle runs stayed open past a 60 second cap with
+billing continuing until the client sent `session.end`. The browser runs its own timer.
+
 ### Notes for the next developer
-T0.5 starts now that T0.2 landed. The other orchestrator's tree held no dirt at this landing.
+P0 is closed. Every probe measured, every fixture committed, every record filed. P1 still needs
+T1.2, T1.3 and T1.4 from the other orchestrator. P3 builds on `testdata/sessions/` offline.
