@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy/redeploy.sh — redeploy Reprise on the foleyflow box with rollback.
+# deploy/redeploy.sh - redeploy Reprise on the foleyflow box with rollback.
 #
 # 1. Preflight the secret files through deploy/run.sh, which refuses to
 #    start on a missing or wrongly permissioned secret.
@@ -108,7 +108,7 @@ while true; do
   case "${RESP}" in
     "ok "*)
       HEALTH_VERSION="$(printf '%s' "${RESP}" | sed -n 's/^ok [^ ]* version=//p')"
-      if [[ -z "${EXPECTED_SHA}" || "${HEALTH_VERSION}" == "${EXPECTED_SHA}"* || "${EXPECTED_SHA}" == "${HEALTH_VERSION}"* ]]; then
+      if [[ -z "${EXPECTED_SHA}" || ( -n "${HEALTH_VERSION}" && ( "${HEALTH_VERSION}" == "${EXPECTED_SHA}"* || "${EXPECTED_SHA}" == "${HEALTH_VERSION}"* ) ) ]]; then
         HEALTH_OK=1
         break
       fi
