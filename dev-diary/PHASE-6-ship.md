@@ -15,30 +15,63 @@ voices checked once, and the materials the submission form asks for.
 
 ### T6.1: Deploy
 ```yaml
-requires:   T0.1, T1.5
+requires:   T0.1, T1.5, T2.1
 fixture-ok: no
-size:       S · mid
-owns:       deploy/
+size:       M · mid
+owns:       deploy/, cmd/reprise/main.go, Dockerfile
 status:     not-started
 ```
-**Build on:** the image from T0.1 and `config/reprise.box.toml` from T1.5. The deploy kit is
-Reprise's, because it deploys one binary to one box.
+**Build on:** the image from T0.1, `config/reprise.box.toml` from T1.5, and the session registry from
+T2.1, which is what a drain waits on. The box is documented in
+`/home/nryn/work/hetzner/docs/foleyflow-server.md`. Read it first. It is a read-only source, like
+Keel and Chaaya, and no task here edits it.
 
-One container behind the existing Traefik on the Hetzner box, at `reprise.nryn.dev`.
+**The box, as recorded on 2026-09-04.** One Hetzner VPS named `foleyflow` at `167.233.247.107`.
+Seven containers share the Docker network `proxy`. Traefik v3 is the only one publishing ports, 80
+and 443, and it discovers services through the Docker socket. Every public hostname is a proxied
+Cloudflare A record, and certificates come from Let's Encrypt over DNS-01. Roughly 2.9 GiB of memory
+was free and the host runs no swap.
 
+**Copy `thutapi`, which already does this.** It runs distroless nonroot, publishes no host port,
+bind mounts `/srv/thutapi/data` to `/data` owned by uid 65532, and reports its commit at `/healthz`.
+Reprise deploys the same shape at `reprise.nryn.dev`.
+
+* The container joins the `proxy` network and publishes nothing. Traefik routes to it by label.
 * The container reads `config/reprise.box.toml` through `REPRISE_CONFIG`.
 * Secrets live in `/etc/reprise/env`, root-owned, mode `0600`, mounted read-only. The TOML's
   `env_file` references point at it, so no secret passes on the command line or through `docker run`
-  environment flags.
-* SQLite and media on a host bind mount, owned by the distroless nonroot user.
-* A resource limit on CPU and memory, so a render cannot starve the other services on the box.
+  environment flags. `/etc/reprise/gemini-sa.json` mounts the same way.
+* A host bind mount carries SQLite and media, owned by uid 65532, the distroless nonroot user. The
+  box config puts them under `/var/lib/reprise` inside the container.
+* A CPU and memory limit, because the box is small, has no swap, and already runs seven containers.
+  The render is the greedy one, so size the limit against ffmpeg rather than the idle server.
 * A nightly `sqlite.Backup` copied off the box, plus the media directory.
 
-A redeploy must not cut a live session. The container waits for open sessions to end before it
-stops, up to the session cap.
+**Three gaps this task closes before it can deploy anything.** Each one is code, not deployment,
+which is why the `owns` line grew past `deploy/`.
 
-**Done when:** `reprise.nryn.dev/healthz` answers from a workstation. The boot log shows the
-resolution plan with every secret resolved and no value. A redeploy during a session lets it finish.
+1. **The binary never reads its own settings.** `cmd/reprise/main.go` does not import
+   `internal/settings`, never looks at `REPRISE_CONFIG`, and never logs the plan. Load the settings
+   at boot and log `Plan.String`, which names every source and carries no value.
+2. **Nothing drains.** `main.go` calls `http.ListenAndServe` with no signal handling. Take SIGTERM,
+   stop accepting new sessions, wait for open ones through the T2.1 registry, then shut down. The
+   `docker run` stop timeout must be at least `session_max_seconds`, which is 1800.
+3. **ffmpeg is not in the image.** The runtime stage is `distroless/static-debian12`, which carries
+   no ffmpeg, while the render, the export and the waveform all shell out through `keel/ffmpeg`. Copy
+   a pinned static `ffmpeg` and `ffprobe` into the runtime stage, the same pair CI installs.
+
+**Two decisions the owner makes before this starts.**
+
+* **How the image reaches the box.** `thutapi` pulls a public GHCR image, which a private repository
+  cannot do without a registry credential on the host. Building on the box or shipping the image over
+  SSH both avoid that. Reprise has no git remote at all today.
+* **Where the nightly backup goes.** The box documentation found no backup job, no archives, and no
+  verified restore. This task cannot invent a destination, and the run script must not hold a
+  credential for one.
+
+**Done when:** `reprise.nryn.dev/healthz` answers from a workstation, never from the box, because
+Cloudflare challenges the box's own address. The boot log shows the resolution plan with every secret
+resolved and no value. A redeploy during a session lets it finish.
 
 ---
 
