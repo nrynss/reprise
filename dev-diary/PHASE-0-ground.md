@@ -200,6 +200,37 @@ regenerated pcm matches what the live probe streamed, or the record says why it 
 
 ---
 
+### T0.7: Repair the CI media install
+```yaml
+requires:   T0.1
+fixture-ok: yes
+size:       S · mid
+owns:       .github/workflows/ci.yml, Dockerfile
+status:     not-started
+```
+T6.1's review recorded this at H severity and out of scope, because `.github/workflows/ci.yml`
+belongs to T0.1, which is done. Nobody owns it, so nobody fixes it.
+
+**The pinned archive is gone.** The install step fetches `ffmpeg-linux-amd64` and
+`ffprobe-linux-amd64` from the `mwader/static-ffmpeg` v7.1 release. Both answer 404, confirmed again
+on 2026-09-19. `curl -fsSL` fails the step, so no run reaches the gate. The workflow has never run,
+because the repository has no remote yet. It breaks on the first push instead.
+
+**The image already solved this.** T6.1's Dockerfile copies the pair out of the pinned
+`mwader/static-ffmpeg:7.1` image rather than the release archive. CI takes the same route, so the
+same binaries measure in both places. AGENTS.md requires exactly that, because a measurement is only
+comparable when the measuring tool is identical wherever the check runs.
+
+**Pin by digest, not by tag.** Both the workflow and the Dockerfile name a tag today, and a tag
+moves. A digest makes the pair reproducible, and it makes a silent upstream change visible as a pull
+failure rather than as a drifting measurement.
+
+**Done when:** A run reaches the gate with the media stages green. `ffmpeg -version` in the workflow
+prints the same version the image ships, and both the workflow and the Dockerfile name the same
+digest.
+
+---
+
 ## Exit criteria
 
 - [ ] The image builds and serves the shell, and a clean clone passes the gate three times.
@@ -207,6 +238,7 @@ regenerated pcm matches what the live probe streamed, or the record says why it 
 - [ ] The Gemini credential route, the chapter route and the result route are decided.
 - [ ] `testdata/sessions/` holds three recorded sessions made from generated speech.
 - [ ] Every committed fixture comes from its own script, and `ffprobe` reads it with no warning.
+- [ ] CI reaches the gate, with `ffmpeg` and `ffprobe` installed from a source that resolves.
 
 ---
 
