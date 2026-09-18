@@ -12,7 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
+	"path/filepath"
 
 	"github.com/nrynss/keel/id"
 )
@@ -50,19 +50,17 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // appHandler serves the built application with a single-page fallback.
-// Unknown paths return index.html so client-side routes survive a reload.
+// The build emits the client shell as fallback.html, and unknown paths
+// return it so client-side routes survive a reload.
 func appHandler(webDir string) http.Handler {
 	root := http.FileServer(http.Dir(webDir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			if _, err := os.Stat(webDir + r.URL.Path); errors.Is(err, fs.ErrNotExist) {
-				r2 := r.Clone(r.Context())
-				r2.URL.Path = "/"
-				r = r2
+		path := r.URL.Path
+		if path != "/" && path != "/index.html" {
+			if _, err := os.Stat(filepath.Join(webDir, path)); errors.Is(err, fs.ErrNotExist) {
+				http.ServeFile(w, r, filepath.Join(webDir, "fallback.html"))
+				return
 			}
-		}
-		if strings.HasSuffix(r.URL.Path, "/") {
-			w.Header().Set("Cache-Control", "no-cache")
 		}
 		root.ServeHTTP(w, r)
 	})

@@ -23,10 +23,11 @@ func TestHealthzReturnsOK(t *testing.T) {
 
 func TestUnknownPathFallsBackToShell(t *testing.T) {
 	dir := t.TempDir()
-	shell := "<!doctype html><html><body>shell</body></html>"
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(shell), 0o644); err != nil {
+	shell := "<!doctype html><html><body>fallback shell</body></html>"
+	if err := os.WriteFile(filepath.Join(dir, "fallback.html"), []byte(shell), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
 	srv := httptest.NewServer(appHandler(dir))
 	defer srv.Close()
 

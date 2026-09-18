@@ -77,7 +77,7 @@ $leak"
 fi
 
 echo "-- consumer names"
-names=$(git grep -InEi 'hackathon|lablab' || true)
+names=$(git grep -InEi 'hackathon|lablab' -- ':!tools/check.sh' || true)
 if [ -n "$names" ]; then
 	fail "consumer names" "provider or consumer names in tracked files:
 $names"
