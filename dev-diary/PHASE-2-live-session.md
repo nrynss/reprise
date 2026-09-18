@@ -238,7 +238,7 @@ requires:   T2.4
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/cap.ts
-status:     in-progress:land:t2.7-impl@2aeacc375f225a77003a9a1c25608d22b4a27dee
+status:     done:190ef02fbd51597ef391107264073f81c595553d
 ```
 **Build on:** T2.4's socket and session guard. T0.2 proved the provider does not stop at the cap, so
 `project.md` now says the browser runs its own timer and ends first. No task owned that timer. This
@@ -254,6 +254,33 @@ one does.
 **Done when:** A Playwright run against the mock socket holds a session past its cap and sees exactly
 one `session.end`, sent by the timer and not by a person. A second run wakes a suspended page past
 the cap and sees the same. Neither run needs a wall clock threshold, because the mock drives time.
+
+---
+
+### T2.8: Wire the cap into the record page ★
+```yaml
+requires:   T2.4, T2.7
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/routes/record/, web/src/routes/record/cap.spec.ts
+status:     in-progress:implement:t2.8-impl
+```
+Opened from T2.7 round 1's out-of-scope rows. The cap unit landed unwired: the record page never
+constructs `SessionCap`, so no timer runs in the app and the Playwright remainder of T2.7's done
+criterion had no page to drive.
+
+* Build `SessionCap` beside the socket when the take goes live, with the end control path as
+  `finish` and the broker `max_session_duration_seconds`. Call `stop` on every take end path,
+  `wake` on show and visibility change, and render `warnText` in a live region with keyboard
+  reachable controls while `warning` holds.
+* The socket needs nothing new. Its latched `end` already gives the once-only close the timer
+  calls into. If it cannot do what the page needs, raise a contract change instead of reaching
+  into T2.4's files beyond this task's owns.
+
+**Done when:** A Playwright run against the mock socket holds a session past its cap and sees
+exactly one `session.end`, sent by the timer and not by a person. A second run wakes a suspended
+page past the cap and sees the same. Neither run uses a wall clock threshold, because the mock
+drives time.
 
 ---
 
@@ -285,6 +312,9 @@ voice path drains without accumulating, ends exactly once on every path includin
 replays offline behind a mock socket. The first implementer never committed, so a takeover verified
 the draft, fixed four defects, and committed. Round 1 found the pre-open end race; the fix
 short-circuits open on the end latch. That landing opens T2.5 and T2.7, both claimed.
+T2.7 landed (Orchestrator-2) after round 1 APPROVE with zero findings. The timer unit is proved
+through the real socket on a fake clock, but the record page never constructs it, so T2.8 opens to
+wire the cap into the page with the two Playwright runs.
 
 ### What surprised us
 Nothing yet.
