@@ -168,7 +168,7 @@ requires:   T0.2
 fixture-ok: yes
 size:       S · mid
 owns:       testdata/speech/
-status:     in-progress:implement:t0.6-impl
+status:     in-progress:review-r1:t0.6-rev-r1@53656ca6697e9795db604cb6d669329f3e7e6c36
 ```
 T0.2's review recorded two fixture defects out of scope. Both are real and neither changes a
 measurement, so the record stands. They are fixed here.
