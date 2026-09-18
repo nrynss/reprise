@@ -114,7 +114,7 @@ requires:   T1.3, T2.1
 fixture-ok: yes
 size:       M · frontier
 owns:       web/src/routes/record/, web/src/routes/processing/, web/src/lib/voice/
-status:     in-progress:land:t2.4-rem-r1@e471725264588e4bb0487e2cfa5d986c2de71558
+status:     done:bb25f89e3cf5d17fb637c0f69672bf2b72e068ae
 ```
 **Mockup:** the `preflight`, `live` and `processing` views ([`mockup`](mockup), `#/preflight`,
 `#/live`, `#/processing`).
@@ -170,7 +170,7 @@ requires:   T2.3, T2.4
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/align/
-status:     not-started
+status:     in-progress:implement:t2.5-impl
 ```
 Place both stems on one episode clock and prove it. The clock is real rather than inferred, because
 T2.4's page records and plays on one context: `CaptureChunk` carries `contextTime` per block, and the
@@ -238,7 +238,7 @@ requires:   T2.4
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/cap.ts
-status:     not-started
+status:     in-progress:implement:t2.7-impl
 ```
 **Build on:** T2.4's socket and session guard. T0.2 proved the provider does not stop at the cap, so
 `project.md` now says the browser runs its own timer and ends first. No task owned that timer. This
@@ -280,6 +280,11 @@ T2.3 landed (Orchestrator-2) after round 2 APPROVE with zero residue against rou
 lease now completes the tail after settling, and the over-cap alert fires once per session on a
 durable flag. Landing needed two rebases past the other orchestrator's T0.3 commits with a green
 gate each time.
+T2.4 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. The duplex
+voice path drains without accumulating, ends exactly once on every path including pre-open, and
+replays offline behind a mock socket. The first implementer never committed, so a takeover verified
+the draft, fixed four defects, and committed. Round 1 found the pre-open end race; the fix
+short-circuits open on the end latch. That landing opens T2.5 and T2.7, both claimed.
 
 ### What surprised us
 Nothing yet.
