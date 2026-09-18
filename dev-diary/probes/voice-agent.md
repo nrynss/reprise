@@ -275,3 +275,75 @@ lost session cannot burn more than 15 cents.
 - A package with only live tagged test files breaks the non-live gate.
   `internal/assemblyai/doc.go` holds the package clause so plain `go test`
   passes. Whoever owns the provider adapter keeps that file.
+
+## Server side end (sweep measurement)
+
+Live run on 2026-09-18 against the AssemblyAI Voice Agent API. The Go probe
+is `internal/assemblyai/terminate_live_test.go` behind the `live` build tag.
+It opens one real session with a 120 second cap, deletes the session record
+while the socket stays open, and records what the socket sees and what the
+API reports after. Two runs confirmed every answer. Each run connects about
+40 seconds and costs about 5 cents. Run it alone:
+
+```bash
+REPRISE_CONFIG=/absolute/path/to/config/reprise.local.toml \
+  go test -tags live -run TestTerminateLiveProbe -v ./internal/assemblyai/
+```
+
+The config path above is a placeholder. Point it at the local settings file
+the way the main probe does, with an absolute path. Relative paths resolve
+against the package directory under `go test`, so they miss the file.
+
+### DELETE does not end a connected session, and billing runs on
+
+`DELETE /v1/sessions/{id}` on a connected session returns 204 with an empty
+body. The socket sees nothing in the next 15 seconds: no `session.ended`,
+no `session.error`, and the wire stays open. A later `session.end` from the
+client still draws `session.ended`, and it bills the full wall time:
+
+```json
+{"type": "session.ended", "session_duration_seconds": 39.131378,
+ "audio_duration_seconds": null, "timestamp": 1789760529.7121396}
+```
+
+The test waited 15 seconds plus 20 seconds after the delete, then ended the
+call. A duration past 30 proves billing ran through the delete. Both runs
+billed about 39 seconds against about 41 seconds of wall time.
+
+### The record is gone after the delete
+
+Before the delete the record reads open with null duration and no
+artifacts:
+
+```json
+{"id": "sess_59c28e7b0ad143fd9dbdaf00605bc38", "agent_id": null,
+ "status": "created", "public_close_reason": null, "duration_seconds": null,
+ "config": null, "created_at": "2026-09-18T19:41:30.584151Z",
+ "ended_at": null, "artifacts": []}
+```
+
+After the delete the session leaves the list, and a fetch returns 404:
+
+```json
+{"code": "session_not_found", "message": "Session not found", "param": null,
+ "request_id": "67180a0c-cfff-47a6-8ed6-e1664454c6ca"}
+```
+
+It still reads 404 twenty seconds later. A second DELETE also returns 404
+with the same shape. Settle before deleting, because the duration is
+unreadable afterwards.
+
+### No other server side end exists
+
+The Sessions API offers GET on one session, GET on the list, and DELETE.
+None ends the call. The socket never sees `session.ended` unless the client
+sends `session.end`. The `expires_at` value near one hour out stays
+unmeasured as a close, because holding a session open for an hour costs a
+full hour. The only measured end is the client one.
+
+### Spend
+
+Two sessions of about 40 connected seconds each cost about 10 cents total.
+Every token carries a 120 second cap, so a lost run cannot burn more than
+15 cents. The probe deletes its session and fails when the session still
+lists afterwards.
