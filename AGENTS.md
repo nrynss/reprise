@@ -181,9 +181,9 @@ the tree ever reaches one.
   `git worktree list`, then re-reads the task's status line. If the head, the tree, or the line
   moved under it, it stops and reconciles before touching anything.
 - **Land serially through rebase.** The rebase-then-fast-forward is the atomic step. Whoever lands
-  second resolves the conflict. A dirty file the tree does not attribute to your own status lines
-  is another orchestrator's work. Never restore it, delete it, rebase over it, or commit it.
-  Report it instead.
+  second resolves the conflict. A dirty file your own status lines do not own is another
+  orchestrator's work. Stage and commit only your own files, leave theirs dirty, and keep going.
+  Note their dirt in your handoff log so the next session knows it was there and untouched.
 
 ### Planning files stay out of worktrees
 
