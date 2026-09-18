@@ -192,7 +192,7 @@ fixture-ok: no
 size:       M · frontier
 owns:       internal/broker/sweep.go, internal/broker/reconcile.go,
             internal/assemblyai/terminate.go, internal/assemblyai/terminate_live_test.go
-status:     in-progress:review-r1:t2.6-rev-r1@e3f6c3fc2bba687faa6c4f2c31e0985b7e1c6df4
+status:     in-progress:remediate-r1:t2.6-rem-r1
 ```
 **Build on:** T0.2's record, which overturned the plan. The token cap does not end the session. Three
 idle runs held a 60 second cap open past 100 seconds with no close and no error, and billing ran
