@@ -148,7 +148,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/episode/lifecycle.go, internal/episode/lifecycle_test.go
-status:     in-progress:land:t1.2-impl@6ead8a8b7f522e0de58e6712f5e0fb2f7bd21fc1
+status:     done:33ee3270a8c5f86085f41a21b4a6e17d43c22ac1
 ```
 The states are `recording`, `draft`, `rendering`, `analysing`, `ready` and `failed`. Visibility is
 separate, and always starts `private`.
@@ -254,7 +254,9 @@ exposure. The diary schema migrates under the `reprise` namespace with twelve ta
 delete cascades across every content table with the owner surviving. The round 2 review approved
 T1.1 with zero findings. The missing `main` wiring is a contract change held for the task that
 next owns that file. T1.6a strengthened both thinned pins, and its round 1 review
-approved with zero findings, so the box config and the credential source stay pinned.
+approved with zero findings, so the box config and the credential source stay pinned. T1.2 landed
+(Orchestrator-2) after a round 1 APPROVE with zero findings. The rebase onto current main kept the
+gate green.
 
 ### What surprised us
 
