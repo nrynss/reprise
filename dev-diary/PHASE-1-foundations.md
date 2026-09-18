@@ -86,7 +86,7 @@ requires:   T1.5
 fixture-ok: yes
 size:       XS · light
 owns:       internal/settings/settings_test.go
-status:     in-progress:review-r1:t1.6a-rev-r1@99638ba356355643fc09a855d75ea49177288c31
+status:     done:1026cb0e3b1e9bea18fd1b5c8c07e67f9c6f6b8c
 ```
 The review of the landed service account change found two thinned pins. The file that
 checks the shipped configs reads only the local one, so box-only drift stays green. The
@@ -253,8 +253,8 @@ Settings load once per environment through Keel. `internal/settings` holds the s
 exposure. The diary schema migrates under the `reprise` namespace with twelve tables, and episode
 delete cascades across every content table with the owner surviving. The round 2 review approved
 T1.1 with zero findings. The missing `main` wiring is a contract change held for the task that
-next owns that file. The T1.6 follow-up owns the two thinned test pins on the box config and the
-credential source.
+next owns that file. T1.6a strengthened both thinned pins, and its round 1 review
+approved with zero findings, so the box config and the credential source stay pinned.
 
 ### What surprised us
 
