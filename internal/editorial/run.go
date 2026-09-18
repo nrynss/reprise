@@ -3,6 +3,7 @@ package editorial
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -149,6 +150,10 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		return Result{Fallback: true, Title: plainTitle(len(words)), Price: cost.Price(0)}, nil
 	}
 	if err := cfg.SaveRaw(ctx, []byte(reply.JSON)); err != nil {
+		if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+			return Result{}, errors.Join(err, fmt.Errorf("editorial: run: settle: %w", settleErr))
+		}
+		settled = true
 		return Result{}, fmt.Errorf("editorial: run: receipt store: %w", err)
 	}
 	got, err := decode(reply.JSON)
@@ -170,6 +175,10 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		valid.Title = title
 	}
 	if err := store(ctx, cfg.DB, cfg.OwnerID, cfg.EpisodeID, words, valid); err != nil {
+		if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+			return Result{}, errors.Join(err, fmt.Errorf("editorial: run: settle: %w", settleErr))
+		}
+		settled = true
 		return Result{}, err
 	}
 	if err := cfg.Budgets.Settle(estimate, estimate); err != nil {

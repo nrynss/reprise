@@ -255,7 +255,7 @@ func TestRunRefusesWithoutBudget(t *testing.T) {
 }
 
 // TestRunKeepsProviderCopyOnReceiptFailure checks a receipt store failure
-// returns the error with nothing stored and frees the reservation.
+// returns the error with nothing stored and settles the spent call.
 func TestRunKeepsProviderCopyOnReceiptFailure(t *testing.T) {
 	t.Parallel()
 	db := openDiary(t)
@@ -274,8 +274,34 @@ func TestRunKeepsProviderCopyOnReceiptFailure(t *testing.T) {
 	}
 	budgets.mu.Lock()
 	defer budgets.mu.Unlock()
-	if len(budgets.settled) != 0 || len(budgets.released) != 1 {
-		t.Fatalf("budget holds %+v, want one release and no settle", budgets)
+	if len(budgets.settled) != 1 || len(budgets.released) != 0 {
+		t.Fatalf("budget holds %+v, want one settle for the spent call", budgets)
+	}
+}
+
+// TestRunSettlesSpentCallOnStoreFailure checks a store failure after a
+// billed call still settles the estimate instead of releasing it.
+func TestRunSettlesSpentCallOnStoreFailure(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	seedForty(t, db)
+	mustExec(t, db, "DROP TABLE decisions")
+	model := &scriptedModel{answer: fullAnswer()}
+	budgets := &fakeBudget{}
+	var receipt []byte
+	if _, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt)); err == nil {
+		t.Fatal("run succeeded, want the store failure")
+	}
+	model.mu.Lock()
+	calls := model.calls
+	model.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("model calls = %d, want one billed call before the failure", calls)
+	}
+	budgets.mu.Lock()
+	defer budgets.mu.Unlock()
+	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
+		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
 	}
 }
 
