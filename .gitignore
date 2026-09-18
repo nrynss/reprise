@@ -1,0 +1,9 @@
+# Planning stays out of the repository.
+AGENTS.md
+product.md
+dev-diary/
+
+# Secrets never land here.
+.env
+.env.*
+!.env.example
