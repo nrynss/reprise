@@ -30,7 +30,7 @@ requires:   T1.1, T1.4, T1.5
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/, internal/assemblyai/token.go
-status:     in-progress:review-r1:t2.1-rev-r1@e0a46229f219e03006d07a6d4b6b988a602e153b
+status:     in-progress:land:t2.1-impl@e0a46229f219e03006d07a6d4b6b988a602e153b
 ```
 **Build on:** Keel `v0.3.0`. `keel/gate` for the route, `keel/cost/sqlitestore` for the global daily
 ceiling and the per-owner ceiling beneath it, `keel/flag` for the kill switch, `keel/lease` for the
