@@ -1,0 +1,27 @@
+# Box settings for Reprise. Inline values only. Each secret names the
+# box env file and never carries a value.
+transcription_model = "universal-3.5-pro"
+editorial_model = "gemini-2.5-flash"
+session_max_seconds = 1800
+guest_max_sessions = 10
+guest_max_episodes = 10
+daily_spend_cents = 2000
+render_concurrency = 1
+data_dir = "/var/lib/reprise/data"
+media_dir = "/var/lib/reprise/media"
+public_origin = "https://reprise.nryn.dev"
+
+[secrets.assemblyai_api_key]
+source = "env_file"
+path = "/etc/reprise/env"
+var = "ASSEMBLYAI_API_KEY"
+
+[secrets.gemini_credential]
+source = "env_file"
+path = "/etc/reprise/env"
+var = "GEMINI_CREDENTIAL"
+
+[secrets.session_signing_key]
+source = "env_file"
+path = "/etc/reprise/env"
+var = "SESSION_SIGNING_KEY"
