@@ -136,6 +136,13 @@ func TestRunStoresDraft(t *testing.T) {
 	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
 		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
 	}
+	want := editorial.Estimate(12)
+	if budgets.reserved[0] != want {
+		t.Fatalf("reserved = %v, want %v", budgets.reserved[0], want)
+	}
+	if budgets.settled[0] != [2]cost.Price{want, want} {
+		t.Fatalf("settled = %v, want {%v %v}", budgets.settled[0], want, want)
+	}
 }
 
 // TestRunDropsDanglingSpans checks a proposal pointing outside the word
