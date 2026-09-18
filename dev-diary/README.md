@@ -67,22 +67,23 @@ bottom right carries the states that view can reach.
 | `#/welcome` | First visit, the seeded season, one gesture to play | T5.5 |
 | `#/preflight` | Microphone, connection and memory checks; both refusals | T2.4, refusals from T5.3 |
 | `#/live` | On air: timer, turn-taking, levels, barge-in, the end gate | T2.4 |
-| `#/processing` | Upload, transcription, editorial pass, draft ready | **none** — spans T2.4, T3.1, T3.2 |
+| `#/processing` | Upload, transcription, editorial pass, draft ready | T2.4, drawing T3.1 and T3.2's jobs |
 | `#/editor` | Transcript, proposed cuts with reasons, revert, cold open | T3.3 |
 | `#/episode` | A finished episode, publish gate, erase, export control | T4.3; publish and erase T4.4; export T5.1 |
 | `#/gallery` | The season, with a live job drawn on the card | T4.3 |
 | `#/threads` | The memory loop across episodes | T4.3 |
 | `#/admin` | Spend, runtime flags, guest limits | T5.3 |
-| `#/privacy` | What is kept, what is deleted, in plain words | **none** |
-| `#/share` | What a visitor sees behind a share link | **none** — T4.4 mints the token |
+| `#/privacy` | What is kept, what is deleted, in plain words | T4.4 |
+| `#/share` | What a visitor sees behind a share link | T4.4, which also mints the token |
 
-**Three routes have no owner.** The privacy page, the public share page and the processing screen all
-appear in the design and in `project.md`'s prose, but no task's `owns` list carries a route for them.
-Either a task grows to cover each, or the design drops them. They are not started either way.
+**Every route has an owner.** The three that had none were assigned on 2026-09-18. The processing
+screen went to T2.4, because it belongs to the session that just ended. The share page and the
+privacy page went to T4.4, because publishing that renders nothing is not publishing, and the
+privacy page is the erase story in plain words.
 
-**One divergence to settle.** The gallery card draws a running job, which is what T4.3 describes,
-and the mockup also gives processing a screen of its own. Both can be right — the screen for the
-session you just finished, the card for one you walk away from — but only if a task says so.
+**The processing divergence is settled.** The screen is for the session you just finished and the
+gallery card is for one you walked away from. Both read the same job through `JobStream`. T2.4 and
+T4.3 each say so, so neither implementer builds half of it.
 
 ---
 

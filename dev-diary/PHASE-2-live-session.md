@@ -113,10 +113,16 @@ none held. A restart mid-reconcile resumes and settles exactly once.
 requires:   T1.3, T2.1
 fixture-ok: yes
 size:       M · frontier
-owns:       web/src/routes/record/, web/src/lib/voice/
+owns:       web/src/routes/record/, web/src/routes/processing/, web/src/lib/voice/
 status:     not-started
 ```
-**Mockup:** the `preflight` and `live` views ([`mockup`](mockup), `#/preflight`, `#/live`).
+**Mockup:** the `preflight`, `live` and `processing` views ([`mockup`](mockup), `#/preflight`,
+`#/live`, `#/processing`).
+
+**The processing screen belongs to the session that just ended.** When a take stops, the page stays
+with it and draws upload, transcription and the editorial pass from `JobStream` until the draft is
+ready. A guest who walks away instead sees the same work as progress on the gallery card, which is
+T4.3's. The screen and the card are the same job read from two places, never two mechanisms.
 
 **Build on:** Chaaya `0.2.0`, which carries the whole duplex path. This task wires it and owns
 nothing general. `AudioRecorder` in `pcm` mode for the user stem, `PcmStreamPlayer` for the host, the

@@ -74,7 +74,8 @@ status:     not-started
 playback sync for the episode transcript, and `testing` for both gates.
 
 * **Gallery.** Episodes newest first, with cover, title, state and duration. A running job shows live
-  progress.
+  progress on its card, which is how a guest who walked away from the processing screen sees the same
+  work. The card and T2.4's screen read one job through `JobStream`, never two mechanisms.
 * **Episode.** Player, chapters, show notes, and a transcript that follows playback.
 * **Threads.** People, open commitments and circled topics, each linking to the moment it was said.
 
@@ -90,11 +91,19 @@ backwards across a reload. The pages pass `a11yGate` and `contrastGate`.
 requires:   T1.4, T3.5
 fixture-ok: yes
 size:       S · frontier
-owns:       internal/privacy/
+owns:       internal/privacy/, web/src/routes/share/, web/src/routes/privacy/
 status:     not-started
 ```
-**Mockup:** the publish gate and the erase confirmation on `#/episode`, and the public page the
-share link opens at `#/share` ([`mockup`](mockup)). No task owns that public route yet.
+**Mockup:** the publish gate and the erase confirmation on `#/episode`, the public page the share
+link opens at `#/share`, and the `privacy` view ([`mockup`](mockup)).
+
+**Publishing that renders nothing is not publishing**, so the share route lands here with the token
+that opens it. It serves the render and the cover to a signed-out visitor and nothing else: no
+stems, no transcripts, no threads, and no route to the owner's other episodes.
+
+**The privacy page is the erase story in plain words**, so it lands here too, where the erase runs.
+It states what is kept, what is deleted, and that the provider's own deletion is soft, which
+`project.md` fixes the wording for.
 
 **Build on:** `keel/mediastore` visibility, `keel/id` for share tokens, and `keel/erase` for the
 fan-out, which retries every target until it confirms and survives a restart. Reprise registers the
