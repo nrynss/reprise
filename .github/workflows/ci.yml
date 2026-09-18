@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      # Pinned static builds, so the media checks measure with the same
+      # binaries everywhere.
+      - name: Install pinned ffmpeg and ffprobe
+        run: |
+          base=https://github.com/mwader/static-ffmpeg/releases/download/v7.1
+          curl -fsSL -o ffmpeg "$base/ffmpeg-linux-amd64"
+          curl -fsSL -o ffprobe "$base/ffprobe-linux-amd64"
+          chmod +x ffmpeg ffprobe
+          echo "$PWD" >> "$GITHUB_PATH"
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: web
+
+      # Playwright needs its own browser build.
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      - name: Run the gate
+        run: ./tools/check.sh

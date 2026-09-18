@@ -7,3 +7,16 @@ dev-diary/
 .env
 .env.*
 !.env.example
+
+# Dependency and build output.
+node_modules/
+web/build/
+web/.svelte-kit/
+.vite/
+*.tsbuildinfo
+
+# Test artifacts.
+web/test-results/
+web/playwright-report/
+web/blob-report/
+web/.cache/
