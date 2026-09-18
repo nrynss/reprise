@@ -24,9 +24,23 @@
 		};
 		startButton?.addEventListener('click', onStart);
 		endButton?.addEventListener('click', onEnd);
+		// The warn notice renders only while the warning holds. The document
+		// listener below reaches its button whatever the render shows now.
+		const clicks = new AbortController();
+		document.addEventListener(
+			'click',
+			(event) => {
+				const target = event.target;
+				if (target instanceof Element && target.closest('#record-end-now') !== null) {
+					controller.endControl();
+				}
+			},
+			{ signal: clicks.signal }
+		);
 		return () => {
 			startButton?.removeEventListener('click', onStart);
 			endButton?.removeEventListener('click', onEnd);
+			clicks.abort();
 			controller.destroy();
 		};
 	});
@@ -79,6 +93,12 @@
 					<li><strong>{turn.role === 'host' ? 'Host' : 'You'}:</strong> {turn.text}</li>
 				{/each}
 			</ol>
+			{#if snap.capWarning && snap.phase === 'live'}
+				<div role="alert">
+					<p>{snap.capText}</p>
+					<button id="record-end-now" aria-label="End session now">End session now</button>
+				</div>
+			{/if}
 			<button
 				id="record-end"
 				disabled={snap.phase !== 'live'}

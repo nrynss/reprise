@@ -24,6 +24,7 @@ import { drainHostBlock, drainUserBlock, type HostMark } from '$lib/voice/take';
 import { makeTestTone } from '$lib/voice/pcm';
 import { parseSessionStart, socketUrl, type SessionStart } from '$lib/voice/session';
 import { browserSocket, VoiceSocket, type SocketHandle } from '$lib/voice/socket';
+import { SessionCap, type CapClock } from '$lib/voice/cap';
 
 export type RecordPhase = 'preflight' | 'starting' | 'live' | 'ending' | 'recovering';
 
@@ -42,6 +43,8 @@ export interface RecordSnapshot {
 	elapsed: string;
 	armed: boolean;
 	greeting: string;
+	capWarning: boolean;
+	capText: string;
 }
 
 // MockVoiceHarness drives the take without fixtures. The page exposes it
@@ -63,6 +66,10 @@ export interface MockVoiceHarness {
 	uploadState(): { user: string; host: string; userError: string; hostError: string };
 	finishUploads(): Promise<{ userBytes: number; hostBytes: number }>;
 	finishTake(): Promise<void>;
+	capAdvance(ms: number): void;
+	capJump(ms: number): void;
+	capWake(): void;
+	capInfo(): { warning: boolean; text: string; remainingSeconds: number };
 }
 
 export interface MockRecovered {
@@ -87,7 +94,9 @@ export const emptySnapshot: RecordSnapshot = {
 	levelDb: -100,
 	elapsed: '0:00',
 	armed: false,
-	greeting: ''
+	greeting: '',
+	capWarning: false,
+	capText: ''
 };
 
 function mockScript(): MockScript {
@@ -99,6 +108,51 @@ function mockScript(): MockScript {
 		replyText: 'Say more about that.',
 		interrupted: true
 	};
+}
+
+// HarnessClock stands in for time under the mock flag. The end to end run
+// moves it by hand, so the cap proofs never wait on a real duration. Advance
+// runs every timer due on the way. Jump moves the reading with no timer
+// running, which is what a sleeping laptop looks like to the page.
+class HarnessClock implements CapClock {
+	private nowMs = 0;
+	private nextId = 1;
+	private timers: Array<{ id: number; at: number; task: () => void }> = [];
+
+	now(): number {
+		return this.nowMs;
+	}
+
+	setTimeout(task: () => void, delayMs: number): unknown {
+		const id = this.nextId;
+		this.nextId += 1;
+		this.timers.push({ id, at: this.nowMs + Math.max(0, delayMs), task });
+		return id;
+	}
+
+	clearTimeout(handle: unknown): void {
+		this.timers = this.timers.filter((timer) => timer.id !== handle);
+	}
+
+	advance(ms: number): void {
+		const target = this.nowMs + ms;
+		for (;;) {
+			let next: { id: number; at: number; task: () => void } | null = null;
+			for (const timer of this.timers) {
+				if (timer.at <= target && (next === null || timer.at < next.at)) next = timer;
+			}
+			if (next === null) break;
+			const due = next;
+			this.timers = this.timers.filter((timer) => timer.id !== due.id);
+			this.nowMs = due.at;
+			due.task();
+		}
+		this.nowMs = target;
+	}
+
+	jump(ms: number): void {
+		this.nowMs += ms;
+	}
 }
 
 // RecordController runs one take from the first gesture to the draft.
@@ -137,6 +191,12 @@ export class RecordController {
 	private fedBlockCount = 0;
 	private ending: Promise<void> | null = null;
 	private hideListener: (() => void) | null = null;
+	private showListener: (() => void) | null = null;
+	private visibleListener: (() => void) | null = null;
+	private cap: SessionCap | null = null;
+	private capClock: HarnessClock | null = null;
+	private capWarning = false;
+	private capText = '';
 
 	constructor(options: {
 		mock: boolean;
@@ -156,9 +216,20 @@ export class RecordController {
 		}
 		this.emit();
 		this.hideListener = () => {
-			if (this.phase === 'live') void this.voice?.end();
+			if (this.phase === 'live') {
+				this.stopCap();
+				void this.voice?.end();
+			}
 		};
 		window.addEventListener('pagehide', this.hideListener);
+		this.showListener = () => {
+			this.cap?.wake();
+		};
+		window.addEventListener('pageshow', this.showListener);
+		this.visibleListener = () => {
+			this.cap?.wake();
+		};
+		document.addEventListener('visibilitychange', this.visibleListener);
 	}
 
 	/** Stop timers and listeners, and end a take the page walks away from. */
@@ -167,11 +238,20 @@ export class RecordController {
 			window.removeEventListener('pagehide', this.hideListener);
 			this.hideListener = null;
 		}
+		if (this.showListener !== null) {
+			window.removeEventListener('pageshow', this.showListener);
+			this.showListener = null;
+		}
+		if (this.visibleListener !== null) {
+			document.removeEventListener('visibilitychange', this.visibleListener);
+			this.visibleListener = null;
+		}
 		if (this.timer !== null) {
 			window.clearInterval(this.timer);
 			this.timer = null;
 		}
 		this.guard?.destroy();
+		this.stopCap();
 		if (this.phase === 'live') void this.voice?.end();
 	}
 
@@ -190,6 +270,7 @@ export class RecordController {
 			this.takeStart = this.context?.currentTime ?? 0;
 			this.phase = 'live';
 			this.notice = 'On air. The host hears you.';
+			this.startCap();
 			this.emit();
 			this.timer = window.setInterval(() => {
 				if (this.context !== null) {
@@ -223,6 +304,7 @@ export class RecordController {
 			return;
 		}
 		if (this.voice === null || this.session === null) return;
+		this.stopCap();
 		this.phase = 'ending';
 		this.armed = false;
 		this.notice = 'Ending the session.';
@@ -278,7 +360,21 @@ export class RecordController {
 				hostError: this.hostUpload?.error?.code ?? ''
 			}),
 			finishUploads: () => this.finishUploads(),
-			finishTake: () => this.endTake()
+			finishTake: () => this.endTake(),
+			capAdvance: (ms: number) => {
+				this.capClock?.advance(ms);
+			},
+			capJump: (ms: number) => {
+				this.capClock?.jump(ms);
+			},
+			capWake: () => {
+				this.cap?.wake();
+			},
+			capInfo: () => ({
+				warning: this.capWarning,
+				text: this.capText,
+				remainingSeconds: this.cap?.remainingSeconds() ?? 0
+			})
 		};
 	}
 
@@ -371,6 +467,39 @@ export class RecordController {
 		this.exposeMockHandle();
 	}
 
+	// startCap builds the session stop beside the socket. The timer ends
+	// through the same take end the armed end control calls, so the socket
+	// latch below it keeps every close path to one close message. The broker
+	// cap bounds the timer. Under the mock flag the run moves the clock by
+	// hand, so the proofs never wait on a real duration.
+	private startCap(): void {
+		if (this.session === null || this.voice === null) return;
+		const maxSeconds = this.session.max_session_duration_seconds;
+		const finish = () => {
+			void this.endTake();
+		};
+		const onWarn = () => {
+			this.capWarning = true;
+			this.capText = this.cap?.warnText() ?? '';
+			this.emit();
+		};
+		if (this.mockMode) {
+			const clock = new HarnessClock();
+			this.capClock = clock;
+			this.cap = new SessionCap(finish, { maxSeconds, clock, onWarn });
+		} else {
+			this.cap = new SessionCap(finish, { maxSeconds, onWarn });
+		}
+		this.cap.start();
+	}
+
+	// stopCap cancels the timer. Every take end path calls this, so the
+	// timer never closes a take that already ended another way.
+	private stopCap(): void {
+		this.cap?.stop();
+		this.cap = null;
+	}
+
 	private wireVoice(handle: SocketHandle): VoiceSocket {
 		if (this.session === null) throw new Error('the take opened with no session');
 		return new VoiceSocket(handle, this.session.config, {
@@ -430,7 +559,9 @@ export class RecordController {
 			levelDb: this.levelDb,
 			elapsed: this.elapsed,
 			armed: this.armed,
-			greeting: this.greeting
+			greeting: this.greeting,
+			capWarning: this.capWarning,
+			capText: this.capText
 		});
 	}
 
