@@ -160,6 +160,10 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if err != nil {
 		log.Warn("editorial: answer unusable, leaving a renderable draft", "error", err)
 		if storeErr := store(ctx, cfg.DB, cfg.OwnerID, cfg.EpisodeID, words, draft{Title: plainTitle(len(words))}); storeErr != nil {
+			if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+				return Result{}, errors.Join(storeErr, fmt.Errorf("editorial: run: settle: %w", settleErr))
+			}
+			settled = true
 			return Result{}, storeErr
 		}
 		if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {

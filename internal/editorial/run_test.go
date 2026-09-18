@@ -312,6 +312,33 @@ func TestRunSettlesSpentCallOnStoreFailure(t *testing.T) {
 	}
 }
 
+// TestRunSettlesSpentCallOnFallbackStoreFailure checks a fallback store
+// failure after an unusable answer still settles the billed call instead
+// of releasing it.
+func TestRunSettlesSpentCallOnFallbackStoreFailure(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	seedForty(t, db)
+	mustExec(t, db, "DROP TABLE proposals")
+	model := &scriptedModel{answer: "not json"}
+	budgets := &fakeBudget{}
+	var receipt []byte
+	if _, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt)); err == nil {
+		t.Fatal("run succeeded, want the fallback store failure")
+	}
+	model.mu.Lock()
+	calls := model.calls
+	model.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("model calls = %d, want one billed call before the failure", calls)
+	}
+	budgets.mu.Lock()
+	defer budgets.mu.Unlock()
+	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
+		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
+	}
+}
+
 // TestEstimatePricesMinuteRate checks one audio minute costs the minute
 // rate and one second rounds up to the nanodollar.
 func TestEstimatePricesMinuteRate(t *testing.T) {
