@@ -15,17 +15,15 @@
 		});
 		controller.mount();
 		const startButton = document.getElementById('record-start');
-		const endButton = document.getElementById('record-end');
 		const onStart = () => {
 			void controller.start();
 		};
-		const onEnd = () => {
-			controller.endControl();
-		};
 		startButton?.addEventListener('click', onStart);
-		endButton?.addEventListener('click', onEnd);
-		// The warn notice renders only while the warning holds. The document
-		// listener below reaches its button whatever the render shows now.
+		// The live section renders after the take opens, so the mount time
+		// tree holds no end button yet. The document listener below reaches
+		// the live rendered end control and the warn button alike. A native
+		// button fires click on mouse press and on keyboard Enter and Space,
+		// so delegation covers pointer and keyboard alike.
 		const clicks = new AbortController();
 		document.addEventListener(
 			'click',
@@ -33,13 +31,14 @@
 				const target = event.target;
 				if (target instanceof Element && target.closest('#record-end-now') !== null) {
 					controller.endControl();
+				} else if (target instanceof Element && target.closest('#record-end') !== null) {
+					controller.endControl();
 				}
 			},
 			{ signal: clicks.signal }
 		);
 		return () => {
 			startButton?.removeEventListener('click', onStart);
-			endButton?.removeEventListener('click', onEnd);
 			clicks.abort();
 			controller.destroy();
 		};
