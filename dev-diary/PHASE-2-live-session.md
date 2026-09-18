@@ -238,7 +238,7 @@ requires:   T2.4
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/cap.ts
-status:     in-progress:review-r1:t2.7-rev-r1@2aeacc375f225a77003a9a1c25608d22b4a27dee
+status:     in-progress:land:t2.7-impl@2aeacc375f225a77003a9a1c25608d22b4a27dee
 ```
 **Build on:** T2.4's socket and session guard. T0.2 proved the provider does not stop at the cap, so
 `project.md` now says the browser runs its own timer and ends first. No task owned that timer. This
