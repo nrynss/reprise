@@ -170,7 +170,7 @@ requires:   T2.3, T2.4
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/align/
-status:     in-progress:land:t2.5-rem-r1@601469ffbf4277bf98ee8d789946514c6cd619d2
+status:     done:97580b5a92a01939d5918c005bf907bb059fe47b
 ```
 Place both stems on one episode clock and prove it. The clock is real rather than inferred, because
 T2.4's page records and plays on one context: `CaptureChunk` carries `contextTime` per block, and the
@@ -324,6 +324,11 @@ T2.6 landed (Orchestrator-2) after round 2 APPROVE with zero residue against rou
 measurement stands: no server call ends a session, so the sweep settles first and deletes after,
 with shortfall settle and idempotent delete. Round 1 fixed the audit row on alert failure. Total
 live spend stayed near ten cents.
+T2.5 landed (Orchestrator-2) after round 3 APPROVE with zero residue against rounds 1 and 2. The
+episode clock, correlation math, and the real-layout driver are on main. The 40 ms verdict waits
+on one cross-lane record both reviewers upheld: each testdata/sessions/ dir needs a clips.json
+mapping clip names to start seconds, because detector times lag true onsets by up to a second.
+P2 is fully done with that single fixture record outstanding.
 
 ### What surprised us
 Nothing yet.
