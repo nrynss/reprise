@@ -208,11 +208,13 @@ func TestStartupStopsOnGroupReadableEnv(t *testing.T) {
 	}
 }
 
-// TestBootLogShowsPlanWithoutValues captures the helper plan output. It
-// must name every secret source while carrying none of the dummy values.
+// TestBootLogShowsPlanWithoutValues captures the helper plan output. The
+// credential row must name the file source with its key path. No row may
+// carry a secret value.
 func TestBootLogShowsPlanWithoutValues(t *testing.T) {
 	envPath := writeEnv(t, fullEnv())
-	configPath := writeConfig(t, configDoc(envPath))
+	keyPath := writeKeyFile(t)
+	configPath := writeConfig(t, configDocWithKey(envPath, keyPath))
 
 	out, code := runSelf(t, "plan", "", configPath)
 	if code != 0 {
@@ -224,10 +226,32 @@ func TestBootLogShowsPlanWithoutValues(t *testing.T) {
 		"secrets.session_signing_key",
 		"env_file",
 		"file",
+		keyPath,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("plan output %q lacks %q", out, want)
 		}
+	}
+	rows := map[string][]string{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Split(line, "\t")
+		if len(fields) != 4 {
+			t.Fatalf("plan line %q has %d fields, want 4", line, len(fields))
+		}
+		rows[fields[0]] = fields
+	}
+	gemini, ok := rows["secrets.gemini_credential"]
+	if !ok {
+		t.Fatalf("plan names no credential row: %q", out)
+	}
+	if gemini[1] != "file" {
+		t.Fatalf("credential source = %q, want %q", gemini[1], "file")
+	}
+	if !strings.Contains(gemini[2], keyPath) {
+		t.Fatalf("credential row %q lacks the key path %q", gemini, keyPath)
+	}
+	if gemini[3] != "resolved" {
+		t.Fatalf("credential status = %q, want %q", gemini[3], "resolved")
 	}
 	for _, secret := range []string{dummyAssemblyKey, dummyGeminiCred, dummySigningKey} {
 		if strings.Contains(out, secret) {
@@ -418,8 +442,8 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// TestShippedFilesAgreeOnSecretNames reads the example env file and the
-// local settings file and pins that they name the same env variables. A
+// TestShippedFilesAgreeOnSecretNames reads the example env file and both
+// shipped settings files and pins that they name the same env variables. A
 // name that drifts in one file alone is a startup failure nobody sees
 // until boot.
 func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
@@ -428,9 +452,13 @@ func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	local, err := os.ReadFile(filepath.Join(root, "config", "reprise.local.toml"))
-	if err != nil {
-		t.Fatal(err)
+	for _, want := range []string{"ASSEMBLYAI_API_KEY=", "SESSION_SIGNING_KEY="} {
+		if !strings.Contains(string(example), want) {
+			t.Fatalf(".env.example lacks %q", want)
+		}
+	}
+	if strings.Contains(string(example), "GEMINI_CREDENTIAL") {
+		t.Fatalf(".env.example still names the credential variable")
 	}
 	inExample := map[string]bool{}
 	for _, line := range strings.Split(string(example), "\n") {
@@ -438,23 +466,73 @@ func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
 			inExample[strings.TrimSpace(name)] = true
 		}
 	}
-	wanted := map[string]bool{}
-	for _, line := range strings.Split(string(local), "\n") {
-		if strings.HasPrefix(line, "var = ") {
-			wanted[strings.Trim(strings.TrimPrefix(line, "var = "), `"`)] = true
+	files := []struct {
+		file    string
+		envPath string
+		keyPath string
+	}{
+		{"config/reprise.local.toml", "/home/nryn/work/reprise/.env", "/home/nryn/.config/reprise/gemini-sa.json"},
+		{"config/reprise.box.toml", "/etc/reprise/env", "/etc/reprise/gemini-sa.json"},
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(filepath.Join(root, file.file))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if len(wanted) == 0 {
-		t.Fatal("the local settings file names no env variable")
-	}
-	for name := range wanted {
-		if !inExample[name] {
-			t.Errorf("settings read %s and .env.example does not list it", name)
+		doc := string(raw)
+		for _, want := range []string{
+			"[secrets.assemblyai_api_key]",
+			`var = "ASSEMBLYAI_API_KEY"`,
+			"[secrets.gemini_credential]",
+			`source = "file"`,
+			fmt.Sprintf("path = %q", file.keyPath),
+			"[secrets.session_signing_key]",
+			`var = "SESSION_SIGNING_KEY"`,
+		} {
+			if !strings.Contains(doc, want) {
+				t.Fatalf("%s lacks %q", file.file, want)
+			}
 		}
-	}
-	for name := range inExample {
-		if !wanted[name] {
-			t.Errorf(".env.example lists %s and no secret reads it", name)
+		if strings.Contains(doc, "GEMINI_CREDENTIAL") {
+			t.Fatalf("%s still reads the credential from the env", file.file)
+		}
+		if strings.Contains(doc, "dummy-") {
+			t.Fatalf("%s carries a test value", file.file)
+		}
+		vars := map[string]bool{}
+		for _, line := range strings.Split(doc, "\n") {
+			if strings.HasPrefix(line, "var = ") {
+				vars[strings.Trim(strings.TrimPrefix(line, "var = "), `"`)] = true
+			}
+		}
+		if len(vars) == 0 {
+			t.Fatalf("%s names no env variable", file.file)
+		}
+		for name := range vars {
+			if !inExample[name] {
+				t.Errorf("%s reads %s and .env.example does not list it", file.file, name)
+			}
+		}
+		for name := range inExample {
+			if !vars[name] {
+				t.Errorf(".env.example lists %s and %s does not read it", name, file.file)
+			}
+		}
+		envPath := writeEnv(t, fullEnv())
+		keyPath := writeKeyFile(t)
+		doc = strings.ReplaceAll(doc, file.envPath, envPath)
+		doc = strings.Replace(doc, file.keyPath, keyPath, 1)
+		t.Setenv(PathVar, writeConfig(t, doc))
+		settings, _, err := Load(context.Background())
+		if err != nil {
+			t.Fatalf("tracked file %s does not load: %v", file.file, err)
+		}
+		got, err := settings.Secrets.GeminiCredential.Reveal()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != dummyGeminiCred {
+			t.Fatalf("%s credential revealed the wrong value", file.file)
 		}
 	}
 }
