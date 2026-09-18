@@ -39,13 +39,15 @@ const (
 // Recorded provider bodies. The suite never dials the provider. Each body
 // pins the one flat shape the decoder reads.
 const (
-	recDocA = `{"id":"prov-a","duration_seconds":372,"recording_url":"https://artifacts.example/rec-a.ogg","timeline_url":"https://artifacts.example/tl-a.json"}`
-	recDocB = `{"id":"prov-b","duration_seconds":1800}`
-	recDocC = `{"id":"prov-c","duration_seconds":1920,"recording_url":"https://artifacts.example/rec-c.ogg","timeline_url":"https://artifacts.example/tl-c.json"}`
+	recDocA     = `{"id":"prov-a","duration_seconds":372,"recording_url":"https://artifacts.example/rec-a.ogg","timeline_url":"https://artifacts.example/tl-a.json"}`
+	recDocB     = `{"id":"prov-b","duration_seconds":1800}`
+	recDocC     = `{"id":"prov-c","duration_seconds":1920,"recording_url":"https://artifacts.example/rec-c.ogg","timeline_url":"https://artifacts.example/tl-c.json"}`
+	recDocShort = `{"id":"prov-short","duration_seconds":10,"recording_url":"https://artifacts.example/rec-short.ogg","timeline_url":"https://artifacts.example/tl-short.json"}`
 )
 
 var recAudioA = bytes.Repeat([]byte{0x4f, 0x67, 0x67, 0x53, 0x01, 0x02, 0x03, 0x04}, 512)
 var recAudioC = bytes.Repeat([]byte{0x4f, 0x67, 0x67, 0x53, 0x05, 0x06, 0x07, 0x08}, 512)
+var recAudioShort = bytes.Repeat([]byte{0x4f, 0x67, 0x67, 0x53, 0x09, 0x0a, 0x0b, 0x0c}, 512)
 
 // recReader replays recorded bodies through the real decoder, so the decode
 // stays pinned while no test touches the network.
@@ -131,6 +133,13 @@ type recFixture struct {
 
 func newRecFixture(t *testing.T) *recFixture {
 	t.Helper()
+	return newRecFixtureClock(t, nil, time.Duration(recCapSeconds)*time.Second)
+}
+
+// newRecFixtureClock builds the fixture around the given lease clock and
+// cap. A nil clock means the real clock. A test moves a fake clock past a
+// short cap, so a lease expires with no sleep.
+func newRecFixtureClock(t *testing.T, nowFn func() time.Time, leaseCap time.Duration) *recFixture {
 	quiet := slog.New(slog.DiscardHandler)
 	db, err := sqlite.Open(t.Context(), sqlite.Config{Path: t.TempDir() + "/reconcile.sqlite", Logger: quiet})
 	if err != nil {
@@ -162,8 +171,9 @@ func newRecFixture(t *testing.T) *recFixture {
 		Quota: quota,
 		Meter: passMeter{},
 		Store: leaseStore,
-		Cap:   time.Duration(recCapSeconds) * time.Second,
+		Cap:   leaseCap,
 		Kind:  "session",
+		Now:   nowFn,
 	})
 	if err != nil {
 		t.Fatalf("new lease manager: %v", err)
@@ -191,13 +201,15 @@ func newRecFixture(t *testing.T) *recFixture {
 	rec, err := NewReconciler(ReconcilerConfig{
 		DB: db,
 		Sessions: recReader{docs: map[string]string{
-			"prov-a": recDocA,
-			"prov-b": recDocB,
-			"prov-c": recDocC,
+			"prov-a":     recDocA,
+			"prov-b":     recDocB,
+			"prov-c":     recDocC,
+			"prov-short": recDocShort,
 		}},
 		Artifacts: recFetcher{blobs: map[string][]byte{
-			"https://artifacts.example/rec-a.ogg": recAudioA,
-			"https://artifacts.example/rec-c.ogg": recAudioC,
+			"https://artifacts.example/rec-a.ogg":     recAudioA,
+			"https://artifacts.example/rec-c.ogg":     recAudioC,
+			"https://artifacts.example/rec-short.ogg": recAudioShort,
 		}},
 		Budgets:              budgets,
 		Leases:               manager,
@@ -417,6 +429,64 @@ func TestReconcileSecondRunSettlesOnce(t *testing.T) {
 	}
 	if second != first {
 		t.Fatalf("retry result %+v differs from %+v", second, first)
+	}
+}
+
+func TestReconcileExpiredLeaseCompletesTail(t *testing.T) {
+	start := time.Now()
+	current := start
+	fx := newRecFixtureClock(t, func() time.Time { return current }, 150*time.Millisecond)
+	in := fx.mintSession("prov-short")
+	spentBefore := recSpent(t, fx.costs)
+	current = start.Add(time.Second)
+	res, err := fx.rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("reconcile past the lease cap: %v", err)
+	}
+	if res.NeedsReview {
+		t.Fatalf("expired lease asked for review: %+v", res)
+	}
+	if res.ConnectedSeconds != 10 || res.Cost != recRate*10 {
+		t.Fatalf("expired tail settled %+v, want 10 seconds at %d", res, recRate*10)
+	}
+	if recConnected(t, fx.db, in.SessionID) != 10 {
+		t.Fatalf("session row missed its duration")
+	}
+	if res.RecordingMediaID == "" {
+		t.Fatalf("expired tail stored no recording")
+	}
+	raw, err := os.ReadFile(filepath.Join(fx.mediaDir, res.RecordingMediaID))
+	if err != nil {
+		t.Fatalf("read stored recording: %v", err)
+	}
+	if !bytes.Equal(raw, recAudioShort) {
+		t.Fatalf("stored recording holds %d bytes, want the artifact bytes", len(raw))
+	}
+	if got := recSpent(t, fx.costs); got != spentBefore+recRate*10 {
+		t.Fatalf("spent %d, want exactly one settle past %d", got, spentBefore)
+	}
+	if len(fx.alerter.alerts) != 0 {
+		t.Fatalf("in cap run raised alerts %v, want none", fx.alerter.alerts)
+	}
+	found, err := fx.leases.Inspect(t.Context(), in.LeaseID)
+	if err != nil {
+		t.Fatalf("inspect lease: %v", err)
+	}
+	if found.State != lease.StateExpired {
+		t.Fatalf("lease reads %s, want expired", found.State)
+	}
+	second, err := fx.rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("retry reconcile: %v", err)
+	}
+	if second.NeedsReview {
+		t.Fatalf("retry asked for review: %+v", second)
+	}
+	if second != res {
+		t.Fatalf("retry result %+v differs from %+v", second, res)
+	}
+	if got := recSpent(t, fx.costs); got != spentBefore+recRate*10 {
+		t.Fatalf("spent moved to %d on retry, want no second settle", got)
 	}
 }
 

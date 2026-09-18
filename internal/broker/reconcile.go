@@ -599,6 +599,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, in Input) (Result, error) {
 		return Result{}, fmt.Errorf("broker: reconcile: settle hold: %w: %w", ErrSettle, err)
 	}
 	if err := r.closeLease(ctx, in.LeaseID, price); err != nil {
+		expired, ierr := r.leaseExpired(ctx, in.LeaseID)
+		if ierr != nil {
+			return r.review(ctx, in, fmt.Sprintf("hold settled to %s, lease %s did not close: %v", price, in.LeaseID, err))
+		}
+		if expired {
+			return r.completeExpiredTail(ctx, in, read, price, overCap)
+		}
 		return r.review(ctx, in, fmt.Sprintf("hold settled to %s, lease %s did not close: %v", price, in.LeaseID, err))
 	}
 	if _, err := r.leases.Reconcile(ctx, in.LeaseID, price); err != nil {
@@ -620,7 +627,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, in Input) (Result, error) {
 // a fresh provider read and finishes the artifacts. A closed lease proves
 // the budget settle ran, because the close runs after it, so the resume
 // finishes the reconcile and then the same tail. Any other state stops
-// for review without moving money.
+// for review without moving money. An expired lease proves nothing about
+// the settle, because the close never ran, and a second settle would book
+// spend twice, so expiry on this path reviews. Only the run that settled
+// under its own claim may complete an expired tail.
 func (r *Reconciler) resumeClaimed(ctx context.Context, in Input) (Result, error) {
 	found, err := r.leases.Inspect(ctx, in.LeaseID)
 	if err != nil {
@@ -668,6 +678,37 @@ func (r *Reconciler) closeLease(ctx context.Context, leaseID string, price cost.
 		}
 	}
 	return nil
+}
+
+// leaseExpired reports whether the lease reads expired. Expiry is terminal,
+// because the cap passed before the close and no later close can land. The
+// caller runs only after this run settled the hold under its claim. A
+// resume must never use this answer to complete, because it cannot prove
+// the settle ran and a second settle would book spend twice.
+func (r *Reconciler) leaseExpired(ctx context.Context, leaseID string) (bool, error) {
+	found, err := r.leases.Inspect(ctx, leaseID)
+	if err != nil {
+		return false, fmt.Errorf("broker: inspect lease: %w: %w", ErrSettle, err)
+	}
+	return found.State == lease.StateExpired, nil
+}
+
+// completeExpiredTail finishes a run whose hold settled and whose lease
+// expired before the close. Money moved exactly once under this run's
+// claim, the provider numbers are known, and the lease can never close, so
+// the run writes the duration, persists the artifacts, and marks the claim
+// settled instead of asking for review. The lease row stays expired and
+// unreconciled, because expiry accepts no further move. The money truth
+// lives in the budget and the claim row.
+func (r *Reconciler) completeExpiredTail(ctx context.Context, in Input, read ProviderSession, price cost.Price, overCap bool) (Result, error) {
+	if err := r.markSettled(ctx, in.SessionID, read.DurationSeconds, price, overCap, read.RecordingURL, read.TimelineURL); err != nil {
+		return r.review(ctx, in, fmt.Sprintf("hold settled to %s, state write failed: %v", price, err))
+	}
+	row, err := r.readRow(ctx, in.SessionID)
+	if err != nil {
+		return Result{}, err
+	}
+	return r.finishArtifacts(ctx, in, row)
 }
 
 // finishArtifacts completes the idempotent tail: the session row update,
