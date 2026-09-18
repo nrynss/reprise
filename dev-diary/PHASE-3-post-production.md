@@ -35,7 +35,7 @@ requires:   T1.1, T0.4
 fixture-ok: yes
 size:       M · mid
 owns:       internal/assemblyai/batch.go, internal/transcript/
-status:     in-progress:land:t3.1-rem-r1@165c93963d670714869048fb44423ab3acae750d
+status:     done:0e3d5bdf102f9718dbdc4040c07b1dbf7079efb7
 ```
 **Mockup:** the `processing` view ([`mockup`](mockup), `#/processing`) draws this step and the
 ones around it, and its state lab replays a transcription failure. No task owns that route yet.
@@ -195,8 +195,15 @@ number takes its place.
 
 ## Handoff log
 
-### What exists now
-Not started.
+### What exists now (Orchestrator-2)
+
+T3.1 landed after round 3 APPROVE with zero residue against rounds 1 and 2. The batch client plus
+the merge, store, and budgeted `edit_transcript` job build the episode-clock word timeline. Landing
+took two remediations: the receipt error names the transcript id, the wire body is a named struct,
+and the batch client is `BatchClient` after a rebase collision with the landed token client. The
+50 ms bar runs on a generated clip plus probe shapes until fixture sessions land for a live
+remeasure. The other orchestrator's PHASE-0 dirt was present through this landing and left
+untouched.
 
 ### What surprised us
 Nothing yet.
