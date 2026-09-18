@@ -115,21 +115,6 @@ func measureSession(dir string) (Report, error) {
 	return Align(ClockOffsets(offsets), userLag, hostLag), nil
 }
 
-// checkFixtureSession measures one recorded session directory and fails the
-// session past the drift limit. Layout errors fail too, because an existing
-// directory with a wrong layout is a broken fixture, not a session from
-// another pass.
-func checkFixtureSession(t *testing.T, dir string) {
-	t.Helper()
-	report, err := measureSession(dir)
-	if err != nil {
-		t.Fatalf("session %s: %v", dir, err)
-	}
-	if !report.Pass() {
-		t.Fatalf("session %s drifted by %.1f ms: %s", dir, report.DriftSec*1000, report.Warning())
-	}
-}
-
 // TestFixtureSessions runs the alignment proof against every recorded
 // session under testdata/sessions in the shipped layout. Each session
 // must decode and locate: the driver reads the real files and never
