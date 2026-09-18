@@ -148,7 +148,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/episode/lifecycle.go, internal/episode/lifecycle_test.go
-status:     not-started
+status:     in-progress:implement:t1.2-impl
 ```
 The states are `recording`, `draft`, `rendering`, `analysing`, `ready` and `failed`. Visibility is
 separate, and always starts `private`.
@@ -177,7 +177,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       S · mid
 owns:       internal/api/routes.go, web/src/lib/api/types.ts
-status:     not-started
+status:     in-progress:implement:t1.3-impl
 ```
 **Build on:** `keel/wire` for every error and event. Chaaya's `api` client and `wire` parsers on the
 browser side read the same shapes, so Reprise writes no envelope code of its own.
@@ -214,7 +214,7 @@ requires:   T1.1
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/
-status:     not-started
+status:     in-progress:implement:t1.4-impl
 ```
 Keel lists users as a non-goal, and that boundary holds, so identity is Reprise's.
 
