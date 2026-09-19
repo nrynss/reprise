@@ -173,7 +173,7 @@ requires:   T3.2, T0.3
 fixture-ok: yes
 size:       S · mid
 owns:       internal/cover/
-status:     in-progress:land:t3.6-rem-r1@efe1d2c3c3dd1791420fb903d9a2f84a253eab68
+status:     done:f8be82cff8584c7d22e466309ed72e097d385f71
 ```
 One square image per episode from the title and show notes. No faces and no text in the image. The
 app sets the title, not the model. If generation fails, a plain generated cover from the episode
@@ -212,6 +212,10 @@ cover every post-spend error path. Landing survived a self-inflicted orphan scar
 removed before a fast-forward that failed on my own newer commits, the tip was recovered from the
 object store, rebased again with a green gate, and only then fast-forwarded and cleaned up. Never
 remove worktrees before the fast-forward succeeds.
+T3.6 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. One square
+cover per episode with a deterministic episode-number fallback; paid seam reserves first with no
+auto-retry. Round 1 pinned the rerun-overwrite safety. The live image binding belongs in
+`internal/gemini` per the stack rule and arrives with the wiring.
 
 ### What surprised us
 Nothing yet.
