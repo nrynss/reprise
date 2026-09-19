@@ -64,6 +64,19 @@ fi
 rollback() {
   local reason="$1"
   echo "error: ${reason}" >&2
+
+  # A gate that fails without saying why is undiagnosable from CI, where
+  # nobody has a shell on the box. Print what the container was doing
+  # before the rollback replaces it. The boot log names sources, never
+  # values, so this is safe to put in a workflow log.
+  {
+    echo "--- container state ---"
+    docker ps -a --filter "name=^/${NAME}$" --format 'status: {{.Status}}' 2>/dev/null || true
+    echo "--- last 50 log lines from ${NAME} ---"
+    docker logs --tail 50 "${NAME}" 2>&1 || echo "(no logs available)"
+    echo "--- end of container log ---"
+  } >&2
+
   if [[ -n "${ROLLBACK_IMAGE}" ]]; then
     echo "Restoring previous image: ${ROLLBACK_IMAGE}..." >&2
     if IMAGE="${ROLLBACK_IMAGE}" NAME="${NAME}" "${RUN_SCRIPT}"; then
