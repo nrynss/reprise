@@ -181,7 +181,7 @@ requires:   T7.1, T7.3, T3.1
 fixture-ok: yes
 size:       S · frontier
 owns:       cmd/reprise/main.go, internal/episode/
-status:     in-progress:remediate-r1:t7.6-rem-r1
+status:     in-progress:review-r2:t7.6-rev-r2@b8dcf6ae854312c46575db077fac55a4f47dae90
 ```
 Round 2 carried one item: the binary registers the transcript and
 editorial kinds but schedules neither, and nothing calls the
