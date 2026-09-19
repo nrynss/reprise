@@ -20,7 +20,7 @@ requires:   T3.4, T3.5, T3.6
 fixture-ok: yes
 size:       S · mid
 owns:       internal/export/
-status:     in-progress:implement:t5.1-impl
+status:     in-progress:review-r1:t5.1-rev-r1@dd0a8bbef7a3bcc64de3386592f94a1d4764040e
 ```
 **Build on:** `keel/caption` for the SRT and WebVTT files, `keel/waveform` for the video, and
 `keel/ffmpeg` for the audio. Reprise supplies the word timings and the still. It writes neither
