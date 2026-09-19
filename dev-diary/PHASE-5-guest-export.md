@@ -46,7 +46,7 @@ requires:   T1.4, T4.1, T4.2
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/seed/, data/season/
-status:     in-progress:review-r1:t5.2-rev-r1@8e34b08ce183c86ad9f9c32d3c45074936b8431c
+status:     done:58ea7dbf4ab2896453252c6e36993e045a6a49a3
 ```
 The shipped catalog starts empty. This task builds copy, receipt, and drop. It does not wait on
 episodes. The operator places one or two finished episodes in `data/season/` after the box is
@@ -183,8 +183,7 @@ confirms the button with no seed, and WebKit plays after the first gesture when 
 ## Handoff log
 
 ### What exists now (Orchestrator-2)
-T5.2 is unblocked and not started. The shipped catalog starts empty. Copy, receipt, and drop
-do not wait on episodes. The operator places catalog files after first deploy, as dogfood.
+T5.2 landed after round 1 APPROVE with zero in-scope findings. Copy, receipt, and drop live at the package seam. Four wiring items stand: season-list Sync plus EnsureCopy, delete branch on seeded flag, sweep through Drop, Dockerfile data copy.
 T5.4 already landed. The sweep does not wait on a catalog. Retention is 90 days.
 T5.3 landed after round 1 APPROVE with zero in-scope findings. Guest caps, kill switch, and the
 Keel-backed spend view are on main with both sides pinned. The owner login stays an explicit
