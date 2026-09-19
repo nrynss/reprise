@@ -155,7 +155,7 @@ requires:   T5.2, T2.4, T4.3
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/welcome/
-status:     not-started
+status:     in-progress:implement:t5.5-impl
 ```
 **Mockup:** the `welcome` view ([`mockup`](mockup), `#/welcome`).
 
