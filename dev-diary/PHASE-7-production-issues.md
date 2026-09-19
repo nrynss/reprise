@@ -221,6 +221,37 @@ it with a reason.
 **Done when:** Round 3 records the live draft flow with command and
 output, or names the defect that still blocks it.
 
+### T7.8: Bound the deploy drain
+```yaml
+requires:   T7.2, T6.1
+fixture-ok: yes
+size:       S · frontier
+owns:       cmd/reprise/main.go, deploy/
+status:     not-started
+```
+The `c4c3676` deploy held the workflow 30 minutes: the old container
+never exited on SIGTERM, so `docker stop` waited out the full 1830
+second timeout before the new build could start. Every future deploy
+pays that in pipeline minutes and dead edge time.
+
+* Measure first. Stop the previous build locally with one open
+  session, one leaked hold, and one idle server, and record where
+  the drain hangs. The drain waits on open sessions through the
+  T2.1 registry. Name the waiter with a test, not a guess.
+* Bound it. A drain that cannot finish in well under the stop
+  timeout must log what it waits on and let go: leaked holds are
+  not open sessions and must never hold the process. Keep the
+  honest-session finish the T6.1 design promises.
+* Make the workflow fail fast. If the gate cannot pass within a few
+  minutes of the new container starting, `redeploy.sh` rolls back
+  and exits instead of holding the runner. A stuck deploy reads as
+  red in minutes, never in half hours.
+
+**Done when:** A local stop with a leaked hold exits in seconds with
+the waiter named in the log. A stop with one honest open session
+lets it finish. The workflow bounds the gate wait and rolls back on
+expiry, pinned by a run that proves the rollback path.
+
 ---
 
 ## Exit criteria
