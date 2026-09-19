@@ -300,7 +300,7 @@ requires:   T7.6, T2.4
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/record/
-status:     not-started
+status:     in-progress:implement:t7.11-impl
 ```
 Round 1 carried a disclosed gap: no browser caller posts to
 `POST /api/episodes/{id}/stems/complete`, so only fixture and curl

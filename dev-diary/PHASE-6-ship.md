@@ -165,7 +165,7 @@ requires:   T6.4b
 fixture-ok: no
 size:       M · frontier
 owns:       dev-diary/submission/
-status:     not-started
+status:     in-progress:implement:t6.2-impl
 ```
 The video, the slide deck, the cover image, the short and long descriptions, and the tags.
 
@@ -184,7 +184,7 @@ requires:   T6.1b
 fixture-ok: no
 size:       S · frontier
 owns:       README.md
-status:     not-started
+status:     in-progress:implement:t6.3-impl
 ```
 The submission needs a public repository that builds. The private remote already exists at
 `nrynss/reprise`. This task flips visibility and writes the README a stranger can follow.
