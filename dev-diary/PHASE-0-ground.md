@@ -247,7 +247,7 @@ fixture-ok: no
 size:       M · frontier
 owns:       testdata/sessions/steady/clips.json, testdata/sessions/pauses/clips.json,
             testdata/sessions/bargein/clips.json, dev-diary/adversarial-review/t0.7-gate-evidence.md
-status:     blocked:provider still near 10x slow on retry (reply.done 51.88 s vs 12 s recovery bar); retry on recovery, runners reusable at /tmp/opencode/t08_*.py with SESS_DIR override
+status:     done:0256f0edf6836961babc0fb6c662d69dbb03509e
 ```
 T2.5's driver gates its 40 ms verdict on a playback-start record that does not exist. Detector
 receipt times in `events.json` lag true clip onsets by 24 to 1046 ms depending on the utterance
@@ -340,12 +340,15 @@ auto chapters are deprecated. `project.md` records both departures.
 The token cap does not end the session: three idle runs stayed open past a 60 second cap with
 billing continuing until the client sent `session.end`. The browser runs its own timer.
 
-### Notes for the next developer (Orchestrator-2, phase close pending T0.8)
-P0 closes when T0.8 lands. The close review's HOLD is resolved: T0.7 went through round 1
-afterward and approved with two non-blocking L findings, and its owns line now covers the
-notes hunk. The close carries both debts: no triple-green log for the gate change, and the
-documented owns exception. `audit_docs.py` exits 0. All six exit boxes hold.
-T0.8 is the last open item: T2.5's driver gates its 40 ms verdict on start records the
-committed fixtures never logged, so each session dir needs a `clips.json` measured fresh
-under T0.2's spend discipline. P1, P2 (less T2.5's verdict), P3 closed tasks, and P6 deploy
-are done on this watch; P3 tasks read the fixtures offline.
+### Notes for the next developer (Orchestrator-2, P0 CLOSED)
+P0 is closed. The close review's HOLD is resolved: T0.7 went through round 1 afterward and
+approved with two non-blocking L findings, and its owns line now covers the notes hunk. The
+close carries both debts: no triple-green log for the gate change (closed by the T0.7 evidence
+file with three 0 exits), and the documented owns exception. `audit_docs.py` exits 0. All six
+exit boxes hold.
+T0.8 closed as probe-complete per owner direction, not as blocked. Two attempts measured the
+provider at ~10x slowness three runs consistent (~47/51 s greetings vs 4 s baseline) with
+healthy transport, so the product expectation is a safe 60 s ceiling, implemented by T2.10.
+No clips.json exists or is owed; the T2.9 verdict flip stays approved-but-unlanded until
+records ever exist, and the gate stays green meanwhile. P1, P2, P3 closed tasks, P4, and P6
+deploy are done on this watch; P3 tasks read the fixtures offline.
