@@ -191,5 +191,8 @@ Nothing yet.
 
 ### Notes for the next developer
 First deploy is the current priority. The catalog starts empty. Seed files are dogfood after
-the box is up. Task numbers keep their order of creation, so T6.4b runs before T6.2 despite
-its number.
+the box is up. Images publish from GitHub Actions with a button. A successful publish loads
+the image on the box over SSH. The box never logs into the registry. The private repository
+is `nrynss/reprise`. Add a proxied Cloudflare A record for `reprise.nryn.dev` before the
+public edge check. Task numbers keep their order of creation, so T6.4b runs before T6.2
+despite its number.
