@@ -130,7 +130,7 @@ requires:   T0.1, T4.3
 fixture-ok: yes
 size:       XS · light
 owns:       web/tests/shell.spec.ts
-status:     in-progress:implement:t4.5-impl
+status:     in-progress:review-r1:t4.5-rev-r1@d747703724540048a7e96c3da44c9004f1d1aa95
 ```
 Opened from T4.3 round 1's out-of-scope row. The gallery heads the season view, so the shell
 spec's root-h1 `Reprise` assertion fails. Branding is intact (`appName` still `Reprise`, titles
