@@ -40,8 +40,9 @@ The module is `github.com/nrynss/reprise`. The Go binary serves the built `web/`
 `GET /healthz`. **The repository is private through development, and carries no `LICENSE` file.** No
 task adds one and no task names a license. The owner chooses the license when the project ships.
 
-**`.gitignore` keeps planning out of the public repository.** It lists `AGENTS.md`, `product.md`,
-`dev-diary/`, `.env` and `.env.*` with `!.env.example`. Same rule as Keel and Chaaya.
+**`.gitignore` keeps secrets out.** It lists `.env` and `.env.*` with `!.env.example`. Planning
+files are tracked. That reverses the earlier "keep planning out of the repository" line. `project.md`
+records the reversal. The gate skips those paths.
 
 `tools/check.sh` runs, in order: `gofmt`, `go vet`, `staticcheck`, `go test -race`, `svelte-check`,
 ESLint, Vitest, Playwright, the Svelte 4 leakage guard, a scan for consumer and planning names in

@@ -151,13 +151,14 @@ The submission needs a public repository that builds.
 * Keel `v0.3.0` and `@nrynss/chaaya` `0.2.0` are both public, so a stranger can fetch every
   dependency.
 * A fresh clone on a clean machine builds the image with no access to this machine.
-* `AGENTS.md`, `product.md` and `dev-diary/` stay gitignored. The README describes the product and
-  how to run it, and names Keel and Chaaya as the author's prior open-source work.
+* `AGENTS.md`, `product.md` and `dev-diary/` are tracked. The gate skips them by path. The README
+  describes the product and how to run it, and names Keel and Chaaya as the author's prior
+  open-source work.
 * Making the repository public is the owner's action, and so is the license. The submission
   requires one the terms allow, which is not the same as requiring a particular one. No task commits
   a `LICENSE` file or picks the terms.
 
-**Done when:** A clean clone builds with no access to this machine. No tracked file names a planning
+**Done when:** A clean clone builds with no access to this machine. No source file names a planning
 file or a task id. The owner flips visibility.
 
 ---

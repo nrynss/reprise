@@ -148,6 +148,12 @@ through a Cloud Storage URI, and the object must live in the same project. A twe
 stem is roughly five to ten megabytes, so inline should hold and no bucket should be needed. T0.3
 measures that rather than assuming it.
 
+### Planning files are tracked
+
+T0.1 said `.gitignore` keeps `AGENTS.md`, `product.md` and `dev-diary/` out of the repository. They
+are tracked. The plan travels with the code. The gate skips those paths. Source still must not name
+a task.
+
 ### Seeded season is a per-user copy of a small catalog
 
 `product.md` describes four finished episodes and a visitor recording episode five. The catalog is

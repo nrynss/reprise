@@ -186,13 +186,19 @@ the tree ever reaches one.
   orchestrator's work. Stage and commit only your own files, leave theirs dirty, and keep going.
   Note their dirt in your handoff log so the next session knows it was there and untouched.
 
-### Planning files stay out of worktrees
+### Planning files are tracked
 
-`AGENTS.md`, `product.md` and `dev-diary/` are gitignored, so a worktree does not contain them. Every
-agent reads them at their absolute paths under `/home/nryn/work/reprise/`.
+`AGENTS.md`, `product.md` and `dev-diary/` are tracked. A clone carries how the work runs. The gate
+skips them by path, because a phase file naming a task is the point of a phase file.
+
+A worktree still contains the copies from its commit, and those copies can be stale. Every agent
+reads the live plan at `/home/nryn/work/reprise/`. Nobody but the orchestrator edits those files,
+and only in the main checkout.
 
 - Reviewers, implementers and remediators write only the round files named in "Files a round
-  produces". The file name carries the task and round, so two agents never share one.
+  produces", at `/home/nryn/work/reprise/dev-diary/adversarial-review/`. The file name carries the
+  task and round, so two agents never share one. The orchestrator commits them. They never ride a
+  task commit.
 - The orchestrator alone edits phase files, status lines, handoff logs and `libraries.md`.
 - Probes live under `/home/nryn/work/reprise/dev-diary/probes/<agent>/`. A probe stays while any open
   task or review round cites it.
