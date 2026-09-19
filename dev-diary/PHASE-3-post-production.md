@@ -146,7 +146,7 @@ requires:   T3.2
 fixture-ok: yes
 size:       M · mid
 owns:       internal/render/
-status:     in-progress:land:t3.4-rem-r1@4b9fc8cb723233ca4bb1434b883212c7fb2490a2
+status:     done:fff8a6ba6671ed4cc96df496e583a95574b03706
 ```
 **Build on:** `keel/edl` for the cut list, the crossfades and the two-pass loudness, `keel/ffmpeg`
 underneath it, and the `render` job kind. This task owns the edit model and the job, not the
@@ -172,7 +172,7 @@ requires:   T3.4, T0.4
 fixture-ok: yes
 size:       M · mid
 owns:       internal/analysis/
-status:     not-started
+status:     in-progress:implement:t3.5-impl
 ```
 A `keel/job` of kind `analysis` on the **rendered** file.
 
@@ -237,6 +237,10 @@ T3.6 landed (Orchestrator-2) after round 2 APPROVE with zero residue against rou
 cover per episode with a deterministic episode-number fallback; paid seam reserves first with no
 auto-retry. Round 1 pinned the rerun-overwrite safety. The live image binding belongs in
 `internal/gemini` per the stack rule and arrives with the wiring.
+T3.4 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. The render
+runs stems plus decisions through mix, cold-open-first assembly, and two-pass loudness with
+content-hash reuse. Round 1 fixed the cold-open revert and the hash preimage. That landing opens
+T3.5, claimed.
 T3.3 landed (Orchestrator-2) after round 1 APPROVE with zero findings. The takeover verified the
 orphaned draft, fixed the gate failure, and committed. Opened T3.3a for non-cut reverts
 (callback revert clears its row) from the round 1 observation.
