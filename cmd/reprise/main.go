@@ -569,6 +569,11 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 	}); err != nil {
 		return nil, fmt.Errorf("reprise: mount routes: %w", err)
 	}
+	stemsProtected, err := spendGate.Protect(rule, identitySvc.Middleware(newStemsComplete(episodeSvc, jobs, db)))
+	if err != nil {
+		return nil, fmt.Errorf("reprise: protect stem completion: %w", err)
+	}
+	mux.Handle("POST /api/episodes/{id}/stems/complete", stemsProtected)
 	uploadHandler.Start()
 	go jobs.runSweepLoop(ctx)
 	wired = true
@@ -1090,14 +1095,16 @@ func (p *pipeline) memoryFunc(ownerID, episodeID string) job.Func {
 // locateStems resolves both stem files for one episode with their
 // alignment offsets. Blobs rest as files named by their ids under the
 // media directory, so the render reads them in place through a root
-// confined to that directory.
+// confined to that directory. The oldest row wins per role, so a repeated
+// completion that stored a second pair never swaps the stems a running job
+// reads.
 func (p *pipeline) locateStems(ctx context.Context, ownerID, episodeID string) (userPath, hostPath string, userOffsetMs, hostOffsetMs int64, err error) {
 	type stem struct {
 		mediaID string
 		offset  int64
 	}
 	rows, err := p.db.Reader().QueryContext(ctx,
-		`SELECT media_id, role, start_offset_ms FROM stems WHERE owner_id = ? AND episode_id = ?`,
+		`SELECT media_id, role, start_offset_ms FROM stems WHERE owner_id = ? AND episode_id = ? ORDER BY rowid ASC`,
 		ownerID, episodeID)
 	if err != nil {
 		return "", "", 0, 0, fmt.Errorf("reprise: locate stems: %w", err)
@@ -1110,7 +1117,9 @@ func (p *pipeline) locateStems(ctx context.Context, ownerID, episodeID string) (
 		if err := rows.Scan(&mediaID, &role, &offset); err != nil {
 			return "", "", 0, 0, fmt.Errorf("reprise: locate stems: %w", err)
 		}
-		found[role] = stem{mediaID: mediaID, offset: offset}
+		if _, seen := found[role]; !seen {
+			found[role] = stem{mediaID: mediaID, offset: offset}
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return "", "", 0, 0, fmt.Errorf("reprise: locate stems: %w", err)
@@ -1168,7 +1177,8 @@ func (p *pipeline) locateRender(ctx context.Context, ownerID, episodeID string) 
 
 // jobs carries the wired long work: the runner, the render resolver,
 // the reconciler, the sweeper, and the broker behind them. One value
-// serves the whole process.
+// serves the whole process. The store lets the draft scheduler match an
+// unfinished job back to its episode before starting another paid job.
 type jobs struct {
 	runner   *job.Runner
 	resolver *render.Resolver
@@ -1176,6 +1186,11 @@ type jobs struct {
 	sweeper  *broker.Sweeper
 	pipe     *pipeline
 	broker   *broker.Broker
+	store    job.Store
+	// schedMu serializes the draft ensures, so a repeat completion racing
+	// the transcript chain still schedules one editorial job. StartKind
+	// never blocks for a slot, so holding this across a schedule is short.
+	schedMu sync.Mutex
 }
 
 // openJobs builds the shared clients once and registers every kind on
@@ -1278,7 +1293,9 @@ func openJobs(ctx context.Context, db *sqlite.DB, events *stream.Broker, loaded 
 		return nil, fmt.Errorf("reprise: open job runner: %w", err)
 	}
 	failInterruptedEpisodes(ctx, db, store, unfinished)
-	return &jobs{runner: runner, resolver: resolver, rec: rec, sweeper: sweeper, pipe: pipe, broker: sessionBroker}, nil
+	out := &jobs{runner: runner, resolver: resolver, rec: rec, sweeper: sweeper, pipe: pipe, broker: sessionBroker, store: store}
+	out.recoverDraftPipeline(ctx)
+	return out, nil
 }
 
 // settleEnd wraps the session end handler: after the inner handler
@@ -1399,6 +1416,416 @@ func failInterruptedEpisodes(ctx context.Context, db *sqlite.DB, store job.Store
 		}
 		if err := episode.MarkInterrupted(ctx, db, desc.EpisodeID); err != nil {
 			log.Printf("reprise restart: fail episode %s: %v", desc.EpisodeID, err)
+		}
+	}
+}
+
+// Stem completion and the draft schedule live here. The browser uploads both
+// stems through the chunked upload first, then posts this completion. The
+// completion links the two blobs to the episode, moves recording to draft,
+// and starts one transcript job chained to its editorial follow-up. Paid
+// kinds stay non-idempotent with no resume, so the guards below match a job
+// back to its episode before starting another paid call.
+
+// codeStemsNotFound answers a completion naming a blob the owner holds no
+// stored audio under. Unknown and foreign blobs answer alike, so the refusal
+// never confirms that a private blob exists.
+const codeStemsNotFound = "stems_not_found"
+
+// codePipelineBusy answers a completion while the edit kind runs at
+// capacity. The episode already waits in draft, so a retried completion
+// schedules the job the full queue refused.
+const codePipelineBusy = "pipeline_busy"
+
+// stemsBodyMax caps one stem completion body. Two blob ids and two rates
+// fit with wide room.
+const stemsBodyMax = 1 << 20
+
+// errStemsNotFound reports a completion naming a blob the media index holds
+// nothing under.
+var errStemsNotFound = errors.New("reprise: stems name no stored blob")
+
+// stemsCompleteRequest names the two stored blobs one completion links to an
+// episode. Both blobs arrive through the chunked upload first, so the
+// completion only links them. Sample rates ride along because later passes
+// read them from these rows.
+type stemsCompleteRequest struct {
+	// UserMediaID is the stored user stem blob.
+	UserMediaID string `json:"user_media_id"`
+	// HostMediaID is the stored host stem blob.
+	HostMediaID string `json:"host_media_id"`
+	// UserSampleRate is the user stem rate in hertz.
+	UserSampleRate int64 `json:"user_sample_rate"`
+	// HostSampleRate is the host stem rate in hertz.
+	HostSampleRate int64 `json:"host_sample_rate"`
+}
+
+// stemsCompleteResponse answers a stem completion with the episode state and
+// the job that follows it, when one started here.
+type stemsCompleteResponse struct {
+	// EpisodeID identifies the completed episode.
+	EpisodeID string `json:"episode_id"`
+	// Moved reports the guarded transition won here.
+	Moved bool `json:"moved"`
+	// Scheduled reports a transcript or editorial job started here.
+	Scheduled bool `json:"scheduled"`
+	// JobID identifies the job that started, or empty when none did.
+	JobID string `json:"job_id"`
+	// State is the episode state after the completion.
+	State string `json:"state"`
+}
+
+// stemsComplete links two uploaded blobs as an episode stems and schedules
+// its draft jobs. Create it with newStemsComplete, because the zero value
+// holds no store. The route mounts it behind the spend gate and the guest
+// middleware, so every completion carries its owner.
+type stemsComplete struct {
+	episodes *episode.Service
+	drafts   *jobs
+	db       *sqlite.DB
+}
+
+// newStemsComplete returns the stem completion handler over its stores.
+func newStemsComplete(episodes *episode.Service, drafts *jobs, db *sqlite.DB) http.Handler {
+	return &stemsComplete{episodes: episodes, drafts: drafts, db: db}
+}
+
+// ServeHTTP answers POST /api/episodes/{id}/stems/complete. It links the two
+// named blobs when the owner holds them, moves recording to draft once, and
+// ensures one transcript job with its editorial follow-up. A repeat
+// completion finds the draft and the job and starts nothing.
+func (h *stemsComplete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identity.UserFromContext(r.Context())
+	if !ok || owner.ID == "" {
+		_ = wire.WriteError(w, http.StatusUnauthorized, api.CodeSessionRequired, "this call needs a guest session", nil)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, stemsBodyMax)
+	var body stemsCompleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		_ = wire.WriteError(w, http.StatusBadRequest, api.CodeInvalidRequest, "this request carries no usable body", nil)
+		return
+	}
+	if body.UserMediaID == "" || body.HostMediaID == "" {
+		_ = wire.WriteError(w, http.StatusBadRequest, api.CodeInvalidRequest, "a completion names both stem blobs", nil)
+		return
+	}
+	episodeID := r.PathValue("id")
+	for _, blobID := range []string{body.UserMediaID, body.HostMediaID} {
+		held, err := blobOwner(r.Context(), h.db, blobID)
+		if errors.Is(err, errStemsNotFound) {
+			_ = wire.WriteError(w, http.StatusNotFound, codeStemsNotFound, "both stems name stored audio the owner holds", nil)
+			return
+		}
+		if err != nil {
+			_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the stems could not be read", nil)
+			return
+		}
+		if held != owner.ID {
+			_ = wire.WriteError(w, http.StatusNotFound, codeStemsNotFound, "both stems name stored audio the owner holds", nil)
+			return
+		}
+	}
+	moved, err := h.episodes.CompleteStems(r.Context(), owner.ID, episodeID,
+		body.UserMediaID, body.HostMediaID, body.UserSampleRate, body.HostSampleRate)
+	if errors.Is(err, episode.ErrNotFound) {
+		_ = wire.WriteError(w, http.StatusNotFound, api.CodeEpisodeNotFound, "no episode lives at this id", nil)
+		return
+	}
+	if errors.Is(err, episode.ErrInvalid) {
+		_ = wire.WriteError(w, http.StatusBadRequest, api.CodeInvalidRequest, "a completion names two blobs with positive rates", nil)
+		return
+	}
+	if errors.Is(err, episode.ErrIllegalTransition) {
+		_ = wire.WriteError(w, http.StatusConflict, api.CodeIllegalTransition, "only a recording episode completes its stems", nil)
+		return
+	}
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the stems could not be linked", nil)
+		return
+	}
+	jobID, scheduled, err := h.drafts.ensureTranscript(r.Context(), owner.ID, episodeID)
+	if errors.Is(err, job.ErrLimit) {
+		_ = wire.WriteError(w, http.StatusTooManyRequests, codePipelineBusy, "the edit queue is full, retry this completion", nil)
+		return
+	}
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the transcript job could not start", nil)
+		return
+	}
+	if followID, follow, err := h.drafts.ensureEditorial(r.Context(), owner.ID, episodeID); err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the editorial job could not start", nil)
+		return
+	} else if follow {
+		jobID, scheduled = followID, true
+	}
+	ep, err := h.episodes.Get(r.Context(), owner.ID, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the episode could not be read", nil)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(stemsCompleteResponse{
+		EpisodeID: episodeID,
+		Moved:     moved,
+		Scheduled: scheduled,
+		JobID:     jobID,
+		State:     string(ep.State),
+	})
+}
+
+// blobOwner returns the owner the media index stored a blob under. Unknown
+// ids report errStemsNotFound, so callers answer 404 alike.
+func blobOwner(ctx context.Context, db *sqlite.DB, blobID string) (string, error) {
+	var owner string
+	err := db.Reader().QueryRowContext(ctx, `SELECT owner FROM media WHERE id = ?`, blobID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", errStemsNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("reprise: read blob owner: %w", err)
+	}
+	return owner, nil
+}
+
+// hasEditWords reports whether the transcript pass already landed the word
+// timeline for one episode.
+func hasEditWords(ctx context.Context, db *sqlite.DB, episodeID string) (bool, error) {
+	var count int
+	if err := db.Reader().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM words WHERE episode_id = ? AND source = ?`, episodeID, transcript.SourceEdit).Scan(&count); err != nil {
+		return false, fmt.Errorf("reprise: count edit words: %w", err)
+	}
+	return count > 0, nil
+}
+
+// hasProposals reports whether the editorial pass already stored proposals
+// for one episode.
+func hasProposals(ctx context.Context, db *sqlite.DB, episodeID string) (bool, error) {
+	var count int
+	if err := db.Reader().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM proposals WHERE episode_id = ?`, episodeID).Scan(&count); err != nil {
+		return false, fmt.Errorf("reprise: count proposals: %w", err)
+	}
+	return count > 0, nil
+}
+
+// unfinishedEpisode reports whether a job of one kind already covers an
+// episode. It matches the episode linkage the work reports first, so a
+// restart still maps an interrupted job back. Unknown covers jobs that never
+// reported, and the caller treats them as covering too, because starting a
+// second paid job beside a silent first spends twice.
+func (j *jobs) unfinishedEpisode(ctx context.Context, episodeID, kind string) (running, unknown bool, err error) {
+	listed, err := j.store.Unfinished(ctx)
+	if err != nil {
+		return false, false, fmt.Errorf("reprise: list unfinished jobs: %w", err)
+	}
+	for _, rec := range listed {
+		if rec.Kind != kind {
+			continue
+		}
+		var desc episodeDescriptor
+		if err := json.Unmarshal(rec.Progress.Detail, &desc); err != nil || desc.EpisodeID == "" {
+			unknown = true
+			continue
+		}
+		if desc.EpisodeID == episodeID {
+			running = true
+		}
+	}
+	return running, unknown, nil
+}
+
+// editInputs reads both stem blobs and probes the user stem length for one
+// transcript or editorial run. Host replies stay empty and offsets stay
+// zero, because the live pass stores no host word timings and no alignment
+// pass has landed. The merge then carries the user timeline the editor cuts
+// against.
+func (j *jobs) editInputs(ctx context.Context, ownerID, episodeID string) (userAudio, hostAudio []byte, durationSecs float64, err error) {
+	userPath, hostPath, _, _, err := j.pipe.locateStems(ctx, ownerID, episodeID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	userAudio, err = os.ReadFile(userPath)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("reprise: read user stem: %w", err)
+	}
+	hostAudio, err = os.ReadFile(hostPath)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("reprise: read host stem: %w", err)
+	}
+	length, err := ffmpeg.Duration(ctx, ffmpeg.Tools{}, userPath)
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("reprise: probe user stem: %w", err)
+	}
+	if length.Seconds() <= 0 {
+		return nil, nil, 0, fmt.Errorf("reprise: probe user stem: heard no audio")
+	}
+	return userAudio, hostAudio, length.Seconds(), nil
+}
+
+// ensureTranscript starts one transcript job for a draft episode with both
+// stems and no word timeline, and reports whether it started here. A repeat
+// call finds the words or the running job and starts nothing, so two
+// completions and a boot recovery schedule one job. It returns job.ErrLimit
+// when the kind runs at capacity, and the caller answers retry.
+func (j *jobs) ensureTranscript(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
+	j.schedMu.Lock()
+	defer j.schedMu.Unlock()
+	words, err := hasEditWords(ctx, j.pipe.db, episodeID)
+	if err != nil {
+		return "", false, err
+	}
+	if words {
+		return "", false, nil
+	}
+	if running, unknown, err := j.unfinishedEpisode(ctx, episodeID, kindEditTranscript); err != nil {
+		return "", false, err
+	} else if running || unknown {
+		return "", false, nil
+	}
+	return j.startTranscript(ctx, ownerID, episodeID)
+}
+
+// startTranscript reads both stems and starts one transcript job chained to
+// its editorial follow-up. The chain schedules the editorial job when the
+// timeline lands and only logs a follow-up it cannot start, because the
+// timeline already persists and a later completion or boot recovery
+// schedules the rest.
+func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
+	userAudio, _, durationSecs, err := j.editInputs(ctx, ownerID, episodeID)
+	if err != nil {
+		return "", false, err
+	}
+	inner := j.pipe.editTranscriptFunc(ownerID, episodeID, userAudio, durationSecs, nil, transcript.Offsets{})
+	chained := func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
+		out, runErr := inner(ctx, progress)
+		if runErr != nil {
+			return nil, runErr
+		}
+		if _, _, schedErr := j.ensureEditorial(ctx, ownerID, episodeID); schedErr != nil {
+			log.Printf("reprise edit chain: schedule editorial for %s: %v", episodeID, schedErr)
+		}
+		return out, nil
+	}
+	jobID, err := j.runner.StartKind(ctx, kindEditTranscript, chained)
+	if err != nil {
+		return "", false, err
+	}
+	return jobID, true, nil
+}
+
+// ensureEditorial starts one editorial job for an episode whose word
+// timeline landed and whose proposals are still empty, and reports whether
+// it started here. It returns job.ErrLimit when the kind runs at capacity,
+// and the caller answers retry.
+func (j *jobs) ensureEditorial(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
+	j.schedMu.Lock()
+	defer j.schedMu.Unlock()
+	words, err := hasEditWords(ctx, j.pipe.db, episodeID)
+	if err != nil {
+		return "", false, err
+	}
+	if !words {
+		return "", false, nil
+	}
+	props, err := hasProposals(ctx, j.pipe.db, episodeID)
+	if err != nil {
+		return "", false, err
+	}
+	if props {
+		return "", false, nil
+	}
+	if running, unknown, err := j.unfinishedEpisode(ctx, episodeID, kindEditorial); err != nil {
+		return "", false, err
+	} else if running || unknown {
+		return "", false, nil
+	}
+	return j.startEditorial(ctx, ownerID, episodeID)
+}
+
+// startEditorial reads both stems and starts one editorial job over the
+// landed word timeline.
+func (j *jobs) startEditorial(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
+	userAudio, hostAudio, durationSecs, err := j.editInputs(ctx, ownerID, episodeID)
+	if err != nil {
+		return "", false, err
+	}
+	jobID, err := j.runner.StartKind(ctx, kindEditorial,
+		j.pipe.editorialFunc(ownerID, episodeID, userAudio, hostAudio, durationSecs))
+	if err != nil {
+		return "", false, err
+	}
+	return jobID, true, nil
+}
+
+// stemsLinked reports whether both stem roles rest in the diary for one
+// episode, so a schedule or a recovery never starts a job with half its
+// audio.
+func (j *jobs) stemsLinked(ctx context.Context, ownerID, episodeID string) bool {
+	rows, err := j.pipe.db.Reader().QueryContext(ctx,
+		`SELECT role FROM stems WHERE owner_id = ? AND episode_id = ?`, ownerID, episodeID)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return false
+		}
+		seen[role] = true
+	}
+	if err := rows.Err(); err != nil {
+		return false
+	}
+	return seen[transcript.RoleUser] && seen[transcript.RoleHost]
+}
+
+// recoverDraftPipeline schedules the single transcript and editorial pair
+// for every draft episode a restart left with both stems linked. It runs
+// once at boot after the interrupted pass fails live episodes, so a crash
+// between the completion and the schedule still converges on one pair. Each
+// ensure schedules only what is missing, and episodes with incomplete stems
+// log for review instead of scheduling.
+func (j *jobs) recoverDraftPipeline(ctx context.Context) {
+	rows, err := j.pipe.db.Reader().QueryContext(ctx,
+		`SELECT id, owner_id FROM episodes WHERE state = ? ORDER BY rowid ASC`, string(episode.StateDraft))
+	if err != nil {
+		log.Printf("reprise recover: list draft episodes: %v", err)
+		return
+	}
+	defer rows.Close()
+	type draft struct {
+		id    string
+		owner string
+	}
+	var drafts []draft
+	for rows.Next() {
+		var d draft
+		if err := rows.Scan(&d.id, &d.owner); err != nil {
+			log.Printf("reprise recover: read draft episode: %v", err)
+			return
+		}
+		drafts = append(drafts, d)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("reprise recover: read draft episodes: %v", err)
+		return
+	}
+	for _, d := range drafts {
+		if !j.stemsLinked(ctx, d.owner, d.id) {
+			log.Printf("reprise recover: episode %s links no stem pair, leaving it for review", d.id)
+			continue
+		}
+		if _, _, err := j.ensureTranscript(ctx, d.owner, d.id); err != nil {
+			log.Printf("reprise recover: schedule transcript for %s: %v", d.id, err)
+		}
+		if _, _, err := j.ensureEditorial(ctx, d.owner, d.id); err != nil {
+			log.Printf("reprise recover: schedule editorial for %s: %v", d.id, err)
 		}
 	}
 }
