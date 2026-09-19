@@ -20,7 +20,7 @@ requires:   T3.4, T3.5, T3.6
 fixture-ok: yes
 size:       S · mid
 owns:       internal/export/
-status:     in-progress:review-r1:t5.1-rev-r1@dd0a8bbef7a3bcc64de3386592f94a1d4764040e
+status:     in-progress:remediate-r1:t5.1-rem-r1
 ```
 **Build on:** `keel/caption` for the SRT and WebVTT files, `keel/waveform` for the video, and
 `keel/ffmpeg` for the audio. Reprise supplies the word timings and the still. It writes neither
@@ -105,7 +105,7 @@ requires:   T1.4, T4.4
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/retention/
-status:     in-progress:review-r1:t5.4-rev-r1@5aed2265468fb59cb885ad29fb366a23aee2e4e4
+status:     in-progress:remediate-r1:t5.4-rem-r1
 ```
 **Build on:** `keel/erase` for the fan-out and `keel/job` for the kind that runs it. Reprise names
 the targets, which are the same ones T4.4 registers.
