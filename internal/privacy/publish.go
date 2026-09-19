@@ -95,8 +95,10 @@ func (s *Service) setVisibility(ctx context.Context, blobID, visibility string) 
 }
 
 // Publish opens episodeID behind a fresh share token. It mints the
-// token, marks the episode public, and marks the streaming render
-// public. The export copy stays private, because the share page plays
+// token, marks the streaming render public, and marks the episode
+// public. The render blob flips first, so a missing blob leaves the
+// episode private with its old token instead of opening a dead public
+// link. The export copy stays private, because the share page plays
 // the stream and never offers the export. Publishing an already public
 // episode rotates its token again, so every publish hands out exactly
 // one live link.
@@ -116,13 +118,13 @@ func (s *Service) Publish(ctx context.Context, episodeID string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("privacy: publish %s: %w", episodeID, err)
 	}
+	if err := s.setVisibility(ctx, opus, "public"); err != nil {
+		return "", err
+	}
 	if _, err := s.db.Writer().ExecContext(ctx,
 		"UPDATE episodes SET visibility = ?, share_token = ? WHERE id = ? AND owner_id = ?",
 		VisibilityPublic, token, ep.id, ep.owner); err != nil {
 		return "", fmt.Errorf("privacy: publish %s: %w", episodeID, err)
-	}
-	if err := s.setVisibility(ctx, opus, "public"); err != nil {
-		return "", err
 	}
 	return token, nil
 }

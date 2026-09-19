@@ -168,6 +168,29 @@ func TestUnpublishRevokesEveryRender(t *testing.T) {
 	}
 }
 
+// TestPublishKeepsEpisodePrivateWhenBlobMissing pins the ordering
+// half. Deleting the opus blob row fails the blob flip, and the
+// episode stays private with its old token instead of opening a dead
+// public link no retry can play.
+func TestPublishKeepsEpisodePrivateWhenBlobMissing(t *testing.T) {
+	fx := openFixture(t)
+	fx.as("owner-a")
+	seed := fx.seeds["owner-a"]
+
+	fx.exec(t, `DELETE FROM media WHERE id = ?`, seed.opus)
+	if _, err := fx.svc.Publish(t.Context(), seed.episode); !errors.Is(err, privacy.ErrMediaMissing) {
+		t.Fatalf("publish err %v, want media missing", err)
+	}
+	var visibility string
+	if err := fx.db.Reader().QueryRowContext(t.Context(),
+		"SELECT visibility FROM episodes WHERE id = ?", seed.episode).Scan(&visibility); err != nil {
+		t.Fatalf("read visibility: %v", err)
+	}
+	if visibility != privacy.VisibilityPrivate {
+		t.Fatalf("episode visibility %q, want private", visibility)
+	}
+}
+
 // TestPublishRefusals pins the boundaries. Another owner's episode,
 // a missing episode, and an episode with no render all refuse with
 // their own sentinel.
