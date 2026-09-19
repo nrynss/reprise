@@ -242,7 +242,7 @@ requires:   T1.3, T2.1, T1.4, T5.3
 fixture-ok: yes
 size:       S · mid
 owns:       internal/api/routes.go, web/src/lib/api/types.ts, cmd/reprise/main.go
-status:     in-progress:land:t1.7-impl@224e21a4a729d3c791dc0b81d96eb68069f85db4
+status:     done:e4ff7aefcc68ec7fc8b77576fdd9681b2f14a3c2
 ```
 Opened from T5.3 round 1's out-of-scope row. Handlers exist unmounted: the broker's
 `POST /api/sessions` (T2.1) and the three admin patterns (T5.3) have no route table entry and
@@ -287,7 +287,10 @@ gate green. T1.3 landed (Orchestrator-2) after a round 1 APPROVE with zero findi
  line now covers the golden companions the done criteria demand. The rebase onto current main kept
  the gate green. T1.4 landed (Orchestrator-2) after a round 1 APPROVE with zero findings. The
  diff touches only its owned directory, so no owns change was needed. The rebase onto current main
- kept the gate green.
+ kept the gate green. T1.7 landed (Orchestrator-2) after round 1 APPROVE with zero in-scope
+ findings. Every implemented handler now mounts behind gate, guest session, handler, with the
+ owner-limit equality runtime-guarded and the TS mirror extended. Two out-of-scope rows stand:
+ the nil drain registry (T6.1's) and the stub end route (T2.3 candidate). P1 is fully done.
 
 ### What surprised us
 
