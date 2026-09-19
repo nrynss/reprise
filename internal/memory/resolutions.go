@@ -39,9 +39,13 @@ func Migrate(ctx context.Context, db *sqlite.DB) error {
 
 // StoreResolution closes one commitment with one evidence quote in one
 // transaction. The evidence lands as a doing mention on the later
-// episode, and the resolution row links it to the commitment. A second
-// close for the same commitment replaces the first, so rejudging one
-// episode never stacks outcomes.
+// episode, and the resolution row links it to the commitment. The
+// evidence episode must be later than the commitment episode, so a
+// backdated close fails with ErrInvalid and stores nothing. An unknown
+// commitment id, or one owned by someone else, fails with ErrNotFound
+// and stores nothing. A second close for the same commitment replaces
+// the link and keeps every evidence row, so rejudging one episode never
+// stacks outcomes and never erases a stored quote.
 func StoreResolution(ctx context.Context, db *sql.DB, ownerID, commitmentID, episodeID, evidence string, offset int) error {
 	if db == nil || ownerID == "" || commitmentID == "" || episodeID == "" || evidence == "" || offset < 0 {
 		return fmt.Errorf("memory: store resolution: %w", ErrInvalid)
@@ -56,7 +60,10 @@ func StoreResolution(ctx context.Context, db *sql.DB, ownerID, commitmentID, epi
 		"SELECT episode_id FROM mentions WHERE id = ? AND owner_id = ? AND kind = ?",
 		commitmentID, ownerID, CommitmentKind).Scan(&commitmentEpisodeID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("memory: store resolution: %w: unknown commitment", ErrInvalid)
+		return fmt.Errorf("memory: store resolution: %w", ErrNotFound)
+	}
+	if err != nil {
+		return fmt.Errorf("memory: store resolution: %w", err)
 	}
 	var commitmentNumber int
 	err = tx.QueryRowContext(ctx,

@@ -651,6 +651,7 @@ func TestMigrateRejectsNilDatabase(t *testing.T) {
 		t.Fatalf("migrate nil error = %v, want ErrInvalid", err)
 	}
 }
+
 // TestStoreResolutionRejectsBackdatedClose pins the later episode rule.
 // A commitment from episode two never closes on episode one, and the
 // failed close stores nothing.
@@ -792,3 +793,47 @@ func TestParseRejectsTrailingGarbage(t *testing.T) {
 	}
 }
 
+// TestStoreResolutionUnknownCommitment pins the not found contract. An
+// unknown id fails with ErrNotFound instead of a driver error.
+func TestStoreResolutionUnknownCommitment(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "owner-a-ep1", "owner-a", 1)
+	if err := memory.StoreResolution(t.Context(), db, "owner-a", "missing", "owner-a-ep1", "ran today", 0); !errors.Is(err, memory.ErrNotFound) {
+		t.Fatalf("unknown close error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestStoreResolutionForeignCommitment pins the owner scope. Closing
+// another owner commitment fails with ErrNotFound and writes nothing,
+// so no cross owner row ever lands.
+func TestStoreResolutionForeignCommitment(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	addOwner(t, db, "owner-a")
+	addOwner(t, db, "owner-b")
+	addEpisode(t, db, "owner-a-ep1", "owner-a", 1)
+	addEpisode(t, db, "owner-b-ep1", "owner-b", 1)
+	addMention(t, db, "owner-a-c1", "owner-a", "owner-a-ep1", "commitment", 0, "I will call Maya back")
+	if err := memory.StoreResolution(t.Context(), db, "owner-b", "owner-a-c1", "owner-b-ep1", "called Maya back", 0); !errors.Is(err, memory.ErrNotFound) {
+		t.Fatalf("foreign close error = %v, want ErrNotFound", err)
+	}
+	var n int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM resolutions").Scan(&n); err != nil {
+		t.Fatalf("count resolutions: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("resolutions = %d, want none after a foreign close", n)
+	}
+	if n := mentionCount(t, db, "owner-b-ep1", "doing"); n != 0 {
+		t.Fatalf("doing mentions = %d, want none after a foreign close", n)
+	}
+	resolved, err := memory.ResolvedCommitments(t.Context(), db, "owner-b")
+	if err != nil {
+		t.Fatalf("resolved commitments: %v", err)
+	}
+	if len(resolved) != 0 {
+		t.Fatalf("resolved = %+v, want none for the other owner", resolved)
+	}
+}
