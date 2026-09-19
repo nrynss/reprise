@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import { activeWordAt } from '@nrynss/chaaya/transcript';
 	import { pageTitle } from '$lib/shell';
-	import { DraftController, emptyDraft, formatTime, runEditorGates } from '$lib/editor/draft';
+	import { DraftController, emptyDraft, formatTime, queryValue, runEditorGates } from '$lib/editor/draft';
 
 	let snap = $state(emptyDraft(page.params.id ?? 'draft'));
 	let controller = $state<DraftController | null>(null);
@@ -19,7 +19,7 @@
 		});
 		controller = next;
 		next.mount(window.location.search);
-		if (new URLSearchParams(window.location.search).get('gate') === '1') {
+		if (queryValue(window.location.search, 'gate') === '1') {
 			const main = document.querySelector('main');
 			if (main) {
 				void runEditorGates(main).then((result) => {
@@ -75,14 +75,15 @@
 		}
 	});
 
-	let liveWord = $derived(
-		controller && snap.ready
-			? (activeWordAt(snap.words, snap.cuts, controller.player.currentTime || snap.position) ??
-				activeWordAt(snap.words, snap.cuts, snap.position))
-			: null
+	let liveWord = $derived.by(
+		() =>
+			controller && snap.ready
+				? (activeWordAt(snap.words, snap.cuts, controller.player.currentTime || snap.position) ??
+					activeWordAt(snap.words, snap.cuts, snap.position))
+				: null
 	);
 
-	let position = $derived(controller ? controller.player.currentTime || snap.position : 0);
+	let position = $derived.by(() => (controller ? controller.player.currentTime || snap.position : 0));
 </script>
 
 <svelte:head>

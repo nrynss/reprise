@@ -115,6 +115,15 @@ export function formatTime(seconds: number): string {
 
 const PEAK_BUCKETS = 120;
 
+// Read one query value by iterating the entries in order. The first
+// match is the answer, and a missing name reads null.
+export function queryValue(search: string, name: string): string | null {
+	for (const [key, value] of new URLSearchParams(search)) {
+		if (key === name) return value;
+	}
+	return null;
+}
+
 // Proposal ids mirror the fixture: prop-<cut id> for cuts.
 function proposalIdForCut(cutId: string): string {
 	return `prop-${cutId}`;
@@ -144,8 +153,7 @@ export class DraftController {
 	// and the episode endpoint serves it. Peaks render in a worker after
 	// the words land, so a missing worker still leaves a usable screen.
 	mount(search: string): void {
-		const params = new URLSearchParams(search);
-		const wantsBackend = params.get('fixture') !== '1';
+		const wantsBackend = queryValue(search, 'fixture') !== '1';
 		if (wantsBackend) {
 			void this.loadFromBackend();
 		} else {

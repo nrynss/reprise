@@ -2,7 +2,7 @@
 // writes the decision row, the waveform regions follow the cuts, and the
 // cold open preview parks the playhead where the open starts.
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { DraftController, formatTime, type DraftSnapshot } from './draft';
+import { DraftController, formatTime, queryValue, type DraftSnapshot } from './draft';
 
 beforeAll(() => {
 	if (typeof URL.createObjectURL !== 'function') {
@@ -85,5 +85,11 @@ describe('draft controller', () => {
 		expect(formatTime(0)).toBe('0:00');
 		expect(formatTime(65)).toBe('1:05');
 		expect(formatTime(143)).toBe('2:23');
+	});
+
+	it('reads one query value by name', () => {
+		expect(queryValue('?fixture=1&gate=0', 'fixture')).toBe('1');
+		expect(queryValue('?fixture=1', 'gate')).toBeNull();
+		expect(queryValue('', 'fixture')).toBeNull();
 	});
 });
