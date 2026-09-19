@@ -53,8 +53,9 @@ const (
 // Sentinel errors. Every failure path this package produces wraps one of
 // these, so callers branch with errors.Is.
 var (
-	// ErrInvalid reports a call with an empty id, a nil dependency, or
-	// an unusable path.
+	// ErrInvalid reports a call the package cannot run. Callers hit it
+	// with an empty path, blank word text, empty cover bytes, a
+	// non-square cover, a missing duration, or an unreadable video.
 	ErrInvalid = errors.New("export: invalid argument")
 	// ErrNoWords reports a caption request with no words to group.
 	ErrNoWords = errors.New("export: no words")
