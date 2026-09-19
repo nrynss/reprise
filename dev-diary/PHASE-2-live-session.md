@@ -290,7 +290,7 @@ requires:   T2.5
 fixture-ok: yes
 size:       XS · light
 owns:       internal/align/fixture_test.go
-status:     in-progress:implement:t2.9-skip
+status:     in-progress:review-r2:t2.9-rev-r2@41f036583155bdf59293f143d115ab58c3883897
 ```
 Opened from T0.8's handoff. The landed driver treats a present start record as failure
 (`t.Fatalf` "measured past the evidence gate"), so landing `clips.json` alone would turn the
