@@ -300,7 +300,7 @@ requires:   T7.6, T2.4
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/record/
-status:     in-progress:review-r1:t7.11-rev-r1@38d4696c49a8e5ce30822eeccbc5363a3141c820
+status:     done:ed6078fa611dbe42312f49acd4461f20d4b4933f
 ```
 Round 1 carried a disclosed gap: no browser caller posts to
 `POST /api/episodes/{id}/stems/complete`, so only fixture and curl
@@ -354,6 +354,9 @@ retry.
 
 ### What exists now
 
+T7.11 landed after round 1 APPROVE with zero in-scope findings. The
+driver, alert, retry, and proofs are correct. The production trigger
+carries to T7.12 on the controller path.
 T7.9 landed after round 1 APPROVE with zero findings. Completion and
 detail report the last transcript outcome, empty passes fail, repeats
 report standing outcome. The pipe has a voice.
