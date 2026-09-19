@@ -210,7 +210,7 @@ requires:   T7.6
 fixture-ok: no
 size:       XS · light
 owns:       dev-diary/probes/production.md
-status:     in-progress:review-r2:t7.7-rev-r2@bde314dc9090d780817aebea054d151d3bb6c939
+status:     done:1485268c5297477ffc0fc87d9d19c58804cb2c2e
 ```
 Runs once, after T7.6 deploys. A scripted guest records from
 generated speech, posts stem completion, and follows the episode to
@@ -313,6 +313,9 @@ T7.8 landed after round 1 APPROVE with zero in-scope findings. The
 drain reclaims expired holds each second and names its waiter.
 Rollback reads red in about a minute. Deploys stop costing half
 hours.
+T7.7 landed after round 2 APPROVE with zero residue. Round 3 stands:
+draft passes live, the silent transcript chain carries to T7.9 with
+its defect named.
 T7.6 landed after round 2 APPROVE with zero residue. Stem completion
 moves recording to draft and chains one transcript job to one
 editorial job, with per-episode cover, 429 on a full queue, and one
