@@ -32,7 +32,7 @@ requires:   T1.7
 fixture-ok: yes
 size:       M · mid
 owns:       internal/api/, internal/episode/
-status:     in-progress:review-r1:t7.1-rev-r1@690f17a6481518ed0d19f45613281974d3e107f6
+status:     done:2b8ae36d94b78346aced30b4b00d0ee762c5a751
 ```
 **Build on:** the route table from T1.3 and the mounting shape from
 T1.7. The probe measured 501 `not_implemented` on `GET /api/episodes`,
@@ -190,6 +190,10 @@ evidence.
 
 ### What exists now
 
+T7.1 landed after round 1 APPROVE with zero findings. Episode list,
+detail, decisions, done, session end, and threads answer behind owner
+checks with method plus pattern routing. `main.go` construction of the
+new handlers waits on T7.2, which runs now.
 Round 1 of `dev-diary/probes/production.md` measured the first
 deploy: mint and live call pass, everything after them is unwired.
 T7.1 wires the handlers, T7.2 wires the binary and the settle, T7.3
