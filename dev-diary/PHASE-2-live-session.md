@@ -290,7 +290,7 @@ requires:   T2.5
 fixture-ok: yes
 size:       XS · light
 owns:       internal/align/fixture_test.go
-status:     in-progress:land:t2.9-skip@41f036583155bdf59293f143d115ab58c3883897
+status:     done:22c7e45340792d5a517c35d741da648fc480849b
 ```
 Opened from T0.8's handoff. The landed driver treats a present start record as failure
 (`t.Fatalf` "measured past the evidence gate"), so landing `clips.json` alone would turn the
@@ -383,6 +383,9 @@ P2 is fully done with that single fixture record outstanding.
 T2.10 landed (Orchestrator-2) after round 1 APPROVE with zero findings. The 60 s latency floors
 live in broker constants with a zero-spend audit record; call-site swaps and the unwired
 scheduler stay follow-up rows for their owners.
+T2.9 landed (Orchestrator-2) after round 2 APPROVE with zero residue. Absent records skip
+loudly per subtest, wrong layouts fail, present records measure. The suite is green with no
+record present and needs no holding status anymore.
 
 ### What surprised us
 Nothing yet.
