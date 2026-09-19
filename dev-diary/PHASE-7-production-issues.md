@@ -258,7 +258,7 @@ requires:   T7.1, T7.6, T7.7
 fixture-ok: yes
 size:       S · frontier
 owns:       cmd/reprise/main.go, internal/episode/, internal/api/
-status:     in-progress:review-r1:t7.9-rev-r1@4b102662d4cae71c34244cf20fd6674922c42cf3
+status:     done:db0bdb6e476f6b10e8d70e5d8bf0e3f5dbae1723
 ```
 Round 3 carried one defect: transcript passes vanish without landing
 words and without a surfaced error, and a repeat completion schedules
@@ -332,6 +332,9 @@ post reports the standing outcome. No wall-clock threshold.
 
 ### What exists now
 
+T7.9 landed after round 1 APPROVE with zero findings. Completion and
+detail report the last transcript outcome, empty passes fail, repeats
+report standing outcome. The pipe has a voice.
 T7.8 landed after round 1 APPROVE with zero in-scope findings. The
 drain reclaims expired holds each second and names its waiter.
 Rollback reads red in about a minute. Deploys stop costing half
