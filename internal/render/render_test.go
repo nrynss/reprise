@@ -502,6 +502,59 @@ func TestRenderRevertedCutStays(t *testing.T) {
 	}
 }
 
+func TestRenderRevertedColdOpenRerenders(t *testing.T) {
+	sqliteDB, db := openDiary(t)
+	media, mediaDir := openMedia(t, sqliteDB)
+	workDir := t.TempDir()
+	userPath := filepath.Join(workDir, "user.wav")
+	hostPath := filepath.Join(workDir, "host.wav")
+	writeTone(t, userPath, 440.0417, 12, 44100)
+	writeTone(t, hostPath, 660.0417, 12, 44100)
+
+	addOwner(t, db, "owner-co")
+	addEpisode(t, db, "ep-co", "owner-co")
+	addWords(t, db, "owner-co", "ep-co", 40, 300, 250)
+	addProposal(t, db, "cold-co", "owner-co", "ep-co", editorial.KindColdOpen, 5, 14)
+
+	r := newResolver(db, media, workDir, fixedStems(userPath, hostPath))
+	first, err := r.Run(t.Context(), "owner-co", "ep-co", nil)
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if first.Reused {
+		t.Fatalf("first run must not reuse")
+	}
+	if cold, err := render.ColdOpen(t.Context(), db, "ep-co"); err != nil {
+		t.Fatalf("cold open: %v", err)
+	} else if cold == nil {
+		t.Fatalf("cold open missing before revert")
+	}
+	firstDur := probeDuration(t, blobFile(mediaDir, first.OpusMediaID))
+
+	addDecision(t, db, "dec-co", "owner-co", "ep-co", "cold-co", "reverted")
+
+	if cold, err := render.ColdOpen(t.Context(), db, "ep-co"); err != nil {
+		t.Fatalf("cold open after revert: %v", err)
+	} else if cold != nil {
+		t.Fatalf("reverted cold open still reads: %+v", cold)
+	}
+
+	second, err := r.Run(t.Context(), "owner-co", "ep-co", nil)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if second.Reused {
+		t.Fatalf("run after revert must not reuse the hash")
+	}
+	if second.Hash == first.Hash {
+		t.Fatalf("run after revert kept the hash %s", first.Hash)
+	}
+	secondDur := probeDuration(t, blobFile(mediaDir, second.OpusMediaID))
+	if firstDur-secondDur < 2.0 {
+		t.Fatalf("reverted run still carries the opening: first %.3f second %.3f", firstDur, secondDur)
+	}
+}
+
 func TestRenderFixtureStems(t *testing.T) {
 	sqliteDB, db := openDiary(t)
 	media, mediaDir := openMedia(t, sqliteDB)

@@ -64,8 +64,9 @@ func AcceptedCuts(ctx context.Context, db *sql.DB, episodeID string) ([]Cut, err
 }
 
 // ColdOpen reads the opening span for one episode in milliseconds on the
-// episode clock. It returns nil when the draft proposes none, so the
-// episode plays without one. A dangling span drops like a dangling cut.
+// episode clock. It returns nil when the draft proposes none, or when the
+// latest decision on the opening proposal reads reverted, so the episode
+// starts at the top. A dangling span drops like a dangling cut.
 func ColdOpen(ctx context.Context, db *sql.DB, episodeID string) (*RangeMs, error) {
 	if db == nil || episodeID == "" {
 		return nil, fmt.Errorf("render: cold open: %w", ErrInvalid)
@@ -74,16 +75,28 @@ func ColdOpen(ctx context.Context, db *sql.DB, episodeID string) (*RangeMs, erro
 	if err != nil {
 		return nil, fmt.Errorf("render: cold open: %w", err)
 	}
+	var proposalID string
 	var start, end int
 	err = db.QueryRowContext(ctx,
-		`SELECT start_word, end_word FROM proposals
+		`SELECT id, start_word, end_word FROM proposals
 		 WHERE episode_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1`,
-		episodeID, editorial.KindColdOpen).Scan(&start, &end)
+		episodeID, editorial.KindColdOpen).Scan(&proposalID, &start, &end)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("render: cold open: %w", err)
+	}
+	var latest sql.NullString
+	err = db.QueryRowContext(ctx,
+		`SELECT decision FROM decisions
+		 WHERE proposal_id = ? ORDER BY rowid DESC LIMIT 1`,
+		proposalID).Scan(&latest)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("render: cold open: %w", err)
+	}
+	if latest.Valid && latest.String == "reverted" {
+		return nil, nil
 	}
 	if start < 0 || end < start || end >= len(words) {
 		return nil, nil
