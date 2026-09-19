@@ -205,8 +205,8 @@ regenerated pcm matches what the live probe streamed, or the record says why it 
 requires:   T0.1
 fixture-ok: yes
 size:       S · mid
-owns:       .github/workflows/ci.yml, Dockerfile, tools/check.sh
-status:     in-progress:review-r1:t0.7-rev-r1@4d2c372a3c12a0dd702e1be93b2e58729af70a70
+owns:       .github/workflows/ci.yml, Dockerfile, tools/check.sh, deploy/README.md
+status:     done:4d2c372a3c12a0dd702e1be93b2e58729af70a70
 ```
 T6.1's review recorded the dead install at H severity and out of scope, because
 `.github/workflows/ci.yml` belongs to T0.1, which is done. Nobody owns it, so nobody fixes it. The
@@ -233,6 +233,10 @@ because a measurement is comparable only when the measuring tool is identical wh
 **Done when:** `ffmpeg -version` prints 9.0.1 in the workflow, in the image and under `check.sh`, and
 all three name the same digest. `check.sh` fails on a machine whose ffmpeg differs, with a message
 naming the pin.
+
+Round 1 approved the landed commit with two non-blocking L findings: the gate change ships
+without triple-green evidence (process debt the phase close carries), and the `deploy/README.md`
+hunk stands as a documented owns exception (it removes a version the notes cannot keep in step).
 
 ---
 
@@ -280,6 +284,10 @@ espeak-ng version, and the ffmpeg digest, writes seekable wavs, and scripts the 
 Regenerated pcm matches the streamed bytes exactly, so no record update was needed. ffprobe reads
 clean at 3.58 and 3.98 seconds.
 
+T0.7 reviewed after landing at Orchestrator-1's request: round 1 approved the digest pin,
+the copy mechanism, and the version refusal, all correct in the three owned places. Two
+non-blocking L findings remain: no triple-green log for the gate change, and the deploy
+notes hunk now covered by the widened owns line. The phase close carries both.
 T0.5 landed after round 2 approval with zero residue: three sessions (steady 18.11s, pauses
 30.38s, barge-in 25.24s) hold user stems, stereo recordings, event logs with local clocks, and
 timelines. Round 1 found corrupt wav headers, an unpinned toolchain, a non-recreating script,
