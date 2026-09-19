@@ -165,7 +165,7 @@ requires:   T6.4b
 fixture-ok: no
 size:       M · frontier
 owns:       dev-diary/submission/
-status:     in-progress:remediate-r1:t6.2-rem-r1
+status:     in-progress:review-r2:t6.2-rev-r2@1c73805bca2ddc6db427ff1b2438f18683af376a
 ```
 The video, the slide deck, the cover image, the short and long descriptions, and the tags.
 
