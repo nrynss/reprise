@@ -269,6 +269,113 @@ func appHandler(webDir string) http.Handler {
 	})
 }
 
+// uploadOpenBodyMax bounds the open body the owner wrapper rewrites.
+// The upload library bounds open bodies the same way, so this match
+// keeps large bodies refused.
+const uploadOpenBodyMax = 64 << 10
+
+// withUploadOwner resolves the upload owner from the request session.
+// The browser opens uploads with a placeholder owner, while the media
+// authorizer compares the resolved user id. The wrapper replaces the
+// posted owner with that id before the upload handler reads it, so the
+// stored blob carries the id the authorizer compares. Other upload
+// calls pass through untouched.
+func withUploadOwner(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path != api.UploadBasePath && r.URL.Path != api.UploadBasePath+"/" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		user, ok := identity.UserFromContext(r.Context())
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if r.Body == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		raw, err := io.ReadAll(io.LimitReader(r.Body, uploadOpenBodyMax+1))
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		_ = r.Body.Close()
+		if len(raw) > uploadOpenBodyMax {
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			next.ServeHTTP(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			next.ServeHTTP(w, r)
+			return
+		}
+		body["owner"] = user.ID
+		out, err := json.Marshal(body)
+		if err != nil {
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			next.ServeHTTP(w, r)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(out))
+		r.ContentLength = int64(len(out))
+		next.ServeHTTP(w, r)
+	})
+}
+
+// withMediaRefusalHeader adds a no-store header to media refusals.
+// The blob store answers unknown ids and refused private reads with a
+// bare 404. The wrapper stamps that answer with private no-store, so
+// no cache keeps the refusal. Successful reads pass through untouched.
+func withMediaRefusalHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &mediaRefusalWriter{ResponseWriter: w}
+		next.ServeHTTP(rec, r)
+	})
+}
+
+// mediaRefusalWriter captures the status so the wrapper can stamp
+// refusals. It forwards every call to the wrapped writer.
+type mediaRefusalWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+// WriteHeader stamps a bare 404 with private no-store before answering.
+func (w *mediaRefusalWriter) WriteHeader(status int) {
+	w.status = status
+	if status == http.StatusNotFound && w.Header().Get("Cache-Control") == "" {
+		w.Header().Set("Cache-Control", "private, no-store")
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+// Write forwards the body, recording an implicit 200 first.
+func (w *mediaRefusalWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// Flush forwards flushes to the wrapped writer when it supports them.
+func (w *mediaRefusalWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap exposes the wrapped writer to the response controller.
+func (w *mediaRefusalWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // hostBuilder adapts the host prompt loader to the broker config seam. The
 // broker declares the interface and the host owns the rows, so this type is
 // the one place the two meet.
@@ -454,8 +561,8 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 		SessionEnd:        jobs.settleEnd(api.NewSessionEnd(episodeSvc)),
 		Threads:           api.NewThreads(db),
 		Admin:             adminSvc.Handler(),
-		Uploads:           uploadHandler,
-		Media:             mediaStore,
+		Uploads:           withUploadOwner(uploadHandler),
+		Media:             withMediaRefusalHeader(mediaStore),
 		Events:            events,
 		OwnerSessionLimit: ceiling,
 		OwnerDefaultLimit: ceiling,

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,6 +23,7 @@ import (
 	"github.com/nrynss/keel/cost"
 	costsqlitestore "github.com/nrynss/keel/cost/sqlitestore"
 	flagsqlitestore "github.com/nrynss/keel/flag/sqlitestore"
+	keelid "github.com/nrynss/keel/id"
 	"github.com/nrynss/keel/job"
 	jobsqlitestore "github.com/nrynss/keel/job/sqlitestore"
 	"github.com/nrynss/keel/lease"
@@ -28,6 +32,8 @@ import (
 	mediasqlitestore "github.com/nrynss/keel/mediastore/sqlitestore"
 	keelsqlite "github.com/nrynss/keel/sqlite"
 	"github.com/nrynss/keel/stream"
+	"github.com/nrynss/keel/upload"
+	"github.com/nrynss/reprise/internal/api"
 	"github.com/nrynss/reprise/internal/assemblyai"
 	"github.com/nrynss/reprise/internal/broker"
 	"github.com/nrynss/reprise/internal/cover"
@@ -890,6 +896,139 @@ func TestPipelineFactoriesConstructJobs(t *testing.T) {
 	}
 	if _, err := fx.pipe.locateRender(t.Context(), owner, "no-such-episode"); err == nil {
 		t.Fatal("locate render succeeded with no render rows")
+	}
+}
+
+// TestUploadOpenResolvesSessionOwnerAndRefusalCarriesHeader opens an
+// upload with the placeholder owner, completes it, and reads it back.
+// The owner reads its own bytes, while a cookieless read answers 404
+// with private no-store on both the stored blob and an unknown id.
+func TestUploadOpenResolvesSessionOwnerAndRefusalCarriesHeader(t *testing.T) {
+	ctx := t.Context()
+	db, err := keelsqlite.Open(ctx, keelsqlite.Config{Path: filepath.Join(t.TempDir(), "upload-owner.db")})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := reprisestore.Open(ctx, db); err != nil {
+		t.Fatalf("migrate diary schema: %v", err)
+	}
+	identitySvc, err := identity.New(ctx, identity.Config{DB: db, SigningKey: "upload-owner-test-signing-key"})
+	if err != nil {
+		t.Fatalf("open identity: %v", err)
+	}
+	mediaDir := t.TempDir()
+	mediaIndex, err := mediasqlitestore.Open(ctx, mediasqlitestore.Config{DB: db})
+	if err != nil {
+		t.Fatalf("open media index: %v", err)
+	}
+	media, err := mediastore.Open(ctx, mediastore.Config{
+		Dir:          mediaDir,
+		Index:        mediaIndex,
+		ContentTypes: mediaContentTypes,
+		Authorize:    identitySvc.AuthorizeMedia,
+	})
+	if err != nil {
+		t.Fatalf("open media store: %v", err)
+	}
+	uploads, err := upload.New(upload.Config{
+		Dir:      filepath.Join(t.TempDir(), "stage"),
+		Store:    media,
+		BasePath: api.UploadBasePath,
+	})
+	if err != nil {
+		t.Fatalf("open upload handler: %v", err)
+	}
+	t.Cleanup(func() { _ = uploads.Close() })
+
+	mux := http.NewServeMux()
+	mux.Handle(api.UploadBasePath, identitySvc.Middleware(withUploadOwner(uploads)))
+	mux.Handle(api.UploadBasePath+"/", identitySvc.Middleware(withUploadOwner(uploads)))
+	mux.Handle("GET /media/{id}", identitySvc.Middleware(withMediaRefusalHeader(media)))
+
+	openReq := httptest.NewRequest(http.MethodPost, api.UploadBasePath,
+		bytes.NewReader([]byte(`{"owner":"guest","content_type":"audio/ogg","visibility":"private"}`)))
+	openRec := httptest.NewRecorder()
+	mux.ServeHTTP(openRec, openReq)
+	if openRec.Code != http.StatusCreated {
+		t.Fatalf("open status = %d, want 201: %s", openRec.Code, openRec.Body.String())
+	}
+	var opened struct {
+		ID    string `json:"id"`
+		Owner string `json:"owner"`
+	}
+	if err := json.Unmarshal(openRec.Body.Bytes(), &opened); err != nil {
+		t.Fatalf("decode open response: %v", err)
+	}
+	if opened.Owner == "" || opened.Owner == "guest" {
+		t.Fatalf("open owner = %q, want the session user id", opened.Owner)
+	}
+	var cookie *http.Cookie
+	for _, c := range openRec.Result().Cookies() {
+		if c.Name == identity.CookieName {
+			cookie = c
+		}
+	}
+	if cookie == nil {
+		t.Fatal("open set no session cookie")
+	}
+
+	payload := []byte("owner stem bytes for the reload pin")
+	sum := sha256.Sum256(payload)
+	digest := hex.EncodeToString(sum[:])
+	putReq := httptest.NewRequest(http.MethodPut, api.UploadBasePath+"/"+opened.ID+"/chunks/0", bytes.NewReader(payload))
+	putReq.Header.Set("X-Chunk-SHA256", digest)
+	putReq.AddCookie(cookie)
+	putRec := httptest.NewRecorder()
+	mux.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("chunk status = %d, want 200: %s", putRec.Code, putRec.Body.String())
+	}
+	completeReq := httptest.NewRequest(http.MethodPost, api.UploadBasePath+"/"+opened.ID+"/complete",
+		bytes.NewReader([]byte(`{"sha256":"`+digest+`"}`)))
+	completeReq.AddCookie(cookie)
+	completeRec := httptest.NewRecorder()
+	mux.ServeHTTP(completeRec, completeReq)
+	if completeRec.Code != http.StatusCreated {
+		t.Fatalf("complete status = %d, want 201: %s", completeRec.Code, completeRec.Body.String())
+	}
+
+	ownReq := httptest.NewRequest(http.MethodGet, "/media/"+opened.ID, nil)
+	ownReq.AddCookie(cookie)
+	ownRec := httptest.NewRecorder()
+	mux.ServeHTTP(ownRec, ownReq)
+	if ownRec.Code != http.StatusOK {
+		t.Fatalf("owner media status = %d, want 200: %s", ownRec.Code, ownRec.Body.String())
+	}
+	if !bytes.Equal(ownRec.Body.Bytes(), payload) {
+		t.Fatalf("owner media body = %q, want exactly the persisted bytes", ownRec.Body.String())
+	}
+	if got := ownRec.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("owner media Cache-Control = %q, want private no-store", got)
+	}
+
+	anonReq := httptest.NewRequest(http.MethodGet, "/media/"+opened.ID, nil)
+	anonRec := httptest.NewRecorder()
+	mux.ServeHTTP(anonRec, anonReq)
+	if anonRec.Code != http.StatusNotFound {
+		t.Fatalf("anon media status = %d, want 404", anonRec.Code)
+	}
+	if got := anonRec.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("anon refusal Cache-Control = %q, want private no-store", got)
+	}
+
+	unknown, err := keelid.New()
+	if err != nil {
+		t.Fatalf("mint unknown id: %v", err)
+	}
+	missingReq := httptest.NewRequest(http.MethodGet, "/media/"+unknown, nil)
+	missingRec := httptest.NewRecorder()
+	mux.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("unknown media status = %d, want 404", missingRec.Code)
+	}
+	if got := missingRec.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("unknown refusal Cache-Control = %q, want private no-store", got)
 	}
 }
 
