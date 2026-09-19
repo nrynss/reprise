@@ -89,7 +89,11 @@ fi
 # The env file must provide both variables. Sourcing runs in a clean
 # environment so outer shell variables cannot mask a missing key, and only
 # missing names are reported, never values.
-PREFLIGHT_ERR="$(ENV_FILE="${ENV_FILE}" env -i bash -c '
+# The assignment goes after `env -i`, never before it. A prefix assignment
+# sets the variable in env's own environment, which `-i` then wipes before
+# it execs bash, so the inner `set -u` dies on an unbound ENV_FILE and the
+# container never starts.
+PREFLIGHT_ERR="$(env -i ENV_FILE="${ENV_FILE}" bash -c '
   set -eu
   . "$ENV_FILE"
   missing=()

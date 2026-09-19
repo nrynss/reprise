@@ -92,6 +92,11 @@ jobs:
           TARGET_IMAGE: ${{ steps.deploy-meta.outputs.target_image }}
           EXPECTED_SHA: ${{ steps.deploy-meta.outputs.expected_sha }}
         run: |
+          # redeploy.sh runs through `tee` below. Without pipefail the step
+          # takes tee's exit code, so a refused deploy reports success and
+          # the box keeps serving nothing.
+          set -o pipefail
+
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
 
