@@ -131,7 +131,7 @@ requires:   T5.3, T1.4
 fixture-ok: yes
 size:       S · mid
 owns:       internal/limits/, web/src/routes/admin/
-status:     blocked:owner login decision
+status:     blocked:owner login, which lands after dogfooding
 ```
 The probe measured pause and limits answering 403 `owner_required`
 behind `StubOwnerAuth`, so the kill switch path is covered by broker
@@ -214,6 +214,9 @@ Nothing yet.
 
 ### Notes for the next developer
 
+Owner login lands after dogfooding, so T7.4 waits past the
+re-verification. T7.5 records that sequencing and skips the switch
+flip until the login exists.
 T7.1 and T7.2 own disjoint paths and may start together. T7.3 waits
 on T7.2 for the shared `main.go`. T7.4 is blocked on the owner login
 decision, not on code. T7.5 appends round 2 and never rewrites round 1.
