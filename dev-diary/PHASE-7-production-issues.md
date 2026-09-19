@@ -65,7 +65,7 @@ requires:   T6.1, T2.3, T3.2
 fixture-ok: yes
 size:       M · frontier
 owns:       cmd/reprise/main.go, internal/broker/, internal/gemini/
-status:     in-progress:review-r1:t7.2-rev-r1@80a6ad79396f4165cfdd3ab48687081e5a1a9fc5
+status:     done:3e3f219990eafaf2675f170e1779e2dfc12b0f45
 ```
 **Build on:** the job kinds P2 and P3 landed, the reconciler from
 T2.3, and the broker from T2.1. The probe measured a binary that
@@ -190,6 +190,11 @@ evidence.
 
 ### What exists now
 
+T7.2 landed after round 1 APPROVE with zero findings. One shared
+Gemini client, all eight kinds registered with paid passes
+non-idempotent, reconcile per recorded close, sweep every five
+minutes with a boot pass, TTL past cap plus margin. The ceiling stops
+leaking. T7.3 is unblocked.
 T7.1 landed after round 1 APPROVE with zero findings. Episode list,
 detail, decisions, done, session end, and threads answer behind owner
 checks with method plus pattern routing. `main.go` construction of the
