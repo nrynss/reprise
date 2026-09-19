@@ -165,6 +165,62 @@ func TestNormalizeKeepsShortEpisodeWhole(t *testing.T) {
 	}
 }
 
+// TestNormalizeSplitFloorKeepsTenSeconds pins the split floor on a 32
+// second episode. Middle cuts would leave eight second chapters, so the
+// pass keeps two valid chapters instead of three short ones.
+func TestNormalizeSplitFloorKeepsTenSeconds(t *testing.T) {
+	t.Parallel()
+	words := scheduleWords(40, 800)
+	drafts := []analysis.ChapterDraft{{Title: "Whole", StartMs: 0}}
+	got, err := analysis.NormalizeChapters(drafts, words, 32000)
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("chapters = %+v, want two floor keeping chapters", got)
+	}
+	for i, c := range got {
+		if !startsOnWord(words, c.StartMs) {
+			t.Fatalf("chapter %+v starts off the word grid", c)
+		}
+		end := int64(32000)
+		if i+1 < len(got) {
+			end = got[i+1].StartMs
+		}
+		if end-c.StartMs < analysis.MinChapterMs {
+			t.Fatalf("chapter %+v runs %d ms, want at least ten seconds", c, end-c.StartMs)
+		}
+		if i > 0 && !strings.HasSuffix(c.Title, " (continued)") {
+			t.Fatalf("chapter %+v misses the continued mark", c)
+		}
+	}
+}
+
+// TestNormalizeShortEpisodeKeepsFewer pins a 25 second episode at two
+// chapters. The duration allows two ten second spans but not three, so
+// the pass stops splitting instead of cutting a sliver.
+func TestNormalizeShortEpisodeKeepsFewer(t *testing.T) {
+	t.Parallel()
+	words := scheduleWords(40, 800)
+	drafts := []analysis.ChapterDraft{{Title: "Whole", StartMs: 0}}
+	got, err := analysis.NormalizeChapters(drafts, words, 25000)
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("chapters = %+v, want two", got)
+	}
+	for i, c := range got {
+		end := int64(25000)
+		if i+1 < len(got) {
+			end = got[i+1].StartMs
+		}
+		if end-c.StartMs < analysis.MinChapterMs {
+			t.Fatalf("chapter %+v runs %d ms, want at least ten seconds", c, end-c.StartMs)
+		}
+	}
+}
+
 // TestNormalizeRejectsUnusable pins the sentinel for empty drafts,
 // blank titles, and drafts past the episode end.
 func TestNormalizeRejectsUnusable(t *testing.T) {

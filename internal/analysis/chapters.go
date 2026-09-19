@@ -181,8 +181,8 @@ func dropIndex(chapters []Chapter, durationMs int64) int {
 }
 
 // ensureCount splits the longest spans until a long enough episode
-// carries three chapters. Episodes under the minimum for three keep
-// what merging left, because padding would invent structure.
+// carries three chapters. Episodes that cannot fit three ten second spans
+// keep what merging left, because padding would invent structure.
 func ensureCount(chapters []Chapter, words []Word, durationMs int64) []Chapter {
 	target := WantChapters
 	if feasible := int(durationMs / MinChapterMs); feasible < target {
@@ -203,9 +203,11 @@ func ensureCount(chapters []Chapter, words []Word, durationMs int64) []Chapter {
 	return out
 }
 
-// splitLongest finds the longest chapter with a word boundary strictly
-// inside it and returns its index plus that middle boundary. It returns
-// minus one when no chapter can split.
+// splitLongest finds the longest chapter with a splittable word boundary
+// strictly inside it and returns its index plus that boundary. A boundary
+// splits only when both halves stay at least the minimum chapter long. It
+// returns minus one when no chapter can split, so short episodes keep
+// fewer chapters instead of cutting a sliver.
 func splitLongest(chapters []Chapter, words []Word, durationMs int64) (int, int64) {
 	at := -1
 	var span int64
@@ -232,14 +234,19 @@ func splitLongest(chapters []Chapter, words []Word, durationMs int64) (int, int6
 	return at, boundary
 }
 
-// middleBoundary returns the word start nearest the middle of one span.
-// It reports false when no word starts strictly inside the span.
+// middleBoundary returns the word start nearest the middle of one span
+// that leaves both halves at least the minimum chapter long. It reports
+// false when no word start inside the span satisfies the floor on both
+// sides, so the caller keeps fewer chapters instead of cutting a sliver.
 func middleBoundary(words []Word, startMs, endMs int64) (int64, bool) {
 	mid := startMs + (endMs-startMs)/2
 	best := int64(-1)
 	var distance int64 = 1 << 62
 	for _, w := range words {
 		if w.StartMs <= startMs || w.StartMs >= endMs {
+			continue
+		}
+		if w.StartMs-startMs < MinChapterMs || endMs-w.StartMs < MinChapterMs {
 			continue
 		}
 		gap := w.StartMs - mid
