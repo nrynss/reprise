@@ -240,6 +240,38 @@ hunk stands as a documented owns exception (it removes a version the notes canno
 
 ---
 
+### T0.8: Start records for the fixture sessions ★
+```yaml
+requires:   T0.5
+fixture-ok: no
+size:       M · frontier
+owns:       testdata/sessions/steady/clips.json, testdata/sessions/pauses/clips.json,
+            testdata/sessions/bargein/clips.json
+status:     not-started
+```
+T2.5's driver gates its 40 ms verdict on a playback-start record that does not exist. Detector
+receipt times in `events.json` lag true clip onsets by 24 to 1046 ms depending on the utterance
+(measured, two reviewers upheld the refusal), and no stream-start marker was ever logged, so the
+record cannot be derived from the committed files. It has to be measured fresh.
+
+Re-stream each session's clips through new live sessions that log every clip start on the local
+event-log clock, under the same spend discipline as T0.2 (tokens capped at 120 seconds, total
+under $1). The choreography in `testdata/sessions/README.md` defines the three runs. Commit one
+`clips.json` per directory: a JSON array with one entry per streamed guest clip, such as
+`[{"file":"user-a.wav","start_sec":3.412}]`, file as clip base name and start as the local clock
+reading at the first clip sample with millisecond precision or better, at least two entries each.
+
+This task writes the start records only. It does not replace `recording.ogg`, `events.json`,
+`timeline.json`, `metadata.json`, the clips, or the README SHAs, so T0.5's pins keep standing.
+If a re-stream cannot reproduce a session closely enough for its old recording to pair with new
+starts, say so in the probe record instead of rewriting history, and the task goes `blocked:`
+with the reason in words.
+
+**Done when:** T2.5's `TestFixtureSessions` flips from the loud evidence block to the 40 ms
+verdict on all three sessions with no driver change.
+
+---
+
 ## Exit criteria
 
 - [x] The image builds and serves the shell, and a clean clone passes the gate three times.
