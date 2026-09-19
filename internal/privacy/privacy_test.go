@@ -237,8 +237,9 @@ func (fx *fixture) as(owner string) {
 	fx.current = owner
 }
 
-// seedOwner writes one full episode: session, stems, render, analysis,
-// cover, and the reconciliation row naming the stereo copy.
+// seedOwner writes one full episode: session, stems, turn, proposal
+// with its decision, render, analysis, word, mention with its
+// callback, cover, and the reconciliation row naming the stereo copy.
 func (fx *fixture) seedOwner(t *testing.T, owner string, number int64) {
 	t.Helper()
 	ctx := t.Context()
@@ -314,6 +315,51 @@ func (fx *fixture) seedOwner(t *testing.T, owner string, number int64) {
 		(id, owner_id, episode_id, text, start_ms, end_ms, source)
 		VALUES (?, ?, ?, 'hello', 0, 120, 'rendered')`, wordID, owner, episodeID); err != nil {
 		t.Fatalf("seed word: %v", err)
+	}
+	turnID, err := id.New()
+	if err != nil {
+		t.Fatalf("mint turn id: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx, `INSERT INTO turns
+		(id, owner_id, episode_id, role, text, started_ms, ended_ms, provider_item_id)
+		VALUES (?, ?, ?, 'host', 'hello there', 0, 120, '')`, turnID, owner, episodeID); err != nil {
+		t.Fatalf("seed turn: %v", err)
+	}
+	proposalID, err := id.New()
+	if err != nil {
+		t.Fatalf("mint proposal id: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx, `INSERT INTO proposals
+		(id, owner_id, episode_id, kind, start_word, end_word, reason)
+		VALUES (?, ?, ?, 'cut', 0, 1, 'a pause')`, proposalID, owner, episodeID); err != nil {
+		t.Fatalf("seed proposal: %v", err)
+	}
+	decisionID, err := id.New()
+	if err != nil {
+		t.Fatalf("mint decision id: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx, `INSERT INTO decisions
+		(id, owner_id, episode_id, proposal_id, decision)
+		VALUES (?, ?, ?, ?, 'keep')`, decisionID, owner, episodeID, proposalID); err != nil {
+		t.Fatalf("seed decision: %v", err)
+	}
+	mentionID, err := id.New()
+	if err != nil {
+		t.Fatalf("mint mention id: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx, `INSERT INTO mentions
+		(id, owner_id, episode_id, kind, word_offset, quote)
+		VALUES (?, ?, ?, 'person', 0, 'hello')`, mentionID, owner, episodeID); err != nil {
+		t.Fatalf("seed mention: %v", err)
+	}
+	callbackID, err := id.New()
+	if err != nil {
+		t.Fatalf("mint callback id: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx, `INSERT INTO callbacks
+		(id, owner_id, episode_id, mention_id, used)
+		VALUES (?, ?, ?, ?, 0)`, callbackID, owner, episodeID, mentionID); err != nil {
+		t.Fatalf("seed callback: %v", err)
 	}
 	seed.coverFile = episodeID + ".png"
 	if err := os.WriteFile(filepath.Join(fx.coverDir, seed.coverFile), []byte("cover "+owner), 0o600); err != nil {
