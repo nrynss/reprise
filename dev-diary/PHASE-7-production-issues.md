@@ -252,6 +252,48 @@ the waiter named in the log. A stop with one honest open session
 lets it finish. The workflow bounds the gate wait and rolls back on
 expiry, pinned by a run that proves the rollback path.
 
+### T7.9: Visible transcript job outcome
+```yaml
+requires:   T7.1, T7.6, T7.7
+fixture-ok: yes
+size:       S · frontier
+owns:       cmd/reprise/main.go, internal/episode/, internal/api/
+status:     not-started
+```
+Round 3 carried one defect: transcript passes vanish without landing
+words and without a surfaced error, and a repeat completion schedules
+again instead of reporting the last job outcome. The pipe runs
+silent. This task gives it a voice.
+
+* The completion answer reports the last job outcome for the episode:
+  state, job id, and error text when it failed. A repeat completion
+  reports the standing outcome instead of scheduling beside a silent
+  first, reconciled against the T7.6 no-double-schedule pin in the
+  record, not by gut feel.
+* Episode detail surfaces the same outcome beside its proposals, so
+  the gallery card and the detail agree on what the pipe did.
+* Paid kinds keep their registration. No new spend path opens.
+
+**Done when:** A transcript pass that lands nothing moves the episode
+to `failed` with its error readable on both the completion answer
+and the detail, pinned by fixture. A repeat completion reports the
+standing outcome and starts nothing new.
+
+### T7.10: Silent-chain live re-run
+```yaml
+requires:   T7.9
+fixture-ok: no
+size:       XS · light
+owns:       dev-diary/probes/production.md
+status:     not-started
+```
+Runs once, after T7.9 deploys. Repeats the round 3 flow live and
+appends a round 4 note without touching earlier rounds. Closes the
+round 3 carry or carries it with a reason.
+
+**Done when:** Round 4 records the live outcome with command and
+output.
+
 ---
 
 ## Exit criteria
