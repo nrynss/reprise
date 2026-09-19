@@ -183,6 +183,7 @@ func newFixture(t *testing.T, opts *fixtureOptions) *fixture {
 	broker, err := New(Config{
 		Flags:             flags,
 		Budgets:           budgets,
+		DB:                db,
 		LeaseQuota:        quota,
 		LeaseStore:        leases,
 		Minter:            minterFace,
@@ -579,6 +580,7 @@ func TestStoreFailureReleasesEverything(t *testing.T) {
 	rebuilt, err := New(Config{
 		Flags:             fx.flags,
 		Budgets:           fx.budgets,
+		DB:                fx.db,
 		LeaseQuota:        mustQuota(t, 10),
 		LeaseStore:        fx.leaseStore,
 		Minter:            fx.minter,
@@ -664,6 +666,7 @@ func TestNewRefusesBadConfig(t *testing.T) {
 	good := Config{
 		Flags:             fx.flags,
 		Budgets:           fx.budgets,
+		DB:                fx.db,
 		LeaseQuota:        mustQuota(t, 10),
 		LeaseStore:        fx.leaseStore,
 		Minter:            fx.minter,
@@ -677,6 +680,7 @@ func TestNewRefusesBadConfig(t *testing.T) {
 		{},
 		func() Config { c := good; c.Flags = nil; return c }(),
 		func() Config { c := good; c.Budgets = nil; return c }(),
+		func() Config { c := good; c.DB = nil; return c }(),
 		func() Config { c := good; c.LeaseQuota = nil; return c }(),
 		func() Config { c := good; c.LeaseStore = nil; return c }(),
 		func() Config { c := good; c.Minter = nil; return c }(),

@@ -23,6 +23,7 @@ import (
 	"github.com/nrynss/keel/flag"
 	"github.com/nrynss/keel/gate"
 	"github.com/nrynss/keel/lease"
+	"github.com/nrynss/keel/sqlite"
 	"github.com/nrynss/keel/wire"
 	"github.com/nrynss/reprise/internal/assemblyai"
 	"github.com/nrynss/reprise/internal/identity"
@@ -153,9 +154,11 @@ type Session struct {
 }
 
 var (
-	_ TokenMinter = (*assemblyai.Client)(nil)
-	_ Budget      = (*costsqlitestore.KeyedBudget)(nil)
-	_ Lessor      = (*lease.Manager)(nil)
+	_ TokenMinter  = (*assemblyai.Client)(nil)
+	_ Budget       = (*costsqlitestore.KeyedBudget)(nil)
+	_ Lessor       = (*lease.Manager)(nil)
+	_ SessionStore = (*SQLiteDiary)(nil)
+	_ SweepSource  = (*Broker)(nil)
 )
 
 // passMeter runs the lease open and close bookkeeping without holding
@@ -182,6 +185,9 @@ type Config struct {
 	Flags flag.Store
 	// Budgets holds the owner and global ceilings. It must not be nil.
 	Budgets Budget
+	// DB holds the settle linkage beside every other store. It must not
+	// be nil, because a mint without a recorded link can never settle.
+	DB *sqlite.DB
 	// LeaseQuota bounds how many leases stay open at once. It must not be nil.
 	LeaseQuota *lease.Quota
 	// LeaseStore keeps the lease rows. It must not be nil.
@@ -206,6 +212,7 @@ type Config struct {
 type Broker struct {
 	flags      flag.Store
 	budgets    Budget
+	db         *sqlite.DB
 	leases     *lease.Manager
 	minter     TokenMinter
 	sessions   ConfigBuilder
@@ -224,6 +231,9 @@ func New(cfg Config) (*Broker, error) {
 	}
 	if cfg.Budgets == nil {
 		return nil, fmt.Errorf("broker: new: %w: budgets must not be nil", ErrInvalid)
+	}
+	if cfg.DB == nil {
+		return nil, fmt.Errorf("broker: new: %w: database must not be nil", ErrInvalid)
 	}
 	if cfg.LeaseQuota == nil {
 		return nil, fmt.Errorf("broker: new: %w: lease quota must not be nil", ErrInvalid)
@@ -259,9 +269,13 @@ func New(cfg Config) (*Broker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("broker: new lease manager: %w", ErrInvalid)
 	}
+	if err := ensureLinkTable(context.Background(), cfg.DB); err != nil {
+		return nil, err
+	}
 	return &Broker{
 		flags:      cfg.Flags,
 		budgets:    cfg.Budgets,
+		db:         cfg.DB,
 		leases:     manager,
 		minter:     cfg.Minter,
 		sessions:   cfg.Sessions,
@@ -382,6 +396,12 @@ func (b *Broker) create(w http.ResponseWriter, r *http.Request) {
 	episodeID, sessionID, err := b.diary.CreateEpisodeAndSession(ctx, owner, b.cap)
 	if err != nil {
 		cleanup()
+		writeRefusal(w, http.StatusInternalServerError, CodeInternal, "the session row could not be written")
+		return
+	}
+	if err := b.recordLink(ctx, owner, episodeID, sessionID, opened.ID, reservation); err != nil {
+		cleanup()
+		_, _ = b.db.Writer().ExecContext(ctx, "DELETE FROM episodes WHERE id = ?", episodeID)
 		writeRefusal(w, http.StatusInternalServerError, CodeInternal, "the session row could not be written")
 		return
 	}

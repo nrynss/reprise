@@ -454,6 +454,14 @@ func (r *Reconciler) runFunc(in Input) job.Func {
 	}
 }
 
+// RunFunc builds the job work for one reconciliation. The session end
+// path starts it after the provider close lands, and Resume rebuilds
+// it after a restart. One session settles through one job at a time,
+// and the claim inside keeps money at most once.
+func (r *Reconciler) RunFunc(in Input) job.Func {
+	return r.runFunc(in)
+}
+
 // validate rejects an input the reconciler cannot settle.
 func validate(in Input) error {
 	if in.SessionID == "" || in.OwnerID == "" || in.EpisodeID == "" {

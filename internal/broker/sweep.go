@@ -283,6 +283,13 @@ func (s *Sweeper) runFunc(in SweepInput) job.Func {
 	}
 }
 
+// RunFunc builds the job work for one sweep run. The binary schedules
+// it on its interval, and Resume rebuilds it after a restart. A second
+// pass over a swept session moves no money and raises no alert.
+func (s *Sweeper) RunFunc(in SweepInput) job.Func {
+	return s.runFunc(in)
+}
+
 // Sweep ends every session row still open past its cap plus the margin.
 // It settles each one through the reconciler, deletes the provider record
 // after, and records the outcome. A settled session is skipped, so a

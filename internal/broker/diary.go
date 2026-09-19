@@ -42,6 +42,25 @@ func NewSQLiteDiary(db *sqlite.DB) (*SQLiteDiary, error) {
 	return &SQLiteDiary{db: db}, nil
 }
 
+// SetConnectedSeconds writes the settled duration on one session row.
+// It lets the diary serve the reconciler SessionStore seam, so the
+// settle and the rows share one handle.
+func (d *SQLiteDiary) SetConnectedSeconds(ctx context.Context, sessionID string, connectedSeconds int) error {
+	done, err := d.db.Writer().ExecContext(ctx,
+		`UPDATE sessions SET connected_seconds = ? WHERE id = ?`, connectedSeconds, sessionID)
+	if err != nil {
+		return fmt.Errorf("broker: set connected seconds: %w", ErrStore)
+	}
+	won, err := done.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("broker: set connected seconds: %w", ErrStore)
+	}
+	if won != 1 {
+		return fmt.Errorf("broker: set connected seconds %s: %w", sessionID, ErrStore)
+	}
+	return nil
+}
+
 // CountSessions reports how many sessions the owner started before.
 func (d *SQLiteDiary) CountSessions(ctx context.Context, ownerID string) (int, error) {
 	var held int
