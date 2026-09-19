@@ -156,7 +156,7 @@ requires:   T6.1b, T7.1, T7.2, T7.3
 fixture-ok: no
 size:       S · frontier
 owns:       dev-diary/probes/production.md
-status:     in-progress:remediate-r1:t7.5-rem-r1
+status:     in-progress:review-r2:t7.5-rev-r2@162ff9c8f520ff083077e7864862951cfa883567
 ```
 Automated, from a workstation, never from the box. No person needed.
 Runs once, after P7 lands and the new image deploys.
