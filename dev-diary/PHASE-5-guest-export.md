@@ -20,7 +20,7 @@ requires:   T3.4, T3.5, T3.6
 fixture-ok: yes
 size:       S · mid
 owns:       internal/export/
-status:     in-progress:land:t5.1-rem-r1@68d9eeb261c73de271e39299c2f260670f6ffe97
+status:     done:a5def2931c8813d19cb5ab00226293b85ef880be
 ```
 **Build on:** `keel/caption` for the SRT and WebVTT files, `keel/waveform` for the video, and
 `keel/ffmpeg` for the audio. Reprise supplies the word timings and the still. It writes neither
@@ -166,6 +166,10 @@ T5.4 landed (Orchestrator-2) after round 2 APPROVE with zero residue against rou
 90-day retention sweep deletes expired guests with owner-kept episodes surviving, and retries
 read expiry fresh. Round 1 fixed the frozen-cutoff retry. Retention window decided at 90 days
 by the owner this session.
+T5.1 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. AAC
+master, 1080p waveform video, validated captions, and chaptered descriptions bundle per
+episode. Round 1 isolated the zero-pin, halved the duration window with zero flakes, and fixed
+the error docs.
 
 ### What surprised us
 Nothing yet.
