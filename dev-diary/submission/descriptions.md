@@ -16,6 +16,6 @@ The beat that sells it is memory across episodes. Mention something you dread in
 
 The app records both sides locally as separate stems. The model proposes every cut and you dispose of every cut. Every episode stays private by default, and publishing takes one explicit action.
 
-The live app runs at `https://reprise.nryn.dev`. Scripted verification minted sessions, streamed speech, and closed explicitly with provider confirmed closes.
+The live app runs at `https://reprise.nryn.dev`. Scripted verification minted sessions, streamed speech, and closed explicitly with provider confirmed close.
 
 [WAITS ON T6.4b] Add one quoted host callback with its episode and offset once real voices land.

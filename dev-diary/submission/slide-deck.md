@@ -18,7 +18,7 @@ You talk, a host asks, and the talk becomes an episode. The episode ships with a
 
 One WebSocket carries the live conversation. AssemblyAI runs transcription, turn taking, interruption, and voice end to end. The app records both sides locally as separate stems. The batch pass runs on the rendered file, so chapter timestamps describe the audio people hear.
 
-Measured facts: scripted guests minted sessions with HTTP 201, streamed generated speech, and closed explicitly. Provider records confirm `client_end` closes. Connected calls cost about 2.1 cents for 16 seconds at 4.50 dollars per hour.
+Measured facts: scripted guests minted sessions with HTTP 201, streamed generated speech, and closed explicitly. Provider records confirm `client_end` close. Connected calls cost about 2.1 cents for 16 seconds at 4.50 dollars per hour.
 
 ## 5. Presentation
 
