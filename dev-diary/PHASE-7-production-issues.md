@@ -322,8 +322,9 @@ post reports the standing outcome. No wall-clock threshold.
 requires:   T7.11, T2.4
 fixture-ok: yes
 size:       XS · light
-owns:       web/src/lib/voice/
-status:     in-progress:review-r1:t7.12-rev-r1@234d65cf950e67a75858bd2014778d960f188c29
+owns:       web/src/lib/voice/, web/src/routes/record/cap.spec.ts,
+            web/src/routes/record/mock-session.spec.ts, web/src/routes/record/+page.svelte
+status:     in-progress:remediate-r1:t7.12-rem-r1
 ```
 Round 1 scoped the gap: nothing in a real take calls the completion
 driver. The controller finishes both uploads in `endTake` and
