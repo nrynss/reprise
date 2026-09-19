@@ -48,7 +48,8 @@ Reprise deploys the same shape at `reprise.nryn.dev`.
   box config puts them under `/var/lib/reprise` inside the container.
 * A CPU and memory limit, because the box is small, has no swap, and already runs seven containers.
   The render is the greedy one, so size the limit against ffmpeg rather than the idle server.
-* A nightly `sqlite.Backup` copied off the box, plus the media directory.
+* A nightly `sqlite.Backup` copied off the box, plus the media directory. Deferred on
+  2026-09-19: the script ships, no destination is set, and nothing runs it. See below.
 
 **Three gaps this task closes before it can deploy anything.** Each one is code, not deployment,
 which is why the `owns` line grew past `deploy/`.
@@ -66,9 +67,12 @@ which is why the `owns` line grew past `deploy/`.
 **Two decisions the owner makes before this starts.**
 
 * **How the image reaches the box.** Closed by operator override on 2026-09-19. See the handoff.
-* **Where the nightly backup goes.** The box documentation found no backup job, no archives, and no
-  verified restore. This task cannot invent a destination, and the run script must not hold a
-  credential for one.
+* **Where the nightly backup goes.** Closed on 2026-09-19 by deferring it. The owner's call: a
+  backup destination is a future option and does not gate the deploy or anything after it.
+  `deploy/backup.sh` ships, takes the destination as a parameter, and holds no credential. No
+  destination is chosen, no cron runs it, and the restore drill is unrun. The box therefore holds
+  the only copy of the database and the media. This is a known, accepted exposure, not an
+  oversight, and no later task waits on it.
 
 **Operator override, 2026-09-19.** The owner skipped the implement, review, remediate loop. A
 private GitHub repository now exists at `nrynss/reprise`. `.github/workflows/image.yml` publishes
@@ -222,8 +226,9 @@ The running build is `3ab625a`. `48ac233` and the commits between it change only
 scripts and these notes, none of which is in the image, so the box is current in substance.
 Publish again when the next code change lands.
 
-Remaining owner items: the backup destination, its cron and a restore drill. T6.1b production
-verification is next and nothing blocks it.
+No owner items remain on this task. The backup destination was the last one and it is closed as
+deferred, documented in `deploy/README.md` under a heading that says nothing is backing up today.
+T6.1b production verification is next and nothing blocks it.
 
 ### What surprised us
 The owner needed to ship from GitHub while away from the workstation. The loop would have

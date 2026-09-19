@@ -183,12 +183,23 @@ To reach the origin from the box and bypass the edge:
 curl -k -sS --resolve reprise.nryn.dev:443:127.0.0.1 https://reprise.nryn.dev/healthz
 ```
 
-## Backup
+## Backup, not yet in service
 
-The backup script copies the live database through the SQLite online backup
-API, checks the copy with `integrity_check`, and copies the media directory
-beside it. It takes the destination as a parameter and holds no credential.
-The destination itself is the owner decision. Point it at off-box storage.
+**Nothing is backing up today, by decision.** `backup.sh` is written and
+ready, no destination is chosen, and no cron runs it. The box holds the only
+copy of the database and the media. Treat the deployment as replaceable and
+its data as not.
+
+The rest of this section is the instruction sheet for the day that changes.
+It is not a description of anything currently running.
+
+The script copies the live database through the SQLite online backup API,
+checks the copy with `integrity_check`, and copies the media directory
+beside it. It takes the destination as a parameter and holds no credential,
+so choosing off-box storage is the whole of the remaining decision.
+
+To put it in service, pick a destination, add the cron, then run the restore
+drill below before trusting it.
 
 Nightly cron on the box:
 
@@ -199,7 +210,8 @@ Nightly cron on the box:
 Each run lands in a UTC timestamped directory with a manifest. The newest
 seven runs are kept. Set `RETAIN_COUNT=` to keep more or fewer.
 
-Restore drill, to run before trusting the cron:
+Restore drill, to run before trusting the cron. Until someone has run this
+against a real archive, the backup is an untested claim:
 
 1. Stop the container: `docker rm -f reprise`.
 2. Copy the database back: `cp <run>/reprise.db /srv/reprise/data/reprise.db`.
