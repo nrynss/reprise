@@ -66,13 +66,6 @@ func (d *sessionDouble) ended(sessionID string) bool {
 	return d.deleted[sessionID]
 }
 
-// callsFor returns the session ids the double ended.
-func (d *sessionDouble) callsFor() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return append([]string(nil), d.calls...)
-}
-
 // transcriptDouble records provider batch deletes. A deleted id reads
 // back as the provider deletion marker with no words, the way the real
 // provider keeps soft deleted copies readable.
