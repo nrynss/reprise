@@ -17,7 +17,13 @@
 	let failure = $state('');
 
 	async function load() {
-		const fixture = page.url.searchParams.get('fixture');
+		let fixture = '';
+		for (const [key, value] of page.url.searchParams) {
+			if (key === 'fixture') {
+				fixture = value;
+				break;
+			}
+		}
 		if (fixture === 'published') {
 			const payload = fixtureShare();
 			title = payload.title;
