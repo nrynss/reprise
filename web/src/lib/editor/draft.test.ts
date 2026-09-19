@@ -92,4 +92,17 @@ describe('draft controller', () => {
 		expect(queryValue('?fixture=1', 'gate')).toBeNull();
 		expect(queryValue('', 'fixture')).toBeNull();
 	});
+
+	it('falls back to the scripted draft when the backend refuses', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('no backend')));
+		const snaps: DraftSnapshot[] = [];
+		const controller = new DraftController({ episodeId: 'draft-1', onChange: (snap) => snaps.push(snap) });
+		controller.mount('?fixture=0');
+		await vi.waitFor(() => {
+			expect(controller.snapshot.ready).toBe(true);
+		});
+		expect(controller.snapshot.appliedCount).toBe(3);
+		expect(controller.snapshot.notice).toContain('scripted draft');
+		vi.unstubAllGlobals();
+	});
 });
