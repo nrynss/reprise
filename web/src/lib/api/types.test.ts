@@ -10,6 +10,13 @@ describe('API_ROUTES', () => {
 	it('mirrors the server route table', () => {
 		expect([...API_ROUTES]).toEqual(routesGolden);
 	});
+
+	it('lists the admin patterns the owner page calls', () => {
+		const patterns = API_ROUTES.map((route) => `${route.method} ${route.pattern}`);
+		expect(patterns).toContain('GET /api/admin/limits');
+		expect(patterns).toContain('POST /api/admin/limits/pause');
+		expect(patterns).toContain('POST /api/admin/limits/owner');
+	});
 });
 
 describe('stub refusal', () => {

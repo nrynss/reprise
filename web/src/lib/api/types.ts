@@ -29,6 +29,9 @@ export const API_ROUTES: readonly ApiRoute[] = [
 	{ method: 'DELETE', pattern: '/api/episodes/{id}/publish' },
 	{ method: 'DELETE', pattern: '/api/episodes/{id}' },
 	{ method: 'GET', pattern: '/api/threads' },
+	{ method: 'GET', pattern: '/api/admin/limits' },
+	{ method: 'POST', pattern: '/api/admin/limits/pause' },
+	{ method: 'POST', pattern: '/api/admin/limits/owner' },
 	{ method: 'GET', pattern: '/media/{id}' }
 ];
 

@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,11 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/nrynss/keel/cost"
+	"github.com/nrynss/keel/gate"
+	"github.com/nrynss/keel/stream"
 )
 
 // updateGoldens rewrites the golden files the browser decodes. Run the
@@ -36,6 +43,9 @@ var expectedTable = []Route{
 	{Method: "DELETE", Pattern: "/api/episodes/{id}/publish"},
 	{Method: "DELETE", Pattern: "/api/episodes/{id}"},
 	{Method: "GET", Pattern: "/api/threads"},
+	{Method: "GET", Pattern: "/api/admin/limits"},
+	{Method: "POST", Pattern: "/api/admin/limits/pause"},
+	{Method: "POST", Pattern: "/api/admin/limits/owner"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
 
@@ -151,5 +161,248 @@ func checkGolden(t *testing.T, name string, content []byte) {
 	}
 	if string(want) != string(content) {
 		t.Fatalf("golden %s drifted:\n got %s\nwant %s", name, content, want)
+	}
+}
+
+// guestStub stands in for the guest session middleware. It counts calls
+// and marks the response, so tests see whether the chain ran and in what
+// order.
+type guestStub struct {
+	calls *int
+}
+
+// Middleware marks the response and calls next.
+func (g guestStub) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*g.calls++
+		w.Header().Set("X-Guest-Middleware", "ran")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// recordingHandler stands in for an implemented handler. It counts calls
+// and answers 200, so tests see whether the chain reached it.
+type recordingHandler struct {
+	calls *int
+}
+
+// ServeHTTP counts the call and answers 200.
+func (h recordingHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	*h.calls++
+	w.WriteHeader(http.StatusOK)
+}
+
+// openGate returns a gate with no passcode and one permissive rule, so an
+// honest request passes and only the chain order is under test.
+func openGate(t *testing.T) (*gate.Gate, gate.Rule) {
+	t.Helper()
+	g, err := gate.New(gate.Config{})
+	if err != nil {
+		t.Fatalf("open gate: %v", err)
+	}
+	rule := gate.Rule{
+		Name:      "test",
+		PerClient: gate.Limit{Burst: 64, Every: time.Second},
+		Global:    gate.Limit{Burst: 64, Every: time.Second},
+	}
+	return g, rule
+}
+
+// mountedDeps wires every mountable route to one recording handler behind
+// an open gate and the guest stub. Both owner ceilings agree.
+func mountedDeps(t *testing.T, guestCalls, handlerCalls *int) Dependencies {
+	t.Helper()
+	g, rule := openGate(t)
+	return Dependencies{
+		Gate:              g,
+		Rule:              rule,
+		Identity:          guestStub{calls: guestCalls},
+		Sessions:          recordingHandler{calls: handlerCalls},
+		Admin:             recordingHandler{calls: handlerCalls},
+		Uploads:           recordingHandler{calls: handlerCalls},
+		Media:             recordingHandler{calls: handlerCalls},
+		Events:            stream.New(stream.Config{}),
+		OwnerSessionLimit: cost.Price(100),
+		OwnerDefaultLimit: cost.Price(100),
+	}
+}
+
+func TestMountRefusesUnequalOwnerLimits(t *testing.T) {
+	g, rule := openGate(t)
+	calls := 0
+	deps := Dependencies{
+		Gate:              g,
+		Rule:              rule,
+		Identity:          guestStub{calls: &calls},
+		Sessions:          recordingHandler{calls: &calls},
+		OwnerSessionLimit: cost.Price(100),
+		OwnerDefaultLimit: cost.Price(200),
+	}
+	if err := Mount(http.NewServeMux(), deps); !errors.Is(err, ErrMount) {
+		t.Fatalf("mount with unequal limits: error %v, want %v", err, ErrMount)
+	}
+	deps.Sessions = nil
+	deps.Admin = recordingHandler{calls: &calls}
+	if err := Mount(http.NewServeMux(), deps); !errors.Is(err, ErrMount) {
+		t.Fatalf("mount admin with unequal limits: error %v, want %v", err, ErrMount)
+	}
+}
+
+func TestMountNeedsGateAndIdentity(t *testing.T) {
+	_, rule := openGate(t)
+	calls := 0
+	deps := Dependencies{
+		Rule:              rule,
+		Identity:          guestStub{calls: &calls},
+		Sessions:          recordingHandler{calls: &calls},
+		OwnerSessionLimit: cost.Price(100),
+		OwnerDefaultLimit: cost.Price(100),
+	}
+	if err := Mount(http.NewServeMux(), deps); !errors.Is(err, ErrMount) {
+		t.Fatalf("mount without gate: error %v, want %v", err, ErrMount)
+	}
+	g, _ := openGate(t)
+	deps.Gate = g
+	deps.Identity = nil
+	if err := Mount(http.NewServeMux(), deps); !errors.Is(err, ErrMount) {
+		t.Fatalf("mount without guest middleware: error %v, want %v", err, ErrMount)
+	}
+}
+
+func TestMountServesHandlersThroughChain(t *testing.T) {
+	guestCalls := 0
+	handlerCalls := 0
+	mux := http.NewServeMux()
+	if err := Mount(mux, mountedDeps(t, &guestCalls, &handlerCalls)); err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	chained := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/sessions"},
+		{http.MethodGet, "/api/admin/limits"},
+		{http.MethodPost, "/api/admin/limits/pause"},
+		{http.MethodPost, "/api/admin/limits/owner"},
+		{http.MethodPost, "/api/uploads"},
+		{http.MethodPut, "/api/uploads/e01/chunks/0"},
+		{http.MethodGet, "/media/blob1"},
+	}
+	for _, tc := range chained {
+		guestCalls = 0
+		handlerCalls = 0
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s %s: status %d, want 200", tc.method, tc.path, rec.Code)
+		}
+		if guestCalls != 1 {
+			t.Fatalf("%s %s: guest middleware ran %d times, want 1", tc.method, tc.path, guestCalls)
+		}
+		if handlerCalls != 1 {
+			t.Fatalf("%s %s: handler ran %d times, want 1", tc.method, tc.path, handlerCalls)
+		}
+		if rec.Header().Get("X-Guest-Middleware") != "ran" {
+			t.Fatalf("%s %s: guest middleware mark missing", tc.method, tc.path)
+		}
+	}
+}
+
+func TestMountStreamsJobEvents(t *testing.T) {
+	guestCalls := 0
+	handlerCalls := 0
+	mux := http.NewServeMux()
+	if err := Mount(mux, mountedDeps(t, &guestCalls, &handlerCalls)); err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/jobs/e01/events", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("job events: status %d, want 200", rec.Code)
+	}
+	if contentType := rec.Header().Get("Content-Type"); contentType != "text/event-stream" {
+		t.Fatalf("job events: content type %q, want text/event-stream", contentType)
+	}
+	if guestCalls != 1 {
+		t.Fatalf("job events: guest middleware ran %d times, want 1", guestCalls)
+	}
+}
+
+func TestMountKeepsStubsForUnmountedRoutes(t *testing.T) {
+	guestCalls := 0
+	handlerCalls := 0
+	mux := http.NewServeMux()
+	if err := Mount(mux, mountedDeps(t, &guestCalls, &handlerCalls)); err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	stubs := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/sessions/e01/end"},
+		{http.MethodGet, "/api/episodes"},
+		{http.MethodGet, "/api/threads"},
+	}
+	for _, tc := range stubs {
+		beforeGuests := guestCalls
+		beforeHandlers := handlerCalls
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotImplemented {
+			t.Fatalf("%s %s: status %d, want 501", tc.method, tc.path, rec.Code)
+		}
+		var body errorShape
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("%s %s: decode refusal: %v", tc.method, tc.path, err)
+		}
+		if body.Error.Code != CodeNotImplemented {
+			t.Fatalf("%s %s: code %q, want %q", tc.method, tc.path, body.Error.Code, CodeNotImplemented)
+		}
+		if guestCalls != beforeGuests || handlerCalls != beforeHandlers {
+			t.Fatalf("%s %s: stub ran the chain", tc.method, tc.path)
+		}
+	}
+}
+
+func TestMountGateRefusesBeforeMiddleware(t *testing.T) {
+	g, err := gate.New(gate.Config{Passcode: "owner-secret"})
+	if err != nil {
+		t.Fatalf("open gate: %v", err)
+	}
+	rule := gate.Rule{
+		Name:      "test",
+		PerClient: gate.Limit{Burst: 64, Every: time.Second},
+		Global:    gate.Limit{Burst: 64, Every: time.Second},
+	}
+	guestCalls := 0
+	handlerCalls := 0
+	mux := http.NewServeMux()
+	deps := Dependencies{
+		Gate:              g,
+		Rule:              rule,
+		Identity:          guestStub{calls: &guestCalls},
+		Sessions:          recordingHandler{calls: &handlerCalls},
+		OwnerSessionLimit: cost.Price(100),
+		OwnerDefaultLimit: cost.Price(100),
+	}
+	if err := Mount(mux, deps); err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("passcode refusal: status %d, want 403", rec.Code)
+	}
+	if guestCalls != 0 {
+		t.Fatalf("refused request minted state: guest middleware ran %d times", guestCalls)
+	}
+	if handlerCalls != 0 {
+		t.Fatalf("refused request reached the handler %d times", handlerCalls)
 	}
 }
