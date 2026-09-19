@@ -155,7 +155,7 @@ requires:   T5.2, T2.4, T4.3
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/welcome/
-status:     in-progress:review-r1:t5.5-rev-r1@83a617d4b1524081043b02e293800db57f1f131c
+status:     done:b54809b1dc04be680982ba43d64316d17ac68227
 ```
 **Mockup:** the `welcome` view ([`mockup`](mockup), `#/welcome`).
 
@@ -184,6 +184,7 @@ confirms the button with no seed, and WebKit plays after the first gesture when 
 
 ### What exists now (Orchestrator-2)
 T5.2 landed after round 1 APPROVE with zero in-scope findings. Copy, receipt, and drop live at the package seam. Four wiring items stand: season-list Sync plus EnsureCopy, delete branch on seeded flag, sweep through Drop, Dockerfile data copy.
+T5.5 landed after round 1 APPROVE with zero findings. Empty catalog offers one record link, seeded state plays the teaser after the first gesture. WebKit play-after-gesture stays unverified on the review host (missing libs) and wants a re-run where deps exist.
 T5.4 already landed. The sweep does not wait on a catalog. Retention is 90 days.
 T5.3 landed after round 1 APPROVE with zero in-scope findings. Guest caps, kill switch, and the
 Keel-backed spend view are on main with both sides pinned. The owner login stays an explicit
