@@ -11,6 +11,7 @@
 	let completionText = $state('');
 	let completionFailed = $state(false);
 	let retryReady = $state(false);
+	let activeController = $state<RecordController | null>(null);
 
 	const completionDriver = createCompletionDriver((view) => {
 		completionVisible = true;
@@ -23,6 +24,10 @@
 		void completionDriver.retry();
 	}
 
+	function retryControllerCompletion() {
+		void activeController?.retryCompletion();
+	}
+
 	$effect(() => {
 		const params = Object.fromEntries(new URLSearchParams(window.location.search).entries());
 		const controller = new RecordController({
@@ -33,6 +38,7 @@
 			}
 		});
 		controller.mount();
+		activeController = controller;
 		if (params['mock'] === '1') {
 			exposeStemsMock(completionDriver, () => controller.harness());
 		}
@@ -53,6 +59,8 @@
 				const target = event.target;
 				if (target instanceof Element && target.closest('#stems-retry') !== null) {
 					retryCompletion();
+				} else if (target instanceof Element && target.closest('#record-retry') !== null) {
+					retryControllerCompletion();
 				} else if (target instanceof Element && target.closest('#record-end-now') !== null) {
 					controller.endControl();
 				} else if (target instanceof Element && target.closest('#record-end') !== null) {
@@ -64,6 +72,7 @@
 		return () => {
 			startButton?.removeEventListener('click', onStart);
 			clicks.abort();
+			activeController = null;
 			controller.destroy();
 		};
 	});
@@ -129,6 +138,13 @@
 			>
 				{snap.armed ? 'Confirm end session' : 'End session'}
 			</button>
+		</section>
+	{/if}
+
+	{#if snap.phase === 'ending' && snap.completionFailed}
+		<section aria-label="Draft move retry">
+			<h2>Draft move retry</h2>
+			<button id="record-retry" aria-label="Retry draft move">Retry draft move</button>
 		</section>
 	{/if}
 

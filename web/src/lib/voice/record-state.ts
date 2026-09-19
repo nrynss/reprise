@@ -52,6 +52,7 @@ export interface RecordSnapshot {
 	greeting: string;
 	capWarning: boolean;
 	capText: string;
+	completionFailed: boolean;
 }
 
 // MockVoiceHarness drives the take without fixtures. The page exposes it
@@ -106,7 +107,8 @@ export const emptySnapshot: RecordSnapshot = {
 	armed: false,
 	greeting: '',
 	capWarning: false,
-	capText: ''
+	capText: '',
+	completionFailed: false
 };
 
 function mockScript(): MockScript {
@@ -632,7 +634,8 @@ export class RecordController {
 			armed: this.armed,
 			greeting: this.greeting,
 			capWarning: this.capWarning,
-			capText: this.capText
+			capText: this.capText,
+			completionFailed: this.completion?.status === 'failed'
 		});
 	}
 

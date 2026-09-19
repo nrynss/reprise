@@ -8,6 +8,22 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
+async function installCompletionStub(page: Page): Promise<void> {
+	await page.route('**/stems/complete', async (route) => {
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				episode_id: 'mock-episode',
+				moved: true,
+				scheduled: true,
+				job_id: 'tj-1',
+				state: 'draft'
+			})
+		});
+	});
+}
+
 interface CapHarness {
 	sessionEndCount(): number;
 	capAdvance(ms: number): void;
@@ -35,6 +51,7 @@ async function capInfo(page: Page): Promise<{
 
 test('the timer ends the take past the cap with nobody pressing end', async ({ page }) => {
 	await startMockTake(page);
+	await installCompletionStub(page);
 	const opened = await capInfo(page);
 	expect(opened.warning).toBe(false);
 	expect(opened.remainingSeconds).toBeGreaterThan(61);
@@ -76,6 +93,7 @@ test('the timer ends the take past the cap with nobody pressing end', async ({ p
 
 test('a suspended page past the cap ends on wake', async ({ page }) => {
 	await startMockTake(page);
+	await installCompletionStub(page);
 	const opened = await capInfo(page);
 
 	// Jump past the cap with no timer running, the way a sleeping laptop

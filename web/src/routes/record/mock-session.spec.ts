@@ -39,6 +39,22 @@ async function startMockTake(page: Page): Promise<void> {
 	await expect(page.getByRole('heading', { name: 'On air' })).toBeVisible();
 }
 
+async function installCompletionStub(page: Page): Promise<void> {
+	await page.route('**/stems/complete', async (route) => {
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				episode_id: 'mock-episode',
+				moved: true,
+				scheduled: true,
+				job_id: 'tj-1',
+				state: 'draft'
+			})
+		});
+	});
+}
+
 // Wrap raw PCM16 mono bytes in a WAV header the measuring tool reads.
 function wavBytes(pcm: number[], sampleRate: number): Uint8Array {
 	const data = Uint8Array.from(pcm);
@@ -255,6 +271,7 @@ test('reload completes the take over exactly the persisted bytes', async ({ page
 
 test('leaving the page sends the close message exactly once', async ({ page }) => {
 	await startMockTake(page);
+	await installCompletionStub(page);
 	await page.evaluate(() => {
 		(window as unknown as { __mockVoice: Harness }).__mockVoice.feedBlocks(10);
 	});
