@@ -727,3 +727,50 @@ func TestResolveEpisodeRejectsBackdatedEpisode(t *testing.T) {
 	}
 }
 
+// TestStoreResolutionRecloseKeepsHistory pins the audit trail. Closing
+// twice keeps both evidence rows while the link points at the latest
+// one, so no stored quote ever disappears.
+func TestStoreResolutionRecloseKeepsHistory(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "owner-a-ep1", "owner-a", 1)
+	addEpisode(t, db, "owner-a-ep2", "owner-a", 2)
+	addEpisode(t, db, "owner-a-ep3", "owner-a", 3)
+	addMention(t, db, "owner-a-c1", "owner-a", "owner-a-ep1", "commitment", 0, "I will run daily")
+	if err := memory.StoreResolution(t.Context(), db, "owner-a", "owner-a-c1", "owner-a-ep2", "ran today", 0); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if err := memory.StoreResolution(t.Context(), db, "owner-a", "owner-a-c1", "owner-a-ep3", "ran again today", 0); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+	var first int
+	if err := db.QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM mentions WHERE quote = 'ran today'").Scan(&first); err != nil {
+		t.Fatalf("count first evidence: %v", err)
+	}
+	if first != 1 {
+		t.Fatalf("first evidence rows = %d, want the stored quote kept", first)
+	}
+	if n := mentionCount(t, db, "owner-a-ep2", "doing"); n != 1 {
+		t.Fatalf("episode two doing mentions = %d, want the first evidence kept", n)
+	}
+	if n := mentionCount(t, db, "owner-a-ep3", "doing"); n != 1 {
+		t.Fatalf("episode three doing mentions = %d, want the latest evidence", n)
+	}
+	var links int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM resolutions").Scan(&links); err != nil {
+		t.Fatalf("count resolutions: %v", err)
+	}
+	if links != 1 {
+		t.Fatalf("resolutions = %d, want one link", links)
+	}
+	resolved, err := memory.ResolvedCommitments(t.Context(), db, "owner-a")
+	if err != nil {
+		t.Fatalf("resolved commitments: %v", err)
+	}
+	if len(resolved) != 1 || resolved[0].Evidence != "ran again today" || resolved[0].EvidenceNumber != 3 {
+		t.Fatalf("resolved = %+v, want the latest evidence from episode 3", resolved)
+	}
+}
+

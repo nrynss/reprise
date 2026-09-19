@@ -89,11 +89,7 @@ func StoreResolution(ctx context.Context, db *sql.DB, ownerID, commitmentID, epi
 			ownerID, commitmentID); err != nil {
 			return fmt.Errorf("memory: store resolution: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM mentions WHERE id = ? AND owner_id = ?",
-			oldEvidence, ownerID); err != nil {
-			return fmt.Errorf("memory: store resolution: %w", err)
-		}
-	case err == sql.ErrNoRows:
+	case errors.Is(err, sql.ErrNoRows):
 	default:
 		return fmt.Errorf("memory: store resolution: %w", err)
 	}
