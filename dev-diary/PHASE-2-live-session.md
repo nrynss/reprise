@@ -313,7 +313,7 @@ requires:   T2.1, T2.4, T2.6
 fixture-ok: yes
 size:       S · mid
 owns:       dev-diary/probes/latency.md, internal/broker/timeouts.go
-status:     in-progress:review-r1:t2.10-rev-r1@483e6c71eca724a567e29b9d9003005930fc2d86
+status:     in-progress:land:t2.10-impl@483e6c71eca724a567e29b9d9003005930fc2d86
 ```
 Opened after live measurement showed the provider answering ~10x slower than baseline (greeting
 `reply.done` near 50 s against 4 s, transport and teardown healthy). The product must assume a
