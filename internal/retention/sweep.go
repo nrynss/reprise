@@ -19,6 +19,7 @@ import (
 
 	"github.com/nrynss/keel/job"
 	"github.com/nrynss/keel/mediastore"
+	"github.com/nrynss/reprise/internal/privacy"
 )
 
 // sweptEpisode is one guest episode the sweep must erase, with the inner
@@ -73,6 +74,62 @@ func (s *Service) Sweep(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// ReSweep restarts a failed or interrupted sweep from its recorded
+// snapshot and returns the new job id at once. Stuck episode erasures
+// retry from their recorded ids, because the episode rows are already
+// gone and no fresh inventory could rebuild the provider list. A sweep
+// with nothing recorded restarts from a fresh inventory, so a retry
+// after a provider outage finishes the same guests.
+func (s *Service) ReSweep(ctx context.Context, jobID string) (string, error) {
+	if s.runner == nil {
+		return "", fmt.Errorf("retention: re-sweep: %w: no runner bound", ErrInvalid)
+	}
+	if jobID == "" {
+		return "", fmt.Errorf("retention: re-sweep: %w: empty job", ErrInvalid)
+	}
+	prior, err := s.snapshotOf(ctx, jobID)
+	if err != nil {
+		return "", err
+	}
+	id, err := s.runner.StartKind(ctx, SweepName, func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
+		return s.run(ctx, progress, prior)
+	})
+	if err != nil {
+		return "", fmt.Errorf("retention: re-sweep: %w", err)
+	}
+	return id, nil
+}
+
+// snapshotOf reads the latest recorded snapshot of one sweep job. A job
+// with no snapshot yet restarts from a fresh inventory.
+func (s *Service) snapshotOf(ctx context.Context, jobID string) (sweepSnapshot, error) {
+	attempts, err := s.runner.Attempts(ctx, jobID)
+	if err != nil {
+		return sweepSnapshot{}, fmt.Errorf("retention: re-sweep %s: %w", jobID, err)
+	}
+	if len(attempts) == 0 {
+		return sweepSnapshot{}, fmt.Errorf("retention: re-sweep %s: %w: no attempts recorded", jobID, ErrInvalid)
+	}
+	if attempts[len(attempts)-1].Kind != SweepName {
+		return sweepSnapshot{}, fmt.Errorf("retention: re-sweep %s: %w: job is a %s job",
+			jobID, ErrInvalid, attempts[len(attempts)-1].Kind)
+	}
+	prior := sweepSnapshot{}
+	for i := len(attempts) - 1; i >= 0; i-- {
+		if len(attempts[i].Progress.Detail) == 0 {
+			continue
+		}
+		if err := json.Unmarshal(attempts[i].Progress.Detail, &prior); err != nil {
+			return sweepSnapshot{}, fmt.Errorf("retention: re-sweep %s: %w", jobID, err)
+		}
+		if prior.Version != snapshotVersion {
+			return sweepSnapshot{}, fmt.Errorf("retention: re-sweep %s: %w: unknown snapshot", jobID, ErrInvalid)
+		}
+		break
+	}
+	return prior, nil
+}
+
 // resume rebuilds the work of a sweep a restart left unfinished. It is the
 // job kind resume hook. A record with no snapshot restarts from a fresh
 // inventory, because nothing recorded yet names any guest.
@@ -95,6 +152,10 @@ func (s *Service) resume(rec job.Record) (job.Func, error) {
 // already recorded. The run unions those with guests freshly expired, so a
 // guest who idled past the window while the sweep was down still expires.
 func (s *Service) run(ctx context.Context, progress func(job.Progress), prior sweepSnapshot) ([]byte, error) {
+	runner := s.runner
+	if runner == nil {
+		return nil, fmt.Errorf("retention: sweep: %w: no runner bound", ErrInvalid)
+	}
 	cutoff := prior.Cutoff
 	if cutoff == 0 {
 		cutoff = s.now().Add(-s.window).Unix()
@@ -113,7 +174,8 @@ func (s *Service) run(ctx context.Context, progress func(job.Progress), prior sw
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("retention: sweep: %w", err)
 		}
-		if err := s.sweepGuest(ctx, &snap.Guests[i]); err != nil {
+		report := func() { s.publish(progress, snap) }
+		if err := s.sweepGuest(ctx, runner, &snap.Guests[i], report); err != nil {
 			return nil, err
 		}
 		s.publish(progress, snap)
@@ -208,9 +270,9 @@ func (s *Service) episodes(ctx context.Context, guest string) ([]string, error) 
 // sweepGuest erases every episode of one guest, then removes the stray
 // media and the session and user rows. It marks the guest done only after
 // every delete confirms.
-func (s *Service) sweepGuest(ctx context.Context, guest *sweptGuest) error {
+func (s *Service) sweepGuest(ctx context.Context, runner *job.Runner, guest *sweptGuest, report func()) error {
 	for i := range guest.Episodes {
-		if err := s.eraseEpisode(ctx, guest.Guest, &guest.Episodes[i]); err != nil {
+		if err := s.eraseEpisode(ctx, runner, guest.Guest, &guest.Episodes[i], report); err != nil {
 			return err
 		}
 	}
@@ -229,31 +291,88 @@ func (s *Service) sweepGuest(ctx context.Context, guest *sweptGuest) error {
 // previous run already erased it. A stuck erasure retries from its
 // recorded id, because the rows are gone and no fresh inventory could
 // rebuild the provider list.
-func (s *Service) eraseEpisode(ctx context.Context, guest string, episode *sweptEpisode) error {
+func (s *Service) eraseEpisode(ctx context.Context, runner *job.Runner, guest string, episode *sweptEpisode, report func()) error {
 	if episode.Done {
 		return nil
 	}
 	if !s.episodePresent(ctx, episode.Episode) {
-		episode.Done = true
-		return nil
+		return s.finishRecorded(ctx, runner, episode, report)
 	}
 	for round := 1; round <= episodeRetryRounds; round++ {
-		id, err := s.startErasure(ctx, guest, episode)
+		id, err := s.startErasure(ctx, runner, guest, episode)
 		if err != nil {
 			return err
 		}
 		episode.Erasures = append(episode.Erasures, id)
-		if err := s.waitErasure(ctx, id); err != nil {
+		report()
+		if err := s.waitErasure(ctx, runner, id); err != nil {
 			return err
 		}
-		rep, err := s.inner.Eraser().Inspect(ctx, s.runner, id)
+		rep, err := s.inner.Eraser().Inspect(ctx, runner, id)
 		if err != nil {
 			return fmt.Errorf("retention: inspect erasure for %s: %w", episode.Episode, err)
 		}
 		if rep.Complete() {
 			episode.Done = true
+			report()
 			return nil
 		}
+	}
+	return fmt.Errorf("retention: erase %s: %w: episode still owed", episode.Episode, ErrIncomplete)
+}
+
+// finishRecorded finishes an episode whose row is already gone. Erasures
+// recorded as complete read as done. Any other recorded erasure restarts
+// from its id and waits, because only the recorded ref still names the
+// provider copies. An episode with no recorded erasure went through
+// another flow, so it reads as done.
+func (s *Service) finishRecorded(ctx context.Context, runner *job.Runner, episode *sweptEpisode, report func()) error {
+	if len(episode.Erasures) == 0 {
+		episode.Done = true
+		return nil
+	}
+	for _, id := range episode.Erasures {
+		rep, err := s.inner.Eraser().Inspect(ctx, runner, id)
+		if err != nil {
+			return fmt.Errorf("retention: inspect erasure for %s: %w", episode.Episode, err)
+		}
+		if !rep.Complete() {
+			return s.retryRecorded(ctx, runner, episode, id, report)
+		}
+	}
+	episode.Done = true
+	report()
+	return nil
+}
+
+// retryRecorded restarts one stuck erasure from its recorded id and waits
+// for it to read complete.
+func (s *Service) retryRecorded(ctx context.Context, runner *job.Runner, episode *sweptEpisode, id string, report func()) error {
+	for round := 1; round <= episodeRetryRounds; round++ {
+		next, err := s.inner.ReErase(ctx, id)
+		if errors.Is(err, privacy.ErrComplete) {
+			episode.Done = true
+			report()
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("retention: re-erase %s: %w", episode.Episode, err)
+		}
+		episode.Erasures = append(episode.Erasures, next)
+		report()
+		if err := s.waitErasure(ctx, runner, next); err != nil {
+			return err
+		}
+		rep, err := s.inner.Eraser().Inspect(ctx, runner, next)
+		if err != nil {
+			return fmt.Errorf("retention: inspect erasure for %s: %w", episode.Episode, err)
+		}
+		if rep.Complete() {
+			episode.Done = true
+			report()
+			return nil
+		}
+		id = next
 	}
 	return fmt.Errorf("retention: erase %s: %w: episode still owed", episode.Episode, ErrIncomplete)
 }
@@ -262,13 +381,13 @@ func (s *Service) eraseEpisode(ctx context.Context, guest string, episode *swept
 // recorded one when the episode already owes provider deletes. Ownership
 // checks against the recorded owner, because the sweep allowlisted every
 // guest it runs for.
-func (s *Service) startErasure(ctx context.Context, guest string, episode *sweptEpisode) (string, error) {
+func (s *Service) startErasure(ctx context.Context, runner *job.Runner, guest string, episode *sweptEpisode) (string, error) {
 	if n := len(episode.Erasures); n > 0 {
 		id, err := s.inner.ReErase(ctx, episode.Erasures[n-1])
 		if err == nil {
 			return id, nil
 		}
-		rep, inspectErr := s.inner.Eraser().Inspect(ctx, s.runner, episode.Erasures[n-1])
+		rep, inspectErr := s.inner.Eraser().Inspect(ctx, runner, episode.Erasures[n-1])
 		if inspectErr == nil && rep.Complete() {
 			episode.Done = true
 			return episode.Erasures[n-1], nil
@@ -284,10 +403,10 @@ func (s *Service) startErasure(ctx context.Context, guest string, episode *swept
 // waitErasure polls one inner erasure until its job lands. Done means the
 // erasure confirmed every target. Any other terminal means the provider
 // still owes deletes, so the caller retries from the recorded id.
-func (s *Service) waitErasure(ctx context.Context, id string) error {
+func (s *Service) waitErasure(ctx context.Context, runner *job.Runner, id string) error {
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		attempts, err := s.runner.Attempts(ctx, id)
+		attempts, err := runner.Attempts(ctx, id)
 		if err != nil {
 			return fmt.Errorf("retention: watch erasure: %w", err)
 		}
