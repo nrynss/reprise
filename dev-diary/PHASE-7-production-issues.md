@@ -101,7 +101,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     in-progress:review-r1:t7.3-rev-r1@a4de72f0cc52d7c69b354dab1cbedd3fecc3dc06
+status:     done:5bce6110f2d0b0e7d5f95441dcee8e8afa4c7879
 ```
 The probe measured the uploader reading 404 on its own blob: the
 browser opens uploads with the literal owner `guest` while the media
@@ -190,11 +190,13 @@ evidence.
 
 ### What exists now
 
-T7.2 landed after round 1 APPROVE with zero findings. One shared
-Gemini client, all eight kinds registered with paid passes
-non-idempotent, reconcile per recorded close, sweep every five
-minutes with a boot pass, TTL past cap plus margin. The ceiling stops
-leaking. T7.3 is unblocked.
+T7.3 landed after round 1 APPROVE with zero findings. Upload opens
+resolve to the session user and media refusals carry private
+no-store. Keel issue nrynss/keel#1 tracks the library header. Only
+T7.4 (blocked) and T7.5 remain.
+T7.2 landed after round 1 APPROVE with zero findings. Shared
+Gemini client, eight kinds, reconcile per close, sweep on schedule.
+The ceiling stops leaking.
 T7.1 landed after round 1 APPROVE with zero findings. Episode list,
 detail, decisions, done, session end, and threads answer behind owner
 checks with method plus pattern routing. `main.go` construction of the
