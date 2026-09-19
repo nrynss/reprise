@@ -819,15 +819,14 @@ check live.
 
 ## Observation for the next task
 
-The edge rate gate shaped this run throughout. Upload chunks
-answered 429 `rate_limited` after every second PUT, each with a
-`retry_after_seconds` hint (39, then 14, then shorter). Opens,
-gallery polls, and the completion also met 429s between the
-chunks. Every retry honored the hint and recovered. Poll and
-upload loops must keep honoring the hint instead of retrying
-hot. The gate never blocked the pipeline itself: both stems
-completed byte exact and the completion scheduled on the first
-try after its wait.
+The edge rate gate shaped this run throughout. Upload chunks met
+repeated 429 answers with retry hints. Opens, gallery polls, and
+the completion also met 429s between the chunks. Every retry
+waited for the hinted delay and recovered. Poll and upload loops
+must keep waiting for the hinted delay instead of retrying hot.
+The gate never blocked the pipeline itself. Both stems completed
+byte exact and the completion scheduled on the first try after
+its wait.
 
 No admin call ran in this round, so the kill switch section from
 round 2 stands as written. The site was never paused and no
