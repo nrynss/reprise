@@ -92,7 +92,7 @@ requires:   T3.2, T1.3
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/episode/[id]/edit/, web/src/lib/editor/
-status:     in-progress:review-r1:t3.3-rev-r1@1148c04a4eb3eb235a0784b6d034e210fff2caf7
+status:     in-progress:land:t3.3-impl@1148c04a4eb3eb235a0784b6d034e210fff2caf7
 ```
 **Mockup:** the `editor` view ([`mockup`](mockup), `#/editor`), including the revert affordance
 and the cold-open preview.
