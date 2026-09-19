@@ -128,9 +128,11 @@ func (s *Service) Publish(ctx context.Context, episodeID string) (string, error)
 }
 
 // Unpublish closes episodeID. It marks the episode private, rotates
-// the token so the old link dies, and returns every render blob to
-// private. A missing blob row is tolerated here, because the rotated
-// token already killed the link and revoking must never fail open.
+// the token so the old link dies, and returns the opus and export
+// blobs of every render row to private. A superseded render keeps its
+// blob id, so only a sweep over all rows revokes the whole history. A
+// missing blob row is tolerated here, because the rotated token
+// already killed the link and revoking must never fail open.
 func (s *Service) Unpublish(ctx context.Context, episodeID string) (string, error) {
 	if episodeID == "" {
 		return "", fmt.Errorf("privacy: unpublish: %w: empty episode", ErrInvalid)
@@ -148,11 +150,25 @@ func (s *Service) Unpublish(ctx context.Context, episodeID string) (string, erro
 		VisibilityPrivate, token, ep.id, ep.owner); err != nil {
 		return "", fmt.Errorf("privacy: unpublish %s: %w", episodeID, err)
 	}
-	var opus, aac string
-	_ = s.db.Reader().QueryRowContext(ctx,
-		`SELECT opus_media_id, aac_media_id FROM renders
-		 WHERE episode_id = ? ORDER BY rowid DESC LIMIT 1`, ep.id).Scan(&opus, &aac)
-	for _, blobID := range []string{opus, aac} {
+	rows, err := s.db.Reader().QueryContext(ctx,
+		`SELECT opus_media_id, aac_media_id FROM renders WHERE episode_id = ?`, ep.id)
+	if err != nil {
+		return "", fmt.Errorf("privacy: unpublish %s: %w", episodeID, err)
+	}
+	var blobs []string
+	for rows.Next() {
+		var opus, aac string
+		if err := rows.Scan(&opus, &aac); err != nil {
+			_ = rows.Close()
+			return "", fmt.Errorf("privacy: unpublish %s: %w", episodeID, err)
+		}
+		blobs = append(blobs, opus, aac)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("privacy: unpublish %s: %w", episodeID, err)
+	}
+	for _, blobID := range blobs {
 		if blobID == "" {
 			continue
 		}

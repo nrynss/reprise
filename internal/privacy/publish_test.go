@@ -127,6 +127,47 @@ func TestUnpublishRevokesToken(t *testing.T) {
 	}
 }
 
+// TestUnpublishRevokesEveryRender pins the revoked history half. A
+// second render published over the first leaves two public opus
+// blobs. Unpublish returns both to private, so a signed-out fetch of
+// the superseded render reads 404 like the current one.
+func TestUnpublishRevokesEveryRender(t *testing.T) {
+	fx := openFixture(t)
+	fx.as("owner-a")
+	seed := fx.seeds["owner-a"]
+
+	if _, err := fx.svc.Publish(t.Context(), seed.episode); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	nextOpus := fx.persist(t, "owner-a", seed.episode, "audio/ogg", []byte("render opus take two"))
+	nextAac := fx.persist(t, "owner-a", seed.episode, "audio/mp4", []byte("render aac take two"))
+	renderID, err := id.New()
+	if err != nil {
+		t.Fatalf("mint render id: %v", err)
+	}
+	fx.exec(t, `INSERT INTO renders
+		(id, owner_id, episode_id, input_hash, opus_media_id, aac_media_id, loudness)
+		VALUES (?, ?, ?, 'hash-two', ?, ?, -16)`, renderID, "owner-a", seed.episode, nextOpus, nextAac)
+	if _, err := fx.svc.Publish(t.Context(), seed.episode); err != nil {
+		t.Fatalf("republish: %v", err)
+	}
+	if got := signedOutMedia(fx, t, seed.opus).Code; got != http.StatusOK {
+		t.Fatalf("superseded render status %d, want 200 before unpublish", got)
+	}
+
+	if _, err := fx.svc.Unpublish(t.Context(), seed.episode); err != nil {
+		t.Fatalf("unpublish: %v", err)
+	}
+	for name, blob := range map[string]string{"first opus": seed.opus, "second opus": nextOpus} {
+		if got := signedOutMedia(fx, t, blob).Code; got != http.StatusNotFound {
+			t.Fatalf("signed-out %s status %d, want 404", name, got)
+		}
+		if got := fx.blobVisible(t, blob); got != "private" {
+			t.Fatalf("%s visibility %q, want private", name, got)
+		}
+	}
+}
+
 // TestPublishRefusals pins the boundaries. Another owner's episode,
 // a missing episode, and an episode with no render all refuse with
 // their own sentinel.
