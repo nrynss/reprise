@@ -149,17 +149,16 @@ func (s *Service) resume(rec job.Record) (job.Func, error) {
 }
 
 // run drives one sweep attempt. Prior names the guests an interrupted run
-// already recorded. The run unions those with guests freshly expired, so a
-// guest who idled past the window while the sweep was down still expires.
+// already recorded. The run reads the cutoff fresh on every attempt,
+// including resume and re-sweep, and unions unconfirmed prior guests with
+// the guests expired under that fresh cutoff, so a guest who idled past
+// the window while the sweep was down still expires.
 func (s *Service) run(ctx context.Context, progress func(job.Progress), prior sweepSnapshot) ([]byte, error) {
 	runner := s.runner
 	if runner == nil {
 		return nil, fmt.Errorf("retention: sweep: %w: no runner bound", ErrInvalid)
 	}
-	cutoff := prior.Cutoff
-	if cutoff == 0 {
-		cutoff = s.now().Add(-s.window).Unix()
-	}
+	cutoff := s.now().Add(-s.window).Unix()
 	guests, err := s.plan(ctx, cutoff, prior.Guests)
 	if err != nil {
 		return nil, err

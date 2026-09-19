@@ -267,6 +267,75 @@ func TestDefaultWindowSweepsNinetyDayIdle(t *testing.T) {
 	}
 }
 
+// TestReSweepCatchesNewlyExpired pins the retry cutoff. A guest who
+// idles past the window while the sweep is down expires on the re-sweep,
+// because every attempt reads expiry fresh and unions it with the
+// unconfirmed prior guests. A guest still inside the window survives.
+func TestReSweepCatchesNewlyExpired(t *testing.T) {
+	fx := openFixture(t)
+	fx.seedGuest(t, "guest-old", testNow.Add(-91*24*time.Hour))
+	fx.seedGuest(t, "guest-mid", testNow.Add(-89*24*time.Hour))
+	fx.seedGuest(t, "guest-fresh", testNow.Add(-time.Hour))
+	fx.transcript.fail = true
+
+	jobID, err := fx.svc.Sweep(t.Context())
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		attempts, err := fx.jobStore.Attempts(t.Context(), jobID)
+		if err != nil {
+			t.Fatalf("list attempts: %v", err)
+		}
+		failed := false
+		for _, rec := range attempts {
+			if rec.Status == "error" {
+				failed = true
+			}
+		}
+		if failed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stuck sweep never failed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	fx.transcript.fail = false
+
+	later, err := retention.New(retention.Config{
+		DB:          fx.db,
+		Media:       fx.media,
+		CoverDir:    fx.coverDir,
+		Sessions:    fx.sessions,
+		Transcripts: fx.transcript,
+		Window:      testWindow,
+		Now:         func() time.Time { return testNow.Add(48 * time.Hour) },
+	})
+	if err != nil {
+		t.Fatalf("open later service: %v", err)
+	}
+	if err := later.BindRunner(fx.runner); err != nil {
+		t.Fatalf("bind runner: %v", err)
+	}
+	next, err := later.ReSweep(t.Context(), jobID)
+	if err != nil {
+		t.Fatalf("re-sweep: %v", err)
+	}
+	fx.waitSweepDone(t, next)
+
+	if got := fx.count(t, "episodes", "guest-mid"); got != 0 {
+		t.Fatalf("episodes holds %d newly-expired rows, want none", got)
+	}
+	if got := fx.count(t, "episodes", "guest-old"); got != 0 {
+		t.Fatalf("episodes holds %d old rows, want none", got)
+	}
+	if got := fx.count(t, "episodes", "guest-fresh"); got != 2 {
+		t.Fatalf("episodes holds %d fresh rows, want 2", got)
+	}
+}
+
 // TestReSweepUnknown pins the retry fault. A re-sweep for an unknown job
 // refuses instead of sweeping blind.
 func TestReSweepUnknown(t *testing.T) {
