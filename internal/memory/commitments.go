@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"strings"
@@ -158,6 +159,10 @@ func ParseCommitments(raw string) ([]CommitmentCandidate, error) {
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, fmt.Errorf("memory: parse commitments: %w: %w", ErrModel, err)
 	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("memory: parse commitments: %w: trailing data", ErrModel)
+	}
 	out := make([]CommitmentCandidate, 0, len(payload.Commitments))
 	for _, cand := range payload.Commitments {
 		out = append(out, CommitmentCandidate{
@@ -229,6 +234,10 @@ func ParseResolution(raw string) (resolutionPayload, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&payload); err != nil {
 		return resolutionPayload{}, fmt.Errorf("memory: parse resolution: %w: %w", ErrModel, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return resolutionPayload{}, fmt.Errorf("memory: parse resolution: %w: trailing data", ErrModel)
 	}
 	payload.Quote = strings.TrimSpace(payload.Quote)
 	return payload, nil

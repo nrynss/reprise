@@ -774,3 +774,21 @@ func TestStoreResolutionRecloseKeepsHistory(t *testing.T) {
 	}
 }
 
+// TestParseRejectsTrailingGarbage pins strict decoding. A valid body
+// with prose after it fails, while a clean body still parses.
+func TestParseRejectsTrailingGarbage(t *testing.T) {
+	t.Parallel()
+	if _, err := memory.ParseCommitments(`{"commitments": []} hello`); !errors.Is(err, memory.ErrModel) {
+		t.Fatalf("commitments trailing error = %v, want ErrModel", err)
+	}
+	if _, err := memory.ParseResolution(`{"done": false, "quote": ""} trailing words here`); !errors.Is(err, memory.ErrModel) {
+		t.Fatalf("resolution trailing error = %v, want ErrModel", err)
+	}
+	if _, err := memory.ParseCommitments("{\"commitments\": []}\n"); err != nil {
+		t.Fatalf("clean commitments with a newline fails: %v", err)
+	}
+	if _, err := memory.ParseResolution("{\"done\": false, \"quote\": \"\"}"); err != nil {
+		t.Fatalf("clean resolution fails: %v", err)
+	}
+}
+
