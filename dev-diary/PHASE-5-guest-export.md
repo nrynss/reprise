@@ -46,7 +46,7 @@ requires:   T1.4, T4.1, T4.2
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/seed/, data/season/
-status:     not-started
+status:     in-progress:implement:t5.2-impl
 ```
 The shipped catalog starts empty. This task builds copy, receipt, and drop. It does not wait on
 episodes. The operator places one or two finished episodes in `data/season/` after the box is
