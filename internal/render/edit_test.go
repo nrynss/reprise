@@ -115,6 +115,42 @@ func TestHashInputsStableAcrossCutOrder(t *testing.T) {
 	}
 }
 
+func TestHashInputsVariesWithAssemblyParams(t *testing.T) {
+	base := Input{
+		UserSHA256:   [32]byte{1},
+		HostSHA256:   [32]byte{2},
+		UserOffsetMs: 120,
+		HostOffsetMs: 340,
+		Cuts:         []RangeMs{{Start: 0, End: 100}},
+		ColdOpen:     &RangeMs{Start: 400, End: 900},
+		DurationMs:   1000,
+		CrossfadeMs:  10,
+		MixRateHz:    48000,
+		OpusBitrate:  "96k",
+		AACBitrate:   "128k",
+	}
+	changed := base
+	changed.CrossfadeMs = 20
+	if HashInputs(base) == HashInputs(changed) {
+		t.Fatalf("hash ignores the crossfade")
+	}
+	changed = base
+	changed.MixRateHz = 44100
+	if HashInputs(base) == HashInputs(changed) {
+		t.Fatalf("hash ignores the mix rate")
+	}
+	changed = base
+	changed.OpusBitrate = "64k"
+	if HashInputs(base) == HashInputs(changed) {
+		t.Fatalf("hash ignores the opus bitrate")
+	}
+	changed = base
+	changed.AACBitrate = "96k"
+	if HashInputs(base) == HashInputs(changed) {
+		t.Fatalf("hash ignores the aac bitrate")
+	}
+}
+
 func TestSecondsFormatsMicroseconds(t *testing.T) {
 	if got := seconds(1500); got != "1.500000" {
 		t.Fatalf("seconds: got %q", got)

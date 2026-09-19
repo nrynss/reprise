@@ -47,6 +47,14 @@ type Input struct {
 	ColdOpen *RangeMs
 	// DurationMs bounds the episode clock.
 	DurationMs int64
+	// CrossfadeMs is the fade length at a join in milliseconds.
+	CrossfadeMs int64
+	// MixRateHz is the sample rate of the intermediate mix.
+	MixRateHz int
+	// OpusBitrate names the streaming encoder setting.
+	OpusBitrate string
+	// AACBitrate names the export encoder setting.
+	AACBitrate string
 }
 
 // HashInputs names the render for its inputs. Cuts sort before hashing,
@@ -66,6 +74,10 @@ func HashInputs(in Input) string {
 	fmt.Fprintf(&b, "duration:%d\n", in.DurationMs)
 	fmt.Fprintf(&b, "target:%g:%g:%g\n", TargetLUFS, TruePeakDBTP, LoudnessRangeLU)
 	fmt.Fprintf(&b, "gap:%d\n", ColdOpenGap.Milliseconds())
+	fmt.Fprintf(&b, "crossfade:%d\n", in.CrossfadeMs)
+	fmt.Fprintf(&b, "mixrate:%d\n", in.MixRateHz)
+	fmt.Fprintf(&b, "opus:%s\n", in.OpusBitrate)
+	fmt.Fprintf(&b, "aac:%s\n", in.AACBitrate)
 	for _, c := range cuts {
 		fmt.Fprintf(&b, "cut:%d:%d\n", c.Start, c.End)
 	}

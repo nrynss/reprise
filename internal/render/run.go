@@ -229,6 +229,10 @@ func (r *Resolver) describe(ctx context.Context, episodeID, userPath, hostPath s
 		Cuts:         toRanges(cuts),
 		ColdOpen:     cold,
 		DurationMs:   max(userOffsetMs+userDur.Milliseconds(), hostOffsetMs+hostDur.Milliseconds()),
+		CrossfadeMs:  Crossfade.Milliseconds(),
+		MixRateHz:    MixRate,
+		OpusBitrate:  OpusBitrate,
+		AACBitrate:   AACBitrate,
 	}
 	return in, nil
 }

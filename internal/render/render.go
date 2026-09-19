@@ -54,6 +54,10 @@ const (
 	ColdOpenGap = 750 * time.Millisecond
 	// MixRate is the sample rate of the intermediate mix.
 	MixRate = 48000
+	// OpusBitrate is the streaming encoder setting.
+	OpusBitrate = "96k"
+	// AACBitrate is the export encoder setting.
+	AACBitrate = "128k"
 )
 
 // Output content types carried to the media store. Opus streams inside

@@ -242,8 +242,8 @@ func encodeOutputs(ctx context.Context, tools ffmpeg.Tools, mixPath, graph strin
 		TargetLUFS, LoudnessRangeLU, TruePeakDBTP, m.InputI, m.InputLRA, m.InputTP, m.InputThresh)
 	full := fmt.Sprintf("%s;[asm]%s,%s,asplit=2[opus][aac]", graph, apply, restore)
 	args := []string{"-y", "-i", mixPath, "-filter_complex", full,
-		"-map", "[opus]", "-c:a", "libopus", "-b:a", "96k", opusDst,
-		"-map", "[aac]", "-c:a", "aac", "-b:a", "128k", aacDst}
+		"-map", "[opus]", "-c:a", "libopus", "-b:a", OpusBitrate, opusDst,
+		"-map", "[aac]", "-c:a", "aac", "-b:a", AACBitrate, aacDst}
 	if err := ffmpeg.Run(ctx, tools, args...); err != nil {
 		return fmt.Errorf("render: encode: %w", err)
 	}
