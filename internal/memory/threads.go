@@ -83,7 +83,6 @@ type threadGroup struct {
 	kind     string
 	hits     []EpisodeHit
 	episodes map[int]bool
-	lastRow  int64
 }
 
 // groupMentions folds rows into normalised groups. Blank keys never form
@@ -107,7 +106,6 @@ func groupMentions(rows []mentionRow, skip func(kind string) bool) []*threadGrou
 			order = append(order, group)
 		}
 		group.display = row.quote
-		group.lastRow = row.rowid
 		group.hits = append(group.hits, EpisodeHit{
 			EpisodeID: row.episodeID,
 			Number:    row.number,

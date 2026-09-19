@@ -11,9 +11,9 @@
 // The model marks candidates through the Model seam. Tests bind a scripted
 // answer, so the whole index runs offline. Production binds the seam to
 // the provider package, which owns every wire shape and every paid call.
-// The caller reserves budget before each marking call and persists the raw
-// answer on receipt, because provider output persists and paid calls
-// reserve first.
+// Each marking call reserves budget through the injected Budget and
+// persists the raw answer on receipt, because provider output persists
+// and paid calls reserve first.
 package memory
 
 import (
