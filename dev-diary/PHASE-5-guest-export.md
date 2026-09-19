@@ -72,7 +72,7 @@ requires:   T2.1, T1.4, T1.5
 fixture-ok: yes
 size:       S · mid
 owns:       internal/limits/, web/src/routes/admin/
-status:     not-started
+status:     in-progress:implement:t5.3-impl
 ```
 **Mockup:** the `admin` view ([`mockup`](mockup), `#/admin`), and the two refusals it produces,
 both on `#/preflight` in the state lab: recording paused, and guest limit reached.
