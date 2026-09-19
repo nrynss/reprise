@@ -125,7 +125,7 @@ requires:   T3.2, T3.3
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/episode/[id]/edit/, web/src/lib/editor/
-status:     in-progress:land:t3.3a-impl@5e9cc9584c57273b28d667864de6e650e286e2e5
+status:     done:802e4d311dec5322dd39082cc12b545f09f45b17
 ```
 Opened from T3.3 round 1's observation. The editor reverts cuts only: no control reverts a cold
 open, title, show notes, or callback proposal. T3.2's handoff assigns the callback revert here:
@@ -240,6 +240,9 @@ auto-retry. Round 1 pinned the rerun-overwrite safety. The live image binding be
 T3.3 landed (Orchestrator-2) after round 1 APPROVE with zero findings. The takeover verified the
 orphaned draft, fixed the gate failure, and committed. Opened T3.3a for non-cut reverts
 (callback revert clears its row) from the round 1 observation.
+T3.3a landed (Orchestrator-2) after round 1 APPROVE with zero findings. All four non-cut kinds
+revert with persisted decision rows, and the render/memory reader claims now rest on the shared
+POST surface both sides implement.
 
 ### What surprised us
 Nothing yet.
