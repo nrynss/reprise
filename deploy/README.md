@@ -137,8 +137,12 @@ Every later deploy:
 
 The redeploy script records the running image, starts the target, and gates
 on the container IP. It checks that `/healthz` answers with the expected
-build and that `/` answers 200. A failed gate restores the previous image
-and exits 1. It never touches the public edge.
+build and that `/` answers 200. On expiry it stops the failed container
+fast (30 seconds unless `ROLLBACK_STOP_TIMEOUT` says otherwise), restores
+the recorded image, checks its health within the same bound, and exits 1.
+A stuck deploy reads as red in about a minute. `deploy/redeploy_test.sh`
+pins that path with stubbed tooling, so run it after touching either
+script. It never touches the public edge.
 
 Pin a build explicitly when it matters:
 
@@ -164,6 +168,12 @@ to the session cap of 1800 seconds after SIGTERM, then exits. The timeout
 must stay above the cap, or the daemon kills a drain that was still letting
 a session finish. The 30 second margin covers the exit after the last
 session. A redeploy during a session lets it finish instead of cutting it.
+
+Each second of the drain also reclaims expired holds. A session the browser
+abandoned without its end message never closes on its own, so pure waiting
+would hold the whole window on it. The reclaim frees it at its cap instead.
+A session that is still live keeps its full length. The stop timeout stays
+above the cap for that honest finish.
 
 ## Verification
 

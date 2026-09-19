@@ -124,6 +124,17 @@ type sessions interface {
 	Active() int
 }
 
+// expiredReclaimer frees quota slots whose cap passed. The lease manager
+// implements it. A registry without it never frees early, and the drain
+// still ends on its budget.
+type expiredReclaimer interface {
+	Reclaim(ctx context.Context, ids []string) (int, error)
+}
+
+// leaseReclaimsExpired pins the drain to the registry that backs it, so a
+// signature drift breaks the build here rather than in a quiet drain.
+var _ expiredReclaimer = (*lease.Manager)(nil)
+
 // drainingGate refuses new sessions while the process drains. Open sessions
 // keep their connections, so only the session start path closes. The gate
 // answers through the shared envelope, so screens parse it like any refusal.
@@ -227,20 +238,46 @@ func run(srv *http.Server, gate *drainingGate, reg sessions, budget time.Duratio
 
 // waitSessions blocks until no session stays open or ctx ends. It polls the
 // registry instead of holding a lock, because sessions open and close on
-// other goroutines. A nil registry waits on nothing.
+// other goroutines. Each tick also reclaims expired holds. A lease past its
+// cap never closes on its own, so pure polling would hold the full budget
+// on an abandoned session. A nil registry waits on nothing.
 func waitSessions(ctx context.Context, reg sessions, poll time.Duration) {
 	if reg == nil {
 		return
 	}
+	if reg.Active() == 0 {
+		return
+	}
+	log.Printf("reprise drain: waiting on %d open session leases", reg.Active())
 	tick := time.NewTicker(poll)
 	defer tick.Stop()
 	for reg.Active() > 0 {
 		select {
 		case <-ctx.Done():
-			log.Printf("reprise drain ended with %d sessions open", reg.Active())
+			log.Printf("reprise drain: budget ended with %d open session leases, letting go", reg.Active())
 			return
 		case <-tick.C:
+			reclaimExpired(ctx, reg)
 		}
+	}
+	log.Printf("reprise drain: every session lease closed")
+}
+
+// reclaimExpired frees expired holds on registries that support it, and logs
+// what the drain let go. A registry without that seam keeps its count until
+// its holders close, and the drain still ends on its budget.
+func reclaimExpired(ctx context.Context, reg sessions) {
+	reclaimer, ok := reg.(expiredReclaimer)
+	if !ok {
+		return
+	}
+	freed, err := reclaimer.Reclaim(ctx, nil)
+	if err != nil {
+		log.Printf("reprise drain: reclaim expired holds: %v", err)
+		return
+	}
+	if freed > 0 {
+		log.Printf("reprise drain: reclaimed %d expired holds, %d open session leases remain", freed, reg.Active())
 	}
 }
 
