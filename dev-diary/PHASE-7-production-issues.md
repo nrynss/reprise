@@ -227,7 +227,7 @@ requires:   T7.2, T6.1
 fixture-ok: yes
 size:       S · frontier
 owns:       cmd/reprise/main.go, deploy/
-status:     in-progress:implement:t7.8-impl
+status:     in-progress:review-r1:t7.8-rev-r1@0853b5edb0a90309e9f0c4a17d8b9f542cfea096
 ```
 The `c4c3676` deploy held the workflow 30 minutes: the old container
 never exited on SIGTERM, so `docker stop` waited out the full 1830
