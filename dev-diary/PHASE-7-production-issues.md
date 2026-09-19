@@ -101,7 +101,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     not-started
+status:     in-progress:implement:t7.3-impl
 ```
 The probe measured the uploader reading 404 on its own blob: the
 browser opens uploads with the literal owner `guest` while the media
