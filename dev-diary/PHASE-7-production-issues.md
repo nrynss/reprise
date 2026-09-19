@@ -32,7 +32,7 @@ requires:   T1.7
 fixture-ok: yes
 size:       M · mid
 owns:       internal/api/, internal/episode/
-status:     not-started
+status:     in-progress:implement:t7.1-impl
 ```
 **Build on:** the route table from T1.3 and the mounting shape from
 T1.7. The probe measured 501 `not_implemented` on `GET /api/episodes`,
@@ -65,7 +65,7 @@ requires:   T6.1, T2.3, T3.2
 fixture-ok: yes
 size:       M · frontier
 owns:       cmd/reprise/main.go, internal/broker/, internal/gemini/
-status:     not-started
+status:     in-progress:implement:t7.2-impl
 ```
 **Build on:** the job kinds P2 and P3 landed, the reconciler from
 T2.3, and the broker from T2.1. The probe measured a binary that
