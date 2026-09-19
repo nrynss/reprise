@@ -105,7 +105,7 @@ requires:   T1.4, T4.4
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/retention/
-status:     in-progress:implement:t5.4-impl
+status:     in-progress:review-r1:t5.4-rev-r1@5aed2265468fb59cb885ad29fb366a23aee2e4e4
 ```
 **Build on:** `keel/erase` for the fan-out and `keel/job` for the kind that runs it. Reprise names
 the targets, which are the same ones T4.4 registers.
