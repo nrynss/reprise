@@ -324,7 +324,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/, web/src/routes/record/cap.spec.ts,
             web/src/routes/record/mock-session.spec.ts, web/src/routes/record/+page.svelte
-status:     in-progress:review-r2:t7.12-rev-r2@ea929ca11a62bdaa95da92a4bf426281dd7d76b9
+status:     done:7f7361c51f427885f1ad8c67593b9f96d2b2defa
 ```
 Round 1 scoped the gap: nothing in a real take calls the completion
 driver. The controller finishes both uploads in `endTake` and
@@ -355,6 +355,9 @@ retry.
 
 ### What exists now
 
+T7.12 landed after round 2 APPROVE with zero residue. Takes post
+stem completion automatically with a visible retry on failure, and
+the sibling specs pin the new navigation contract.
 T7.11 landed after round 1 APPROVE with zero in-scope findings. The
 driver, alert, retry, and proofs are correct. The production trigger
 carries to T7.12 on the controller path.
