@@ -258,7 +258,7 @@ requires:   T7.1, T7.6, T7.7
 fixture-ok: yes
 size:       S · frontier
 owns:       cmd/reprise/main.go, internal/episode/, internal/api/
-status:     in-progress:implement:t7.9-impl
+status:     in-progress:review-r1:t7.9-rev-r1@4b102662d4cae71c34244cf20fd6674922c42cf3
 ```
 Round 3 carried one defect: transcript passes vanish without landing
 words and without a surfaced error, and a repeat completion schedules
