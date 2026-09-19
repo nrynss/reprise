@@ -20,7 +20,7 @@ requires:   T3.5
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/memory/
-status:     in-progress:land:t4.1-rem-r1@e4eb7fae38344f2ad03618b654a551087202561c
+status:     done:bc747f742aadb59e78224c987b46d2ce84b42ab8
 ```
 Derive threads from `mentions` in SQL.
 
@@ -44,7 +44,7 @@ requires:   T4.1, T3.2
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/memory/callback.go
-status:     not-started
+status:     in-progress:implement:t4.2-impl
 ```
 Choose what the next episode opens on.
 
@@ -65,7 +65,7 @@ fixture-ok: yes
 size:       L · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/episode/[id]/+page.svelte,
             web/src/routes/threads/
-status:     not-started
+status:     in-progress:implement:t4.3-impl
 ```
 **Mockup:** the `gallery`, `episode` and `threads` views ([`mockup`](mockup), `#/gallery`,
 `#/episode`, `#/threads`). The state lab carries the rendering, ready and draft card states.
@@ -142,6 +142,10 @@ revokes every render blob; erase fans out across rows, blobs, files, and provide
 restart resume. Three review rounds: the C revoked-blob leak, the H dead-public episode, the L
 unseeding erase tables, and the L gate-scan hit, all fixed with pins. Standing opens: the
 ReErase retry route (wiring owner) and the workstation share remeasure.
+T4.1 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. SQL
+threads, quote-backed commitments, append-only evidence, and ranked keyterms are on main. Round
+1 fixed time-travel closes, evidence destruction, trailing-garbage parsing, and owner scoping.
+That landing opens T4.2 and T4.3, both claimed.
 
 ### What surprised us
 Nothing yet.
