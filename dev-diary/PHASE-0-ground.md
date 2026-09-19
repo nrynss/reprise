@@ -247,7 +247,7 @@ fixture-ok: no
 size:       M · frontier
 owns:       testdata/sessions/steady/clips.json, testdata/sessions/pauses/clips.json,
             testdata/sessions/bargein/clips.json, dev-diary/adversarial-review/t0.7-gate-evidence.md
-status:     in-progress:implement:t0.8-retry
+status:     blocked:provider still near 10x slow on retry (reply.done 51.88 s vs 12 s recovery bar); retry on recovery, runners reusable at /tmp/opencode/t08_*.py with SESS_DIR override
 ```
 T2.5's driver gates its 40 ms verdict on a playback-start record that does not exist. Detector
 receipt times in `events.json` lag true clip onsets by 24 to 1046 ms depending on the utterance
