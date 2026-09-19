@@ -44,7 +44,7 @@ requires:   T4.1, T3.2
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/memory/callback.go
-status:     in-progress:implement:t4.2-impl
+status:     in-progress:review-r1:t4.2-rev-r1@974828e233ca311d876779b0777d5c96f29a83bf
 ```
 Choose what the next episode opens on.
 
