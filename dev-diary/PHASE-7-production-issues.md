@@ -204,6 +204,23 @@ proposals. This task closes the pipe from upload to draft.
 and the transcript landing schedules one editorial job. A restart
 between completion and schedule recovers to the same single pair.
 
+### T7.7: Check-2 live re-run
+```yaml
+requires:   T7.6
+fixture-ok: no
+size:       XS · light
+owns:       dev-diary/probes/production.md
+status:     not-started
+```
+Runs once, after T7.6 deploys. A scripted guest records from
+generated speech, posts stem completion, and follows the episode to
+draft with proposals. Appends a round 3 note to `production.md`
+without touching rounds 1 or 2. Closes the round 2 carry or carries
+it with a reason.
+
+**Done when:** Round 3 records the live draft flow with command and
+output, or names the defect that still blocks it.
+
 ---
 
 ## Exit criteria
