@@ -242,7 +242,7 @@ requires:   T1.3, T2.1, T1.4, T5.3
 fixture-ok: yes
 size:       S · mid
 owns:       internal/api/routes.go, web/src/lib/api/types.ts, cmd/reprise/main.go
-status:     not-started
+status:     in-progress:implement:t1.7-impl
 ```
 Opened from T5.3 round 1's out-of-scope row. Handlers exist unmounted: the broker's
 `POST /api/sessions` (T2.1) and the three admin patterns (T5.3) have no route table entry and
