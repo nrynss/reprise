@@ -92,7 +92,7 @@ requires:   T3.2, T1.3
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/episode/[id]/edit/, web/src/lib/editor/
-status:     in-progress:land:t3.3-impl@1148c04a4eb3eb235a0784b6d034e210fff2caf7
+status:     done:20e83f0bbba0fe974ffe08ee9af5e35d0cecfe6d
 ```
 **Mockup:** the `editor` view ([`mockup`](mockup), `#/editor`), including the revert affordance
 and the cold-open preview.
@@ -116,6 +116,27 @@ from the library, so a gap in either is a Chaaya finding rather than a workaroun
 
 **Done when:** Playwright reverts a cut and the decision row appears. A keyboard-only run completes
 the edit and marks done. The page passes `a11yGate` and `contrastGate`.
+
+---
+
+### T3.3a: Revert for non-cut proposals ★
+```yaml
+requires:   T3.2, T3.3
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/episode/[id]/edit/, web/src/lib/editor/
+status:     not-started
+```
+Opened from T3.3 round 1's observation. The editor reverts cuts only: no control reverts a cold
+open, title, show notes, or callback proposal. T3.2's handoff assigns the callback revert here:
+reverting it must also clear its `callbacks` row.
+
+* Each non-cut proposal kind gains a one-action revert beside its display.
+* Reverting a callback clears its `callbacks` row as well as its proposal state.
+* Titles and notes revert to the plain fallback (episode-number title, empty notes).
+
+**Done when:** Playwright reverts one proposal of each non-cut kind and every revert persists.
+Keyboard and accessible names ride the existing patterns.
 
 ---
 
@@ -216,6 +237,9 @@ T3.6 landed (Orchestrator-2) after round 2 APPROVE with zero residue against rou
 cover per episode with a deterministic episode-number fallback; paid seam reserves first with no
 auto-retry. Round 1 pinned the rerun-overwrite safety. The live image binding belongs in
 `internal/gemini` per the stack rule and arrives with the wiring.
+T3.3 landed (Orchestrator-2) after round 1 APPROVE with zero findings. The takeover verified the
+orphaned draft, fixed the gate failure, and committed. Opened T3.3a for non-cut reverts
+(callback revert clears its row) from the round 1 observation.
 
 ### What surprised us
 Nothing yet.
