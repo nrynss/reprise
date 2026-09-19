@@ -66,7 +66,7 @@ size:       L · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/episode/[id]/+page.svelte,
 owns:       web/src/routes/+page.svelte, web/src/routes/episode/[id]/+page.svelte,
             web/src/routes/threads/
-status:     in-progress:land:t4.3-impl@e0417e6f420147faf2db1f9535c4b09c9cd7c1e3
+status:     done:06911925b712aed9f224c747ff7716ec1f145524
 ```
 **Mockup:** the `gallery`, `episode` and `threads` views ([`mockup`](mockup), `#/gallery`,
 `#/episode`, `#/threads`). The state lab carries the rendering, ready and draft card states.
@@ -162,6 +162,11 @@ revokes every render blob; erase fans out across rows, blobs, files, and provide
 restart resume. Three review rounds: the C revoked-blob leak, the H dead-public episode, the L
 unseeding erase tables, and the L gate-scan hit, all fixed with pins. Standing opens: the
 ReErase retry route (wiring owner) and the workstation share remeasure.
+T4.3 landed after round 1 APPROVE with zero in-scope findings. Gallery, episode, and thread
+views run on scripted fixtures through the shared JobStream. Landing came paired with T4.5, a
+one-line shell-spec heading fix: T4.5 landed first with its gate red only on the stale spec it
+was fixing (paired evidence in its round file), then T4.3 rebased onto it with a full green
+gate. Both commits stand separate. Main never stayed red.
 T4.1 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. SQL
 threads, quote-backed commitments, append-only evidence, and ranked keyterms are on main. Round
 1 fixed time-travel closes, evidence destruction, trailing-garbage parsing, and owner scoping.
