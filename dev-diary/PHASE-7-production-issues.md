@@ -227,7 +227,7 @@ requires:   T7.2, T6.1
 fixture-ok: yes
 size:       S · frontier
 owns:       cmd/reprise/main.go, deploy/
-status:     in-progress:review-r1:t7.8-rev-r1@0853b5edb0a90309e9f0c4a17d8b9f542cfea096
+status:     done:ad93cfb312ea6ce6714528dfdcb8c110c6363d34
 ```
 The `c4c3676` deploy held the workflow 30 minutes: the old container
 never exited on SIGTERM, so `docker stop` waited out the full 1830
@@ -267,6 +267,10 @@ expiry, pinned by a run that proves the rollback path.
 
 ### What exists now
 
+T7.8 landed after round 1 APPROVE with zero in-scope findings. The
+drain reclaims expired holds each second and names its waiter.
+Rollback reads red in about a minute. Deploys stop costing half
+hours.
 T7.6 landed after round 2 APPROVE with zero residue. Stem completion
 moves recording to draft and chains one transcript job to one
 editorial job, with per-episode cover, 429 on a full queue, and one
