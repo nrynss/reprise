@@ -166,6 +166,13 @@ does not get a second copy. User delete drops that user's copy only. Catalog aud
 
 T5.4 landed with a 90 day window from settings. The sweep does not wait on a catalog.
 
+### Deploy is from GitHub Actions
+
+`thutapi` pulls a public GHCR image on the box. Reprise is private, so the runner pulls and
+loads the image over SSH. The box never logs into the registry. The owner overrode the loop
+on 2026-09-19 to land this before leaving the workstation. Commits `8eb8e76` and `7a1a7d0`
+were not reviewed. The public edge still needs the DNS record.
+
 ## Open decisions
 
 Each belongs to the owner. The task that needs it stays `blocked` until it is made.

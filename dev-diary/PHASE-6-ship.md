@@ -62,12 +62,17 @@ which is why the `owns` line grew past `deploy/`.
 
 **Two decisions the owner makes before this starts.**
 
-* **How the image reaches the box.** `thutapi` pulls a public GHCR image, which a private repository
-  cannot do without a registry credential on the host. Building on the box or shipping the image over
-  SSH both avoid that. Reprise has no git remote at all today.
+* **How the image reaches the box.** Closed by operator override on 2026-09-19. See the handoff.
 * **Where the nightly backup goes.** The box documentation found no backup job, no archives, and no
   verified restore. This task cannot invent a destination, and the run script must not hold a
   credential for one.
+
+**Operator override, 2026-09-19.** The owner skipped the implement, review, remediate loop. A
+private GitHub repository now exists at `nrynss/reprise`. `.github/workflows/image.yml` publishes
+on a button. `.github/workflows/deploy.yml` loads the image over SSH and runs `redeploy.sh`.
+The box never logs into the registry. Box secrets and `/srv/reprise` are in place. The public
+edge still needs a proxied Cloudflare A record for `reprise.nryn.dev`. Commits `8eb8e76` and
+`7a1a7d0` carry the workflows. They were not reviewed.
 
 **Done when:** `reprise.nryn.dev/healthz` answers from a workstation, never from the box, because
 Cloudflare challenges the box's own address. The boot log shows the resolution plan with every secret
@@ -150,7 +155,8 @@ size:       S · frontier
 owns:       README.md
 status:     not-started
 ```
-The submission needs a public repository that builds.
+The submission needs a public repository that builds. The private remote already exists at
+`nrynss/reprise`. This task flips visibility and writes the README a stranger can follow.
 
 * Keel `v0.3.0` and `@nrynss/chaaya` `0.2.0` are both public, so a stranger can fetch every
   dependency.
@@ -179,15 +185,16 @@ file or a task id. The owner flips visibility.
 ## Handoff log
 
 ### What exists now (Orchestrator-2)
-T6.1 landed after round 2 APPROVE with zero residue against round 1. The deploy kit (run, redeploy
-with stop-then-remove drain, backup with manifest, docs), the settings-loading SIGTERM-draining
-binary, and the ffmpeg-baked image are on main with a green gate. Open owner/box items stand in the
-handoff: first deploy, workstation edge check, redeploy drill, backup cron plus restore drill, DNS.
-The dead CI ffmpeg URL stays an out-of-scope row on T0.1's workflow file. The other orchestrator's
-PHASE-0 dirt sat through this landing and was left untouched.
+Operator override 2026-09-19, no review round. Private repo `nrynss/reprise` is live. Image
+publish is a button. Deploy loads the image over SSH. Box secrets, data dirs, and a deploy
+key are in place. DNS for `reprise.nryn.dev` is not. T6.1 kit still stands from its reviewed
+landing. Remaining owner items: DNS, workstation edge check, redeploy drill, backup
+destination, cron and restore drill.
 
 ### What surprised us
-Nothing yet.
+The owner needed to ship from GitHub while away from the workstation. The loop would have
+held the first box deploy on a review round. The override skipped that so dogfood can start
+once DNS exists.
 
 ### Notes for the next developer
 First deploy is the current priority. The catalog starts empty. Seed files are dogfood after

@@ -6,10 +6,11 @@ How work runs lives only in [`../AGENTS.md`](../AGENTS.md). This file holds fact
 - [`project.md`](project.md): the build, and every departure from the product spec.
 - [`libraries.md`](libraries.md): what Keel and Chaaya carry, and what Reprise builds.
 
-**Current status:** Built on Keel `v0.3.0` and Chaaya `0.2.0`. Priority is first deploy. The
-catalog starts empty. Seed files are dogfood after the box is up. T5.2 and T5.4 do not wait on
-them. T5.2 is not started. T5.4 is done (90 day sweep). T5.5 welcome must work with no seed.
-T6.1 kit is on main. T6.1b first-deploy checks do not wait on a seeded greeting.
+**Current status:** Built on Keel `v0.3.0` and Chaaya `0.2.0`. Private repo `nrynss/reprise`
+ships images from GitHub Actions (operator override, no review round). Priority is the DNS
+record for `reprise.nryn.dev`, then first public healthz. Catalog starts empty. Seed files
+are dogfood after the box is up. T5.2 is not started. T5.4 is done (90 day sweep). T5.5
+welcome must work with no seed. T6.1b first-deploy checks do not wait on a seeded greeting.
 
 The libraries carry the general work. Chaaya `0.2.0` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered
