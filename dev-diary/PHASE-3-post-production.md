@@ -173,7 +173,7 @@ requires:   T3.2, T0.3
 fixture-ok: yes
 size:       S · mid
 owns:       internal/cover/
-status:     in-progress:review-r1:t3.6-rev-r1@69d268d7fd93cd41ec3340e9bd627b4caa4557de
+status:     in-progress:remediate-r1:t3.6-rem-r1
 ```
 One square image per episode from the title and show notes. No faces and no text in the image. The
 app sets the title, not the model. If generation fails, a plain generated cover from the episode
