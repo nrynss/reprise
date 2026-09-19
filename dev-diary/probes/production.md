@@ -265,3 +265,330 @@ One live voice session of 16.6 connected seconds costs about 2.1
 cents. Two further mints never connected, so they bill nothing. Upload
 bytes bill nothing. Total live spend for this verification is about
 2.1 cents.
+
+---
+
+# Round 2: P7 build re-verification
+
+Live run on 2026-09-19 from a workstation against
+`https://reprise.nryn.dev`. Every check ran from this machine, never
+from the box. No real voice appears anywhere. All speech is generated.
+Tokens and keys are redacted below. Cookie jars lived in `/tmp` and
+are deleted. Round 1 above stays untouched.
+
+## Edge identity
+
+Command:
+
+```bash
+curl -sS https://reprise.nryn.dev/healthz
+curl -sS -o /dev/null -w "%{http_code}\n" https://reprise.nryn.dev/
+```
+
+Output:
+
+```text
+ok 41b9e8a8796a09f06ee3170db29f1f03 version=464f0c895fe355c435bca21aded9fc57cc34202d
+200
+```
+
+Result: pass. The version matches the required
+`464f0c895fe355c435bca21aded9fc57cc34202d`.
+
+## 1. Scripted guest records an episode
+
+One guest mints a session, streams two generated lines, hears the
+host reply, and ends the call explicitly.
+
+Command:
+
+```bash
+curl -sS -c jar.txt -b jar.txt -X POST https://reprise.nryn.dev/api/sessions \
+  -H 'Content-Type: application/json' -d '{}' -o mint.json -w 'HTTP %{http_code}\n'
+```
+
+Output (token redacted):
+
+```text
+HTTP 201
+```
+
+The body carries `session_id`
+`c8d1a503bbad438846e6357b89c9bb1d`, `episode_id`
+`b8340f5a578b814e0fda882139dcbfd3`, a single use provider token,
+`expires_in_seconds` 60, `max_session_duration_seconds` 1800, and the
+first episode greeting with empty keyterms.
+
+The live call reuses the generated clips from `testdata/sessions/`
+(`steady/user-a.wav` and `steady/user-b.wav`). A script resamples them
+to 24 kHz mono PCM, sends `session.update` with the returned config,
+streams 4800 sample frames every 200 ms, then sends `session.end`. The
+script is `/tmp/t75_live.py` (workstation only, not tracked).
+
+Output:
+
+```text
+stream samples: 154927 = 6.46s
+ready provider_session=sess_a7c61e841ce44040be953c06ee1fdfc1
+stream done, waiting for reply
+events: 756 provider_session=sess_a7c61e841ce44040be953c06ee1fdfc1
+- transcript.user: The gate needs paint before winter.
+- transcript.user: We should buy brushes on Saturday morning.
+- transcript.agent: OK. I've added buying brushes to your list for Saturday morning.
+session.ended duration=16.406599 audio_duration=None
+```
+
+The client ended the call explicitly and the socket answered
+`session.ended`. No session was left open.
+
+The session end records against the new handler:
+
+```bash
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/sessions/<session_id>/end" \
+  -H 'Content-Type: application/json' -d '{"provider_session_id":"<provider_session_id>"}'
+```
+
+Output:
+
+```text
+{"session_id":"c8d1a503bbad438846e6357b89c9bb1d","episode_id":"b8340f5a578b814e0fda882139dcbfd3","provider_session_id":"sess_a7c61e841ce44040be953c06ee1fdfc1"}
+
+HTTP 200
+```
+
+The episode lists in the gallery with the owner cookie:
+
+```bash
+curl -sS -b jar.txt https://reprise.nryn.dev/api/episodes
+curl -sS -b jar.txt https://reprise.nryn.dev/api/threads
+```
+
+Output:
+
+```text
+{"episodes":[{"id":"b8340f5a578b814e0fda882139dcbfd3","number":1,"title":"Episode 1","state":"recording","visibility":"private"}]}
+
+HTTP 200
+```
+
+```text
+{"name_threads":[],"circled_topics":[]}
+
+HTTP 200
+```
+
+Result: pass. The gallery lists the recorded episode privately under
+its owner. Spend for this call is about 2.1 cents at 4.50 dollars
+per connected hour.
+
+## 2. Decisions, mark done, render job, gallery progress
+
+The handlers answer at their refusal boundaries on the live episode:
+
+```bash
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/episodes/<episode_id>/done" \
+  -H 'Content-Type: application/json' -d '{}'
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/episodes/<episode_id>/decisions" \
+  -H 'Content-Type: application/json' -d '{"proposal_id":"nope","decision":"accepted"}'
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/episodes/<episode_id>/decisions" \
+  -H 'Content-Type: application/json' -d '{"proposal_id":"nope","decision":"maybe"}'
+```
+
+Output:
+
+```text
+{"error":{"code":"illegal_transition","message":"only a draft episode moves to rendering"}}
+
+HTTP 409
+```
+
+```text
+{"error":{"code":"proposal_not_found","message":"no proposal lives at this id"}}
+
+HTTP 404
+```
+
+```text
+{"error":{"code":"invalid_request","message":"a decision is accepted or reverted"}}
+
+HTTP 400
+```
+
+The job stream route is wired. A GET on
+`/api/jobs/does-not-exist/events` with an event stream accept header
+answers HTTP 200 and holds the stream open. It timed out at 8 seconds
+with zero bytes. That is an idle topic, not a refusal.
+
+Result: carried forward. The episode stays in `recording` with zero
+proposals after polling for several minutes, so no accept or revert
+and no render start can run against it. The binary registers the
+transcript and editorial kinds but schedules neither, and nothing
+calls the stems uploaded transition that moves `recording` to
+`draft`. The browser stem uploads therefore land as blobs with no
+episode linkage and no pipeline follows. This needs its own task:
+wire stem completion into the transcript and editorial schedule and
+the draft transition, then re-run this check live. The handler
+refusals above prove the T7.1 wiring holds while that task is open.
+
+## 3. Private media without the cookie
+
+A private blob was persisted through the real upload flow with the
+same shape the browser sends (placeholder owner `guest`, private
+visibility). The chunk was the first 32000 bytes of
+`testdata/sessions/steady/recording.ogg`. The open resolved the owner
+to the session user `c5b7fb0cc73cfa7a6dc4fd8973d339cc`. The persisted
+id was `83506f6007f210e492e1f7e5f6aeaf39`.
+
+Commands:
+
+```bash
+curl -sS -c ju.txt -b ju.txt -X POST https://reprise.nryn.dev/api/uploads \
+  -H 'Content-Type: application/json' \
+  -d '{"owner":"guest","content_type":"audio/ogg","visibility":"private"}'
+curl -sS -b ju.txt -X PUT "https://reprise.nryn.dev/api/uploads/<id>/chunks/0" \
+  -H 'Content-Type: application/octet-stream' -H "X-Chunk-SHA256: $SHA" \
+  --data-binary @clip.ogg
+curl -sS -b ju.txt -X POST "https://reprise.nryn.dev/api/uploads/<id>/complete" \
+  -H 'Content-Type: application/json' -d "{\"sha256\":\"$SHA\"}"
+curl -sS -D anon.hdrs -o /dev/null "https://reprise.nryn.dev/media/<id>"
+curl -sS -D unk.hdrs -o /dev/null "https://reprise.nryn.dev/media/does-not-exist-0000"
+```
+
+Anonymous read of the real blob:
+
+```text
+HTTP 404 size 19
+```
+
+Full anonymous headers:
+
+```text
+HTTP/2 404
+date: Sat, 19 Sep 2026 15:02:15 GMT
+content-type: text/plain; charset=utf-8
+content-length: 19
+cache-control: private, no-store
+```
+
+Anonymous read of the unknown id:
+
+```text
+HTTP 404 size 19
+cache-control: private, no-store
+```
+
+Both bodies read `404 page not found`. The unknown id answers
+identically, so the refusal reveals nothing about whether a blob
+exists. (Cloudflare framing headers and the mint cookie are omitted
+here. They carry no episode data.)
+
+Result: pass. Both refusals answer 404 with `Cache-Control:
+private, no-store`. The round 1 header gap is closed.
+
+## 4. Uploader reads its own bytes back
+
+The same blob from check 3 reads back under the owner cookie:
+
+```bash
+curl -sS -b ju.txt -D owner.hdrs -o back.ogg "https://reprise.nryn.dev/media/<id>"
+```
+
+Output:
+
+```text
+HTTP 200 size 32000
+```
+
+The returned bytes hash to
+`508fdfddcb87b50ef53a7027e3ddb82e98cf542dc4a357c91106a5576698c073`,
+which matches the uploaded chunk exactly. The owner response carries
+`content-type: audio/ogg` and `cache-control: private, no-store`.
+
+Result: pass. Open, chunk, complete, and owner read round trip over
+exactly the persisted bytes. The round 1 ownership gap is closed.
+
+## 5. Connected seconds against the ledger
+
+The provider session id from check 1 is
+`sess_a7c61e841ce44040be953c06ee1fdfc1`. The Sessions API was read from
+the workstation with the account key (value never stored, never
+printed).
+
+Command:
+
+```bash
+curl -sS 'https://agents.assemblyai.com/v1/sessions/<provider_session_id>' \
+  -H "Authorization: $KEY"
+```
+
+Output (artifact URLs redacted, three items listed):
+
+```text
+HTTP 200
+id: sess_a7c61e841ce44040be953c06ee1fdfc1
+status: completed
+public_close_reason: client_end
+duration_seconds: 16.801372
+artifacts: audio (audio/ogg), timeline (application/json), metadata (application/json)
+```
+
+The socket reported `session_duration_seconds` 16.406599. The Sessions
+API reports 16.801372. The two agree within 0.4 seconds, and the close
+reason is `client_end`, which matches the explicit `session.end`.
+
+The ledger side: the session end in check 1 answered 200, so the
+wrapper scheduled one reconcile job for the recorded close. A fresh
+mint after the end answered 201, which proves the ceiling is not
+leaking held reservations. The spend view `GET /api/admin/limits`
+still answers 403 `owner_required` (measured), so the exact ledger
+row cannot be read from the workstation.
+
+Result: closes on its workstation observable terms. Provider duration
+matches the socket, the end records, the reconcile is scheduled, and
+nothing stays held. The direct ledger row comparison waits on the
+owner login, same as check 6.
+
+## 6. Kill switch
+
+Command:
+
+```bash
+curl -sS -b jar.txt -X POST https://reprise.nryn.dev/api/admin/limits/pause \
+  -H 'Content-Type: application/json' -d '{"paused":true}' \
+  -w '\nHTTP %{http_code}\n'
+```
+
+Output:
+
+```text
+{"error":{"code":"owner_required","message":"the admin page needs the owner login"}}
+
+HTTP 403
+```
+
+Result: SKIPPED. The owner login lands after dogfooding, so T7.4
+stays out of this round. The pause was refused, nothing changed
+state, and the site was left unpaused. A fresh honest mint right
+after answered 201, which proves no `sessions_paused` refusal is
+active.
+
+## 7. Seeded callback greeting
+
+Result: deferred, not a gate. The catalog is empty, so the host opens
+with the first episode fallback greeting recorded in check 1. The
+callback greeting re-run waits until the operator places the catalog,
+as the task states.
+
+## Observation for the next task
+
+One gallery poll during this run answered 429 `rate_limited` with a
+10 second retry hint, then recovered on the next call after a wait.
+The spend gate outermost is doing its job. Poll loops should honor
+the hint instead of retrying hot.
+
+## Spend total
+
+One live voice session of 16.8 connected seconds costs about 2.1
+cents. One further mint and the closing mint never connected, so they
+bill nothing. Upload bytes bill nothing. Total live spend for this
+verification is about 2.1 cents.
