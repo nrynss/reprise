@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 
@@ -50,6 +51,34 @@ func StoreResolution(ctx context.Context, db *sql.DB, ownerID, commitmentID, epi
 		return fmt.Errorf("memory: store resolution: %w", err)
 	}
 	defer tx.Rollback()
+	var commitmentEpisodeID string
+	err = tx.QueryRowContext(ctx,
+		"SELECT episode_id FROM mentions WHERE id = ? AND owner_id = ? AND kind = ?",
+		commitmentID, ownerID, CommitmentKind).Scan(&commitmentEpisodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("memory: store resolution: %w: unknown commitment", ErrInvalid)
+	}
+	var commitmentNumber int
+	err = tx.QueryRowContext(ctx,
+		"SELECT number FROM episodes WHERE id = ?", commitmentEpisodeID).Scan(&commitmentNumber)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("memory: store resolution: %w: commitment episode missing", ErrInvalid)
+	}
+	if err != nil {
+		return fmt.Errorf("memory: store resolution: %w", err)
+	}
+	var evidenceNumber int
+	err = tx.QueryRowContext(ctx,
+		"SELECT number FROM episodes WHERE id = ?", episodeID).Scan(&evidenceNumber)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("memory: store resolution: %w: unknown evidence episode", ErrInvalid)
+	}
+	if err != nil {
+		return fmt.Errorf("memory: store resolution: %w", err)
+	}
+	if evidenceNumber <= commitmentNumber {
+		return fmt.Errorf("memory: store resolution: %w: evidence must land on a later episode", ErrInvalid)
+	}
 	var oldEvidence string
 	err = tx.QueryRowContext(ctx,
 		"SELECT evidence_mention_id FROM resolutions WHERE owner_id = ? AND commitment_mention_id = ?",

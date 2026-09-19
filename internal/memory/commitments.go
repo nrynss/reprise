@@ -551,7 +551,9 @@ type ResolveResult struct {
 
 // ResolveEpisode judges one later episode against one open commitment.
 // It reserves budget first, and a refused reservation returns before any
-// provider call. A negative answer stores nothing and still settles the
+// provider call. The evidence episode must be later than the commitment
+// episode, so a backdated run fails with ErrInvalid before any provider
+// call. A negative answer stores nothing and still settles the
 // call. An evidence quote missing from the later words fails with
 // ErrModel and stores nothing, because a close needs its proof in the
 // words.
@@ -569,9 +571,20 @@ func ResolveEpisode(ctx context.Context, cfg ResolveConfig) (ResolveResult, erro
 	if log == nil {
 		log = slog.Default()
 	}
-	commitment, err := loadCommitment(ctx, cfg.DB, cfg.OwnerID, cfg.CommitmentID)
+	commitment, commitmentEpisodeID, err := loadCommitment(ctx, cfg.DB, cfg.OwnerID, cfg.CommitmentID)
 	if err != nil {
 		return ResolveResult{}, err
+	}
+	commitmentNumber, err := episodeNumber(ctx, cfg.DB, commitmentEpisodeID)
+	if err != nil {
+		return ResolveResult{}, err
+	}
+	evidenceNumber, err := episodeNumber(ctx, cfg.DB, cfg.EpisodeID)
+	if err != nil {
+		return ResolveResult{}, err
+	}
+	if evidenceNumber <= commitmentNumber {
+		return ResolveResult{}, fmt.Errorf("memory: resolve episode: %w: evidence must land on a later episode", ErrInvalid)
 	}
 	words, err := renderedTexts(ctx, cfg.DB, cfg.EpisodeID)
 	if err != nil {
@@ -645,17 +658,30 @@ func ResolveEpisode(ctx context.Context, cfg ResolveConfig) (ResolveResult, erro
 	return ResolveResult{Done: true, Evidence: proposal.Quote, Price: estimate}, nil
 }
 
-// loadCommitment reads one commitment quote for the owner. A missing row
-// or a row under another kind fails with ErrNotFound.
-func loadCommitment(ctx context.Context, db *sql.DB, ownerID, commitmentID string) (string, error) {
-	const query = `SELECT quote FROM mentions WHERE id = ? AND owner_id = ? AND kind = ?`
-	var quote string
-	err := db.QueryRowContext(ctx, query, commitmentID, ownerID, CommitmentKind).Scan(&quote)
+// loadCommitment reads one commitment quote with its episode for the
+// owner. A missing row or a row under another kind fails with
+// ErrNotFound.
+func loadCommitment(ctx context.Context, db *sql.DB, ownerID, commitmentID string) (quote, episodeID string, err error) {
+	const query = `SELECT quote, episode_id FROM mentions WHERE id = ? AND owner_id = ? AND kind = ?`
+	if err := db.QueryRowContext(ctx, query, commitmentID, ownerID, CommitmentKind).Scan(&quote, &episodeID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", fmt.Errorf("memory: load commitment: %w", ErrNotFound)
+		}
+		return "", "", fmt.Errorf("memory: load commitment: %w", err)
+	}
+	return quote, episodeID, nil
+}
+
+// episodeNumber reads one episode number. An unknown episode fails with
+// ErrInvalid, because resolution names stored episodes only.
+func episodeNumber(ctx context.Context, db *sql.DB, episodeID string) (int, error) {
+	var number int
+	err := db.QueryRowContext(ctx, "SELECT number FROM episodes WHERE id = ?", episodeID).Scan(&number)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("memory: load commitment: %w", ErrNotFound)
+		return 0, fmt.Errorf("memory: load episode number: %w: unknown episode", ErrInvalid)
 	}
 	if err != nil {
-		return "", fmt.Errorf("memory: load commitment: %w", err)
+		return 0, fmt.Errorf("memory: load episode number: %w", err)
 	}
-	return quote, nil
+	return number, nil
 }

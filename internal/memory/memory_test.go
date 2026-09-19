@@ -651,3 +651,79 @@ func TestMigrateRejectsNilDatabase(t *testing.T) {
 		t.Fatalf("migrate nil error = %v, want ErrInvalid", err)
 	}
 }
+// TestStoreResolutionRejectsBackdatedClose pins the later episode rule.
+// A commitment from episode two never closes on episode one, and the
+// failed close stores nothing.
+func TestStoreResolutionRejectsBackdatedClose(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "owner-a-ep1", "owner-a", 1)
+	addEpisode(t, db, "owner-a-ep2", "owner-a", 2)
+	addMention(t, db, "owner-a-c1", "owner-a", "owner-a-ep2", "commitment", 0, "I will call Maya back")
+	if err := memory.StoreResolution(t.Context(), db, "owner-a", "owner-a-c1", "owner-a-ep1", "called Maya back", 0); !errors.Is(err, memory.ErrInvalid) {
+		t.Fatalf("backdated close error = %v, want ErrInvalid", err)
+	}
+	if n := mentionCount(t, db, "owner-a-ep1", "doing"); n != 0 {
+		t.Fatalf("doing mentions = %d, want none after a backdated close", n)
+	}
+	var n int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM resolutions").Scan(&n); err != nil {
+		t.Fatalf("count resolutions: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("resolutions = %d, want none after a backdated close", n)
+	}
+}
+
+// TestStoreResolutionRejectsSameEpisodeClose pins the strict order. The
+// evidence must land later, so closing on the commitment episode fails.
+func TestStoreResolutionRejectsSameEpisodeClose(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "owner-a-ep1", "owner-a", 1)
+	addMention(t, db, "owner-a-c1", "owner-a", "owner-a-ep1", "commitment", 0, "I will call Maya back")
+	if err := memory.StoreResolution(t.Context(), db, "owner-a", "owner-a-c1", "owner-a-ep1", "called Maya back", 0); !errors.Is(err, memory.ErrInvalid) {
+		t.Fatalf("same episode close error = %v, want ErrInvalid", err)
+	}
+}
+
+// TestResolveEpisodeRejectsBackdatedEpisode pins the model path order
+// check. A backdated run fails before any provider call and stores
+// nothing, so an invalid request never spends budget.
+func TestResolveEpisodeRejectsBackdatedEpisode(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "owner-a-ep1", "owner-a", 1)
+	addEpisode(t, db, "owner-a-ep2", "owner-a", 2)
+	addWords(t, db, "owner-a", "owner-a-ep1", []string{"I", "called", "Maya", "back", "today"})
+	addMention(t, db, "owner-a-c1", "owner-a", "owner-a-ep2", "commitment", 0, "I will call Maya back")
+	model := &scriptModel{resolution: `{"done": true, "quote": "called Maya back"}`}
+	budget := &scriptBudget{}
+	cfg := memory.ResolveConfig{
+		DB: db, Model: model, Budgets: budget,
+		Rates:        memory.Rates{},
+		ModelID:      "mark-model",
+		OwnerID:      "owner-a",
+		CommitmentID: "owner-a-c1",
+		EpisodeID:    "owner-a-ep1",
+		SaveRaw: func(ctx context.Context, raw []byte) error {
+			return nil
+		},
+	}
+	if _, err := memory.ResolveEpisode(t.Context(), cfg); !errors.Is(err, memory.ErrInvalid) {
+		t.Fatalf("backdated resolve error = %v, want ErrInvalid", err)
+	}
+	if model.resolveCalls != 0 {
+		t.Fatal("provider call runs for a backdated resolve")
+	}
+	if budget.reserved != 0 {
+		t.Fatal("budget reserves for a backdated resolve")
+	}
+	if n := mentionCount(t, db, "owner-a-ep1", "doing"); n != 0 {
+		t.Fatalf("doing mentions = %d, want none after a backdated resolve", n)
+	}
+}
+
