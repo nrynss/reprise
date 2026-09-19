@@ -118,10 +118,10 @@ func measureSession(dir string) (Report, error) {
 // TestFixtureSessions runs the alignment proof against every recorded
 // session under testdata/sessions in the shipped layout. Each session
 // must decode and locate: the driver reads the real files and never
-// skips an existing directory. The verdict then waits on the
-// playback-start record, which the shipped sessions do not carry yet, so
-// each session must fail loudly naming that record. The ran count pins
-// the criterion shape: exactly three sessions must reach the gate.
+// skips an existing directory. The verdict measures through the
+// playback-start record and fails the episode past 40 ms of drift. A
+// missing record fails loudly naming it. The ran count pins the
+// criterion shape: exactly three sessions must measure.
 func TestFixtureSessions(t *testing.T) {
 	root := filepath.Join("..", "..", "testdata", "sessions")
 	entries, err := os.ReadDir(root)
@@ -158,12 +158,13 @@ func TestFixtureSessions(t *testing.T) {
 					dir, loc.file, loc.onsetSec, loc.peak, loc.runnerUp)
 			}
 			logVADGap(t, dir, locs)
-			if _, err := readClipStarts(dir); err == nil {
-				t.Fatalf("session %s measured past the evidence gate, want the %s block", dir, clipStartsFile)
-			} else if !strings.Contains(err.Error(), clipStartsFile) {
-				t.Fatalf("session %s evidence error = %v, want it to name %s", dir, err, clipStartsFile)
-			} else {
-				t.Logf("session %s blocked loudly: %v", dir, err)
+			report, err := measureRealSession(dir)
+			if err != nil {
+				t.Fatalf("session %s: %v", dir, err)
+			}
+			t.Logf("session %s drift %.1fms", dir, report.DriftSec*1000)
+			if !report.Pass() {
+				t.Fatalf("session %s drifted by %.1f ms: %s", dir, report.DriftSec*1000, report.Warning())
 			}
 		})
 	}
