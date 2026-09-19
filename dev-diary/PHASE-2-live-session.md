@@ -290,7 +290,7 @@ requires:   T2.5
 fixture-ok: yes
 size:       XS · light
 owns:       internal/align/fixture_test.go
-status:     blocked:landing turns the shared gate red until T0.8 retry lands clips.json; approved work held at d90e721
+status:     in-progress:implement:t2.9-skip
 ```
 Opened from T0.8's handoff. The landed driver treats a present start record as failure
 (`t.Fatalf` "measured past the evidence gate"), so landing `clips.json` alone would turn the
@@ -302,7 +302,8 @@ Switch `TestFixtureSessions` to the `measureRealSession` verdict path already pr
 pins. The verdict it runs is proved; only the switch is missing.
 
 **Done when:** With `clips.json` present, the suite measures instead of failing on the gate;
-without it, the loud evidence block stands as today.
+without it, the suite skips loudly naming the record (owner-directed: no open task owes the
+record, so a red gate would punish every task for a missing file nobody must produce).
 
 ---
 
