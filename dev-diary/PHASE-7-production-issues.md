@@ -32,7 +32,7 @@ requires:   T1.7
 fixture-ok: yes
 size:       M · mid
 owns:       internal/api/, internal/episode/
-status:     in-progress:implement:t7.1-impl
+status:     in-progress:review-r1:t7.1-rev-r1@690f17a6481518ed0d19f45613281974d3e107f6
 ```
 **Build on:** the route table from T1.3 and the mounting shape from
 T1.7. The probe measured 501 `not_implemented` on `GET /api/episodes`,
