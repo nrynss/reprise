@@ -247,7 +247,7 @@ fixture-ok: no
 size:       M · frontier
 owns:       testdata/sessions/steady/clips.json, testdata/sessions/pauses/clips.json,
             testdata/sessions/bargein/clips.json
-status:     not-started
+status:     in-progress:implement:t0.8-impl
 ```
 T2.5's driver gates its 40 ms verdict on a playback-start record that does not exist. Detector
 receipt times in `events.json` lag true clip onsets by 24 to 1046 ms depending on the utterance
@@ -332,6 +332,12 @@ auto chapters are deprecated. `project.md` records both departures.
 The token cap does not end the session: three idle runs stayed open past a 60 second cap with
 billing continuing until the client sent `session.end`. The browser runs its own timer.
 
-### Notes for the next developer
-P0 is closed. Every probe measured, every fixture committed, every record filed. P1 still needs
-T1.2, T1.3 and T1.4 from the other orchestrator. P3 builds on `testdata/sessions/` offline.
+### Notes for the next developer (Orchestrator-2, phase close)
+P0 is closed. The close review's HOLD is resolved: T0.7 went through round 1 afterward and
+approved with two non-blocking L findings, and its owns line now covers the notes hunk. The
+close carries both debts: no triple-green log for the gate change, and the documented owns
+exception. `audit_docs.py` exits 0. All six exit boxes hold.
+T0.8 opened post-close as a follow-up, not a criterion item: T2.5's driver gates its 40 ms
+verdict on start records the committed fixtures never logged, so each session dir needs a
+`clips.json` measured fresh under T0.2's spend discipline. P1, P2 (less T2.5's verdict), P3
+partial, and P6 deploy are done on this watch; P3 closed tasks read the fixtures offline.
