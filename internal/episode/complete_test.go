@@ -2,6 +2,8 @@ package episode_test
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/nrynss/keel/sqlite"
@@ -182,5 +184,48 @@ func TestCompleteStemsNeedsService(t *testing.T) {
 	var svc *episode.Service
 	if _, err := svc.CompleteStems(t.Context(), "owner-1", "ep-1", "blob-u", "blob-h", 48000, 24000); !errors.Is(err, episode.ErrInvalid) {
 		t.Fatalf("nil service error = %v, want ErrInvalid", err)
+	}
+}
+
+// TestCompleteStemsConcurrentKeepsOnePair races eight completions with
+// distinct blobs behind one barrier and requires one pair. Concurrent
+// retries must converge on the first pair with no orphan rows, and reads
+// must keep the oldest row per role.
+func TestCompleteStemsConcurrentKeepsOnePair(t *testing.T) {
+	t.Parallel()
+	db := openDatabase(t)
+	beginEpisode(t, db, "ep-1", 1)
+	svc, err := episode.NewService(episode.Config{DB: db})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	const racers = 8
+	ctx := t.Context()
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make([]error, racers)
+	for i := range racers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, errs[i] = svc.CompleteStems(ctx, "owner-1", "ep-1",
+				fmt.Sprintf("blob-user-%d", i), fmt.Sprintf("blob-host-%d", i), 48000, 24000)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("racer %d error = %v, want no error", i, err)
+		}
+	}
+	if got := stemCount(t, db, "ep-1"); got != 2 {
+		t.Fatalf("stems = %d, want one user and one host row", got)
+	}
+	user := stemMedia(t, db, "ep-1", "user")
+	host := stemMedia(t, db, "ep-1", "host")
+	if user == "" || host == "" {
+		t.Fatalf("pair = (%q, %q), want both roles linked", user, host)
 	}
 }

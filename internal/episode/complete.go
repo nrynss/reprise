@@ -51,26 +51,11 @@ func (s *Service) CompleteStems(ctx context.Context, ownerID, episodeID, userMed
 }
 
 // linkStems stores the two stem rows for an episode and leaves rows a first
-// completion already stored untouched. A repeat with different blob ids keeps
-// the first pair, because a transcript job may already read it.
+// completion already stored untouched. The pair index keeps one row per role,
+// so a repeat with different blob ids keeps the first pair, because a
+// transcript job may already read it. A clash inserts nothing and reports no
+// error, so concurrent completions converge on one pair with no orphan rows.
 func (s *Service) linkStems(ctx context.Context, episodeID, ownerID, userMediaID, hostMediaID string, userSampleRate, hostSampleRate int64) error {
-	rows, err := s.db.Reader().QueryContext(ctx,
-		`SELECT role FROM stems WHERE episode_id = ?`, episodeID)
-	if err != nil {
-		return fmt.Errorf("episode: link stems %q: %w", episodeID, err)
-	}
-	defer rows.Close()
-	present := map[string]bool{}
-	for rows.Next() {
-		var role string
-		if err := rows.Scan(&role); err != nil {
-			return fmt.Errorf("episode: link stems %q: %w", episodeID, err)
-		}
-		present[role] = true
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("episode: link stems %q: %w", episodeID, err)
-	}
 	type want struct {
 		role       string
 		mediaID    string
@@ -80,16 +65,14 @@ func (s *Service) linkStems(ctx context.Context, episodeID, ownerID, userMediaID
 		{role: transcript.RoleUser, mediaID: userMediaID, sampleRate: userSampleRate},
 		{role: transcript.RoleHost, mediaID: hostMediaID, sampleRate: hostSampleRate},
 	} {
-		if present[w.role] {
-			continue
-		}
 		stemID, err := id.New()
 		if err != nil {
 			return fmt.Errorf("episode: link stems %q: %w", episodeID, err)
 		}
 		if _, err := s.db.Writer().ExecContext(ctx,
 			`INSERT INTO stems (id, owner_id, episode_id, media_id, role, sample_rate, start_offset_ms)
-			 VALUES (?, ?, ?, ?, ?, ?, 0)`,
+			 VALUES (?, ?, ?, ?, ?, ?, 0)
+			 ON CONFLICT(episode_id, role) DO NOTHING`,
 			stemID, ownerID, episodeID, w.mediaID, w.role, w.sampleRate); err != nil {
 			return fmt.Errorf("episode: link stems %q: %w", episodeID, err)
 		}

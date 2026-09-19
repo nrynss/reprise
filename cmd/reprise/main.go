@@ -1554,6 +1554,10 @@ func (h *stemsComplete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if followID, follow, err := h.drafts.ensureEditorial(r.Context(), owner.ID, episodeID); err != nil {
+		if errors.Is(err, job.ErrLimit) {
+			_ = wire.WriteError(w, http.StatusTooManyRequests, codePipelineBusy, "the edit queue is full, retry this completion", nil)
+			return
+		}
 		_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the editorial job could not start", nil)
 		return
 	} else if follow {
@@ -1613,14 +1617,16 @@ func hasProposals(ctx context.Context, db *sqlite.DB, episodeID string) (bool, e
 }
 
 // unfinishedEpisode reports whether a job of one kind already covers an
-// episode. It matches the episode linkage the work reports first, so a
-// restart still maps an interrupted job back. Unknown covers jobs that never
-// reported, and the caller treats them as covering too, because starting a
-// second paid job beside a silent first spends twice.
-func (j *jobs) unfinishedEpisode(ctx context.Context, episodeID, kind string) (running, unknown bool, err error) {
+// episode. It matches the episode linkage each start stamps synchronously,
+// so a restart still maps an interrupted job back. A job without linkage
+// covers no episode, because every start stamps its episode before the
+// schedule lock releases. A silent job therefore belongs to no episode this
+// scheduler can name, and waiting on it would let one silent job wedge every
+// episode. A listing failure refuses instead of scheduling blind.
+func (j *jobs) unfinishedEpisode(ctx context.Context, episodeID, kind string) (bool, error) {
 	listed, err := j.store.Unfinished(ctx)
 	if err != nil {
-		return false, false, fmt.Errorf("reprise: list unfinished jobs: %w", err)
+		return false, fmt.Errorf("reprise: list unfinished jobs: %w", err)
 	}
 	for _, rec := range listed {
 		if rec.Kind != kind {
@@ -1628,14 +1634,34 @@ func (j *jobs) unfinishedEpisode(ctx context.Context, episodeID, kind string) (r
 		}
 		var desc episodeDescriptor
 		if err := json.Unmarshal(rec.Progress.Detail, &desc); err != nil || desc.EpisodeID == "" {
-			unknown = true
 			continue
 		}
 		if desc.EpisodeID == episodeID {
-			running = true
+			return true, nil
 		}
 	}
-	return running, unknown, nil
+	return false, nil
+}
+
+// stampEpisode records the episode linkage on a freshly started job while
+// the caller still holds the schedule lock. A later schedule then matches
+// the job back to its episode instead of meeting a silent job. The run
+// reports the same linkage again when it starts, so a restart keeps the
+// mapping the stamp wrote first.
+func stampEpisode(ctx context.Context, store job.Store, jobID, ownerID, episodeID string) error {
+	raw, err := json.Marshal(episodeDescriptor{OwnerID: ownerID, EpisodeID: episodeID})
+	if err != nil {
+		return fmt.Errorf("reprise: describe job %s: %w", jobID, err)
+	}
+	stamped := job.Record{
+		ID:        jobID,
+		Progress:  job.Progress{Stage: "start", Detail: raw},
+		UpdatedAt: time.Now(),
+	}
+	if err := store.SetProgress(context.WithoutCancel(ctx), stamped); err != nil {
+		return fmt.Errorf("reprise: describe job %s: %w", jobID, err)
+	}
+	return nil
 }
 
 // editInputs reads both stem blobs and probes the user stem length for one
@@ -1681,9 +1707,9 @@ func (j *jobs) ensureTranscript(ctx context.Context, ownerID, episodeID string) 
 	if words {
 		return "", false, nil
 	}
-	if running, unknown, err := j.unfinishedEpisode(ctx, episodeID, kindEditTranscript); err != nil {
+	if running, err := j.unfinishedEpisode(ctx, episodeID, kindEditTranscript); err != nil {
 		return "", false, err
-	} else if running || unknown {
+	} else if running {
 		return "", false, nil
 	}
 	return j.startTranscript(ctx, ownerID, episodeID)
@@ -1693,7 +1719,9 @@ func (j *jobs) ensureTranscript(ctx context.Context, ownerID, episodeID string) 
 // its editorial follow-up. The chain schedules the editorial job when the
 // timeline lands and only logs a follow-up it cannot start, because the
 // timeline already persists and a later completion or boot recovery
-// schedules the rest.
+// schedules the rest. It stamps the episode on the job before returning, so
+// a repeat completion meets a described job. A stamp failure cancels the job
+// and reports the error, so no silent job keeps running.
 func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
 	userAudio, _, durationSecs, err := j.editInputs(ctx, ownerID, episodeID)
 	if err != nil {
@@ -1712,6 +1740,10 @@ func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (
 	}
 	jobID, err := j.runner.StartKind(ctx, kindEditTranscript, chained)
 	if err != nil {
+		return "", false, err
+	}
+	if err := stampEpisode(ctx, j.store, jobID, ownerID, episodeID); err != nil {
+		_ = j.runner.Cancel(jobID)
 		return "", false, err
 	}
 	return jobID, true, nil
@@ -1738,16 +1770,18 @@ func (j *jobs) ensureEditorial(ctx context.Context, ownerID, episodeID string) (
 	if props {
 		return "", false, nil
 	}
-	if running, unknown, err := j.unfinishedEpisode(ctx, episodeID, kindEditorial); err != nil {
+	if running, err := j.unfinishedEpisode(ctx, episodeID, kindEditorial); err != nil {
 		return "", false, err
-	} else if running || unknown {
+	} else if running {
 		return "", false, nil
 	}
 	return j.startEditorial(ctx, ownerID, episodeID)
 }
 
 // startEditorial reads both stems and starts one editorial job over the
-// landed word timeline.
+// landed word timeline. It stamps the episode on the job before returning,
+// so a repeat completion meets a described job. A stamp failure cancels the
+// job and reports the error, so no silent job keeps running.
 func (j *jobs) startEditorial(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
 	userAudio, hostAudio, durationSecs, err := j.editInputs(ctx, ownerID, episodeID)
 	if err != nil {
@@ -1756,6 +1790,10 @@ func (j *jobs) startEditorial(ctx context.Context, ownerID, episodeID string) (s
 	jobID, err := j.runner.StartKind(ctx, kindEditorial,
 		j.pipe.editorialFunc(ownerID, episodeID, userAudio, hostAudio, durationSecs))
 	if err != nil {
+		return "", false, err
+	}
+	if err := stampEpisode(ctx, j.store, jobID, ownerID, episodeID); err != nil {
+		_ = j.runner.Cancel(jobID)
 		return "", false, err
 	}
 	return jobID, true, nil

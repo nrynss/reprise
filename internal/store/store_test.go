@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/nrynss/keel/sqlite"
@@ -127,8 +128,13 @@ func TestMigrateAppliesTwiceWithNoChange(t *testing.T) {
 		t.Fatalf("open store: %v", err)
 	}
 	first := ledgerRows(t, path)
-	if len(first) != 1 {
-		t.Fatalf("ledger holds %d rows, want the one migration file", len(first))
+	basenames := make([]string, 0, len(first))
+	for _, row := range first {
+		name, _, _ := strings.Cut(row, "@")
+		basenames = append(basenames, name)
+	}
+	if !slices.Equal(basenames, []string{"0001_schema.sql", "0002_stems_pair_unique.sql"}) {
+		t.Fatalf("ledger holds %q, want both migration files", first)
 	}
 	if _, err := store.Open(t.Context(), db); err != nil {
 		t.Fatalf("reopen store: %v", err)
