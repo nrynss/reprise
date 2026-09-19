@@ -74,10 +74,14 @@ Copy this directory to the box so the scripts run where Docker lives:
 
 ## Getting the image to the box
 
-Publishing is a button. `.github/workflows/image.yml` builds, tests, and
-pushes to GHCR. A successful publish starts `.github/workflows/deploy.yml`,
-which loads the image over SSH and runs `redeploy.sh` on the box. The box
-never logs into the registry.
+Publishing is a button. `.github/workflows/image.yml` checks that the gate
+passed on the commit being published, then builds and pushes to GHCR. It
+runs no tests of its own: the gate already ran every one of them, plus the
+pinned-tool check, and a weaker second copy would only disagree. A commit
+whose gate is red, still running, or never ran refuses to publish. A
+successful publish starts `.github/workflows/deploy.yml`, which loads the
+image over SSH and runs `redeploy.sh` on the box. The box never logs into
+the registry.
 
 ```
 gh workflow run image.yml

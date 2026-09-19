@@ -31,20 +31,39 @@ jobs:
     permissions:
       contents: read
       packages: write
+      actions: read
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
+      # ci.yml already ran the whole gate on this commit: gofmt, go vet,
+      # staticcheck, go test -race, the web suite, the scans, and the check
+      # that ffmpeg is the pinned build. Re-running a subset here proves
+      # less, and a subset with no ffmpeg on the runner is what stopped the
+      # first publish. Gate on that run instead.
+      - name: Require a green gate for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          info=$(gh run list --workflow=ci.yml --commit "${{ github.sha }}" \
+            --limit 1 --json status,conclusion \
+            --jq '.[0] // {} | "\(.status // "none") \(.conclusion // "none")"')
+          status="${info% *}"
+          conclusion="${info#* }"
+          echo "ci for ${{ github.sha }}: status=${status} conclusion=${conclusion}"
 
-      - name: go vet
-        run: go vet ./...
-
-      - name: go test -race
-        run: go test ./... -race
+          if [ "${status}" = "none" ]; then
+            echo "::error::No ci run for this commit. Push it to main, or open a pull request, and let the gate finish."
+            exit 1
+          fi
+          if [ "${status}" != "completed" ]; then
+            echo "::error::ci is still ${status} for this commit. Wait for it, then publish."
+            exit 1
+          fi
+          if [ "${conclusion}" != "success" ]; then
+            echo "::error::ci concluded ${conclusion} for this commit. Publish only a green commit."
+            exit 1
+          fi
 
       - uses: docker/setup-buildx-action@v3
 
