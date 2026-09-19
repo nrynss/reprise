@@ -146,7 +146,7 @@ requires:   T3.2
 fixture-ok: yes
 size:       M · mid
 owns:       internal/render/
-status:     in-progress:review-r1:t3.4-rev-r1@2a3cb576d0b5a78d1dfce384377273f7d975e571
+status:     in-progress:remediate-r1:t3.4-rem-r1
 ```
 **Build on:** `keel/edl` for the cut list, the crossfades and the two-pass loudness, `keel/ffmpeg`
 underneath it, and the `render` job kind. This task owns the edit model and the job, not the
