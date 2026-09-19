@@ -117,7 +117,7 @@ requires:   T6.1, T5.5
 fixture-ok: no
 size:       M · frontier
 owns:       dev-diary/probes/production.md
-status:     in-progress:remediate-r1:t6.1b-rem-r1
+status:     in-progress:review-r2:t6.1b-rev-r2@4ca528d4ecc6693970baf0516b7d301d74c8cd09
 ```
 Automated, from a workstation, never from the box. No person needed. First deploy has no
 catalog. This check does not wait on seed files.
