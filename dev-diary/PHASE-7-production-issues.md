@@ -294,6 +294,29 @@ round 3 carry or carries it with a reason.
 **Done when:** Round 4 records the live outcome with command and
 output.
 
+### T7.11: Record page posts stem completion
+```yaml
+requires:   T7.6, T2.4
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/routes/record/
+status:     not-started
+```
+Round 1 carried a disclosed gap: no browser caller posts to
+`POST /api/episodes/{id}/stems/complete`, so only fixture and curl
+flows reach the T7.6 schedule. This task wires the caller.
+
+* When both stem uploads complete, the record page posts the media
+  pair with sample rates to the new route and surfaces the answer:
+  moved and scheduled, or the standing job outcome on a repeat.
+* Failures refuse loudly on the page with a retry. No silent stall.
+* Chaaya's uploader stays as T2.4 wired it. This task adds the one
+  call after completion, nothing general.
+
+**Done when:** Playwright completes both uploads against the mock
+and sees the draft move with one transcript job scheduled. A repeat
+post reports the standing outcome. No wall-clock threshold.
+
 ---
 
 ## Exit criteria
