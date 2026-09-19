@@ -224,7 +224,7 @@ func StoreAnalysis(ctx context.Context, db *sql.DB, ownerID, episodeID string, s
 func marshalChapters(chapters []Chapter) (string, error) {
 	rows := make([]chapterRow, 0, len(chapters))
 	for _, c := range chapters {
-		rows = append(rows, chapterRow{Title: c.Title, StartMs: c.StartMs})
+		rows = append(rows, chapterRow(c))
 	}
 	raw, err := json.Marshal(rows)
 	if err != nil {
@@ -235,11 +235,7 @@ func marshalChapters(chapters []Chapter) (string, error) {
 
 // marshalSummary encodes the summary for the analyses row.
 func marshalSummary(summary Summary) (string, error) {
-	raw, err := json.Marshal(summaryRow{
-		Headline: summary.Headline,
-		Bullets:  summary.Bullets,
-		Block:    summary.Block,
-	})
+	raw, err := json.Marshal(summaryRow(summary))
 	if err != nil {
 		return "", fmt.Errorf("analysis: encode summary: %w", err)
 	}
@@ -250,7 +246,7 @@ func marshalSummary(summary Summary) (string, error) {
 func marshalEntities(entities []Entity) (string, error) {
 	rows := make([]entityRow, 0, len(entities))
 	for _, e := range entities {
-		rows = append(rows, entityRow{Type: e.Type, Text: e.Text, StartMs: e.StartMs, EndMs: e.EndMs})
+		rows = append(rows, entityRow(e))
 	}
 	raw, err := json.Marshal(rows)
 	if err != nil {
@@ -265,7 +261,7 @@ func marshalPhrases(phrases []KeyPhrase) (string, error) {
 	for _, p := range phrases {
 		row := phraseRow{Text: p.Text, Rank: p.Rank, Count: p.Count}
 		for _, s := range p.Spans {
-			row.Spans = append(row.Spans, spanRow{StartMs: s.StartMs, EndMs: s.EndMs})
+			row.Spans = append(row.Spans, spanRow(s))
 		}
 		rows = append(rows, row)
 	}
