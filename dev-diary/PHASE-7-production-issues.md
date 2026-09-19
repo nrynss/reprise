@@ -324,7 +324,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/, web/src/routes/record/cap.spec.ts,
             web/src/routes/record/mock-session.spec.ts, web/src/routes/record/+page.svelte
-status:     in-progress:remediate-r1:t7.12-rem-r1
+status:     in-progress:review-r2:t7.12-rev-r2@ea929ca11a62bdaa95da92a4bf426281dd7d76b9
 ```
 Round 1 scoped the gap: nothing in a real take calls the completion
 driver. The controller finishes both uploads in `endTake` and
