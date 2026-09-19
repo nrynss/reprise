@@ -65,7 +65,7 @@ requires:   T6.1, T2.3, T3.2
 fixture-ok: yes
 size:       M · frontier
 owns:       cmd/reprise/main.go, internal/broker/, internal/gemini/
-status:     in-progress:implement:t7.2-impl
+status:     in-progress:review-r1:t7.2-rev-r1@80a6ad79396f4165cfdd3ab48687081e5a1a9fc5
 ```
 **Build on:** the job kinds P2 and P3 landed, the reconciler from
 T2.3, and the broker from T2.1. The probe measured a binary that
