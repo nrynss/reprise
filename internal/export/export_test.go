@@ -223,6 +223,10 @@ func TestValidateChaptersRejects(t *testing.T) {
 	if err := export.ValidateChapters(moved, fixtureDurationMs); !errors.Is(err, export.ErrChapters) {
 		t.Fatalf("first past zero: want ErrChapters, got %v", err)
 	}
+	lateStart := []export.Chapter{{Title: "Late", StartMs: 5000}, {Title: "Mid", StartMs: 15000}, {Title: "End", StartMs: 25000}}
+	if err := export.ValidateChapters(lateStart, fixtureDurationMs); !errors.Is(err, export.ErrChapters) {
+		t.Fatalf("first past zero with full spans: want ErrChapters, got %v", err)
+	}
 	short := good[:2]
 	if err := export.ValidateChapters(short, fixtureDurationMs); !errors.Is(err, export.ErrChapters) {
 		t.Fatalf("two chapters: want ErrChapters, got %v", err)
