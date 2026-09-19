@@ -236,6 +236,32 @@ gets 404 on another user's episode and its media, and a revoked session fails it
 
 ---
 
+### T1.7: Route mounting and main wiring ★
+```yaml
+requires:   T1.3, T2.1, T1.4, T5.3
+fixture-ok: yes
+size:       S · mid
+owns:       internal/api/routes.go, web/src/lib/api/types.ts, cmd/reprise/main.go
+status:     not-started
+```
+Opened from T5.3 round 1's out-of-scope row. Handlers exist unmounted: the broker's
+`POST /api/sessions` (T2.1) and the three admin patterns (T5.3) have no route table entry and
+no browser mirror entry, so the served app 404s them. T1.3's stubs hold the table shape.
+
+* Mount every implemented handler behind the middleware chain the handoffs describe: gate
+  outermost, then guest session middleware, then the handler. `OwnerDefaultLimit` must equal
+  the broker `OwnerSessionLimit` where the two meet.
+* Extend the TypeScript mirror for every newly mounted pattern, with the golden decode test
+  covering the additions.
+* `main.go` stays the T6.1 shape (settings load, drain, health). This task adds route
+  registration only, touching nothing about boot, drain, or the image.
+
+**Done when:** The stub refusal golden still decodes for unmounted routes, every mounted route
+answers its handler through the middleware chain, and an unmounted admin pattern no longer
+exists for implemented handlers.
+
+---
+
 ## Exit criteria
 
 - [ ] Settings load per environment, and no secret value sits in a tracked file.

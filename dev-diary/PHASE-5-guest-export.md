@@ -72,7 +72,7 @@ requires:   T2.1, T1.4, T1.5
 fixture-ok: yes
 size:       S · mid
 owns:       internal/limits/, web/src/routes/admin/
-status:     in-progress:land:t5.3-impl@3aba2f09f4e84ccac5ac2cc85fda9fe3ef6a4b87
+status:     done:55d2e30d3c56899605e545dea518dda045097cea
 ```
 **Mockup:** the `admin` view ([`mockup`](mockup), `#/admin`), and the two refusals it produces,
 both on `#/preflight` in the state lab: recording paused, and guest limit reached.
@@ -157,8 +157,11 @@ episodes and the button, and WebKit plays after the first gesture.
 
 ## Handoff log
 
-### What exists now
-Not started.
+### What exists now (Orchestrator-2)
+T5.3 landed after round 1 APPROVE with zero in-scope findings. Guest caps, kill switch, and the
+Keel-backed spend view are on main with both sides pinned. The owner login stays an explicit
+stub seam (`StubOwnerAuth` denies all) until the open login decision lands. Opened T1.7 below
+for the route mounting the round 1 review records as out of scope.
 
 ### What surprised us
 Nothing yet.
