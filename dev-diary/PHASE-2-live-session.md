@@ -284,6 +284,28 @@ drives time.
 
 ---
 
+### T2.9: Flip the fixture verdict to the real sessions ★
+```yaml
+requires:   T2.5
+fixture-ok: yes
+size:       XS · light
+owns:       internal/align/fixture_test.go
+status:     not-started
+```
+Opened from T0.8's handoff. The landed driver treats a present start record as failure
+(`t.Fatalf` "measured past the evidence gate"), so landing `clips.json` alone would turn the
+non-live gate red. Every review claimed the flip needs no driver change; the committed code
+says otherwise.
+
+Switch `TestFixtureSessions` to the `measureRealSession` verdict path already proved by
+`TestRealSessionVerdictPath`. Nothing else changes: same 40 ms bar, same loud errors, same
+pins. The verdict it runs is proved; only the switch is missing.
+
+**Done when:** With `clips.json` present, the suite measures instead of failing on the gate;
+without it, the loud evidence block stands as today.
+
+---
+
 ## Exit criteria
 
 - [ ] No path mints a token without passing gate, kill switch, quota, global budget and owner spend.
