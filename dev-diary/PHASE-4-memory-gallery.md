@@ -92,7 +92,7 @@ requires:   T1.4, T3.5
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/privacy/, web/src/routes/share/, web/src/routes/privacy/
-status:     in-progress:remediate-r1:t4.4-rem-r1
+status:     in-progress:review-r2:t4.4-rev-r2@8d175584de1193b9811bb343f3325050e668f1de
 ```
 **Mockup:** the publish gate and the erase confirmation on `#/episode`, the public page the share
 link opens at `#/share`, and the `privacy` view ([`mockup`](mockup)).
