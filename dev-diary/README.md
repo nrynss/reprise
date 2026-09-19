@@ -6,8 +6,8 @@ How work runs lives only in [`../AGENTS.md`](../AGENTS.md). This file holds fact
 - [`project.md`](project.md): the build, and every departure from the product spec.
 - [`libraries.md`](libraries.md): what Keel and Chaaya carry, and what Reprise builds.
 
-**Current status (Orchestrator-2):** Built on Keel `v0.3.0` and Chaaya `0.2.0`. P1 foundations, all of P2, T3.1 through T3.6, T4.4, T5.3, T6.1 and T1.7 are
-done — P2 needs only the clips.json fixture record (other lane). T4.1 in review.
+**Current status (Orchestrator-2):** Built on Keel `v0.3.0` and Chaaya `0.2.0`. P1, P2 (less the clips.json record), P4 in full, T3.1 through T3.6 plus T3.3a, T5.3, T6.1 and T1.7 are
+done. T0.8 blocked on provider speed. P5 needs T5.1/T5.2/T5.4/T5.5 (seed + owner decisions).
 
 The libraries carry the general work. Chaaya `0.2.0` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered

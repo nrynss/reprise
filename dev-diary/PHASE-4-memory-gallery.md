@@ -44,7 +44,7 @@ requires:   T4.1, T3.2
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/memory/callback.go
-status:     in-progress:land:t4.2-impl@974828e233ca311d876779b0777d5c96f29a83bf
+status:     done:c2274bc25b0dab09ecee2ef957b17383e758fcc7
 ```
 Choose what the next episode opens on.
 
@@ -171,6 +171,9 @@ T4.1 landed (Orchestrator-2) after round 2 APPROVE with zero residue against rou
 threads, quote-backed commitments, append-only evidence, and ranked keyterms are on main. Round
 1 fixed time-travel closes, evidence destruction, trailing-garbage parsing, and owner scoping.
 That landing opens T4.2 and T4.3, both claimed.
+T4.2 landed (Orchestrator-2) after round 1 APPROVE with zero findings. Priority-ordered callback
+selection with planted agreement, adjacent-only no-repeat, and owner-scoped use flags is on main.
+P4 now holds T4.1 through T4.5 done.
 
 ### What surprised us
 Nothing yet.
