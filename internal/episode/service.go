@@ -34,12 +34,15 @@ type Renderer interface {
 // Service carries the owner scoped episode reads and writes the HTTP
 // layer serves. The database is required. The starter, kind, and renderer
 // are required only for the mark done path, so lists and reads run in a
-// process with no job runner. A Service is safe for concurrent use.
+// process with no job runner. The transcript kind is required only for
+// the outcome read, so processes without a runner still serve the
+// detail. A Service is safe for concurrent use.
 type Service struct {
-	db         *sqlite.DB
-	starter    Starter
-	renderKind string
-	render     Renderer
+	db             *sqlite.DB
+	starter        Starter
+	renderKind     string
+	render         Renderer
+	transcriptKind string
 }
 
 // Config carries what NewService needs. DB is the shared diary handle.
@@ -54,6 +57,10 @@ type Config struct {
 	RenderKind string
 	// Render builds the render work for one episode.
 	Render Renderer
+	// TranscriptKind names the transcript job kind the outcome read
+	// matches. Leave it empty when the process starts no transcript
+	// jobs, and the outcome read reports no pass.
+	TranscriptKind string
 }
 
 // NewService returns a Service over cfg. It reports ErrInvalid for a nil
@@ -63,9 +70,10 @@ func NewService(cfg Config) (*Service, error) {
 		return nil, fmt.Errorf("episode: new service: %w: database must not be nil", ErrInvalid)
 	}
 	return &Service{
-		db:         cfg.DB,
-		starter:    cfg.Starter,
-		renderKind: cfg.RenderKind,
-		render:     cfg.Render,
+		db:             cfg.DB,
+		starter:        cfg.Starter,
+		renderKind:     cfg.RenderKind,
+		render:         cfg.Render,
+		transcriptKind: cfg.TranscriptKind,
 	}, nil
 }

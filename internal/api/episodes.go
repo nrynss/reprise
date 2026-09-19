@@ -25,6 +25,9 @@ type episodeStore interface {
 	// RequestRender moves a draft episode to rendering and starts its
 	// render job, returning the job id.
 	RequestRender(ctx context.Context, ownerID, episodeID string) (string, error)
+	// TranscriptOutcome returns the latest transcript pass outcome for
+	// an episode the owner holds.
+	TranscriptOutcome(ctx context.Context, ownerID, episodeID string) (episode.Outcome, error)
 }
 
 var _ episodeStore = (*episode.Service)(nil)
@@ -88,12 +91,28 @@ type proposalJSON struct {
 }
 
 // episodeDetailJSON carries one episode with its proposals, so the editor
-// reads the draft and its revertible record in one round trip.
+// reads the draft and its revertible record in one round trip. The
+// transcript outcome rides beside them, so the detail agrees with the
+// completion answer on what the last pass did.
 type episodeDetailJSON struct {
 	// Episode is the episode row.
 	Episode episodeJSON `json:"episode"`
 	// Proposals holds every proposal on the episode, oldest first.
 	Proposals []proposalJSON `json:"proposals"`
+	// TranscriptOutcome names the latest transcript pass and its state,
+	// or nil when no pass ever started.
+	TranscriptOutcome *transcriptOutcomeJSON `json:"transcript_outcome,omitempty"`
+}
+
+// transcriptOutcomeJSON carries one pass outcome on the wire. Error stays
+// empty unless the pass failed, so screens branch on status first.
+type transcriptOutcomeJSON struct {
+	// JobID identifies the latest pass.
+	JobID string `json:"job_id"`
+	// Status is the latest pass state, such as running or error.
+	Status string `json:"status"`
+	// Error carries the terminal failure text, or empty otherwise.
+	Error string `json:"error,omitempty"`
 }
 
 // decisionRequestJSON asks to accept or revert one proposal.
@@ -182,6 +201,11 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the proposals could not be read", nil)
 		return
 	}
+	outcome, err := h.store.TranscriptOutcome(r.Context(), owner, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the pass outcome could not be read", nil)
+		return
+	}
 	out := make([]proposalJSON, 0, len(props))
 	for _, p := range props {
 		out = append(out, proposalJSON{
@@ -193,7 +217,15 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 			Decision:  p.Decision,
 		})
 	}
-	writeJSON(w, http.StatusOK, episodeDetailJSON{Episode: episodeOf(ep), Proposals: out})
+	detail := episodeDetailJSON{Episode: episodeOf(ep), Proposals: out}
+	if outcome.Found {
+		detail.TranscriptOutcome = &transcriptOutcomeJSON{
+			JobID:  outcome.JobID,
+			Status: outcome.Status,
+			Error:  outcome.Error,
+		}
+	}
+	writeJSON(w, http.StatusOK, detail)
 }
 
 // decide answers POST /api/episodes/{id}/decisions by appending one

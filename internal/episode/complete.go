@@ -16,9 +16,10 @@ import (
 // first pair, leaves the state alone, and reports moved false with no error,
 // so a retried completion schedules nothing twice. A repeat also fills rows
 // the winning call never wrote, so a crash between the move and the schedule
-// heals on retry. Unknown and foreign episodes both report ErrNotFound. A
-// repeat on a draft episode is harmless. Any other state reports
-// ErrIllegalTransition.
+// heals on retry. A repeat on a draft or failed episode is harmless, so the
+// answer below can report the standing pass outcome instead of refusing.
+// Unknown and foreign episodes both report ErrNotFound. Any other state
+// reports ErrIllegalTransition.
 func (s *Service) CompleteStems(ctx context.Context, ownerID, episodeID, userMediaID, hostMediaID string, userSampleRate, hostSampleRate int64) (bool, error) {
 	if s == nil || s.db == nil || ownerID == "" || episodeID == "" || userMediaID == "" || hostMediaID == "" {
 		return false, fmt.Errorf("episode: complete stems %q: %w", episodeID, ErrInvalid)
@@ -41,7 +42,7 @@ func (s *Service) CompleteStems(ctx context.Context, ownerID, episodeID, userMed
 			if cerr != nil {
 				return false, cerr
 			}
-			if cur == StateDraft {
+			if cur == StateDraft || cur == StateFailed {
 				return false, nil
 			}
 		}

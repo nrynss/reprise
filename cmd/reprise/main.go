@@ -576,10 +576,11 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 		return nil, err
 	}
 	episodeSvc, err := episode.NewService(episode.Config{
-		DB:         db,
-		Starter:    jobs.runner,
-		RenderKind: kindRender,
-		Render:     jobs.resolver,
+		DB:             db,
+		Starter:        jobs.runner,
+		RenderKind:     kindRender,
+		Render:         jobs.resolver,
+		TranscriptKind: kindEditTranscript,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open episode service: %w", err)
@@ -1498,7 +1499,9 @@ type stemsCompleteRequest struct {
 }
 
 // stemsCompleteResponse answers a stem completion with the episode state and
-// the job that follows it, when one started here.
+// the job that follows it, when one started here. The transcript outcome
+// names the latest pass for the episode, so a repeat completion reports
+// the standing outcome instead of silence.
 type stemsCompleteResponse struct {
 	// EpisodeID identifies the completed episode.
 	EpisodeID string `json:"episode_id"`
@@ -1510,6 +1513,20 @@ type stemsCompleteResponse struct {
 	JobID string `json:"job_id"`
 	// State is the episode state after the completion.
 	State string `json:"state"`
+	// TranscriptOutcome names the latest transcript pass and its state,
+	// or nil when no pass ever started.
+	TranscriptOutcome *transcriptOutcomeJSON `json:"transcript_outcome,omitempty"`
+}
+
+// transcriptOutcomeJSON carries one pass outcome on the wire. Error stays
+// empty unless the pass failed, so screens branch on status first.
+type transcriptOutcomeJSON struct {
+	// JobID identifies the latest pass.
+	JobID string `json:"job_id"`
+	// Status is the latest pass state, such as running or error.
+	Status string `json:"status"`
+	// Error carries the terminal failure text, or empty otherwise.
+	Error string `json:"error,omitempty"`
 }
 
 // stemsComplete links two uploaded blobs as an episode stems and schedules
@@ -1530,7 +1547,8 @@ func newStemsComplete(episodes *episode.Service, drafts *jobs, db *sqlite.DB) ht
 // ServeHTTP answers POST /api/episodes/{id}/stems/complete. It links the two
 // named blobs when the owner holds them, moves recording to draft once, and
 // ensures one transcript job with its editorial follow-up. A repeat
-// completion finds the draft and the job and starts nothing.
+// completion reports the standing pass outcome beside the episode state
+// and starts nothing.
 func (h *stemsComplete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	owner, ok := identity.UserFromContext(r.Context())
 	if !ok || owner.ID == "" {
@@ -1605,16 +1623,29 @@ func (h *stemsComplete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the episode could not be read", nil)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(stemsCompleteResponse{
+	outcome, err := h.episodes.TranscriptOutcome(r.Context(), owner.ID, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the pass outcome could not be read", nil)
+		return
+	}
+	resp := stemsCompleteResponse{
 		EpisodeID: episodeID,
 		Moved:     moved,
 		Scheduled: scheduled,
 		JobID:     jobID,
 		State:     string(ep.State),
-	})
+	}
+	if outcome.Found {
+		resp.TranscriptOutcome = &transcriptOutcomeJSON{
+			JobID:  outcome.JobID,
+			Status: outcome.Status,
+			Error:  outcome.Error,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // blobOwner returns the owner the media index stored a blob under. Unknown
@@ -1651,33 +1682,6 @@ func hasProposals(ctx context.Context, db *sqlite.DB, episodeID string) (bool, e
 		return false, fmt.Errorf("reprise: count proposals: %w", err)
 	}
 	return count > 0, nil
-}
-
-// unfinishedEpisode reports whether a job of one kind already covers an
-// episode. It matches the episode linkage each start stamps synchronously,
-// so a restart still maps an interrupted job back. A job without linkage
-// covers no episode, because every start stamps its episode before the
-// schedule lock releases. A silent job therefore belongs to no episode this
-// scheduler can name, and waiting on it would let one silent job wedge every
-// episode. A listing failure refuses instead of scheduling blind.
-func (j *jobs) unfinishedEpisode(ctx context.Context, episodeID, kind string) (bool, error) {
-	listed, err := j.store.Unfinished(ctx)
-	if err != nil {
-		return false, fmt.Errorf("reprise: list unfinished jobs: %w", err)
-	}
-	for _, rec := range listed {
-		if rec.Kind != kind {
-			continue
-		}
-		var desc episodeDescriptor
-		if err := json.Unmarshal(rec.Progress.Detail, &desc); err != nil || desc.EpisodeID == "" {
-			continue
-		}
-		if desc.EpisodeID == episodeID {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // stampEpisode records the episode linkage on a freshly started job while
@@ -1731,9 +1735,12 @@ func (j *jobs) editInputs(ctx context.Context, ownerID, episodeID string) (userA
 
 // ensureTranscript starts one transcript job for a draft episode with both
 // stems and no word timeline, and reports whether it started here. A repeat
-// call finds the words or the running job and starts nothing, so two
-// completions and a boot recovery schedule one job. It returns job.ErrLimit
-// when the kind runs at capacity, and the caller answers retry.
+// call finds the words or the covering job and starts nothing, so two
+// completions and a boot recovery schedule one job. A repeat after a
+// terminal pass reports the standing outcome instead of scheduling beside
+// a silent first, and a draft that pass left wordless fails, so the
+// gallery agrees the pass left nothing. It returns job.ErrLimit when the
+// kind runs at capacity, and the caller answers retry.
 func (j *jobs) ensureTranscript(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
 	j.schedMu.Lock()
 	defer j.schedMu.Unlock()
@@ -1744,19 +1751,95 @@ func (j *jobs) ensureTranscript(ctx context.Context, ownerID, episodeID string) 
 	if words {
 		return "", false, nil
 	}
-	if running, err := j.unfinishedEpisode(ctx, episodeID, kindEditTranscript); err != nil {
+	last, err := episode.LastKindJob(ctx, j.pipe.db, episodeID, kindEditTranscript)
+	if err != nil {
 		return "", false, err
-	} else if running {
+	}
+	if last.Found {
+		if !jobTerminal(last.Status) {
+			return "", false, nil
+		}
+		if err := j.failSilentDraft(ctx, episodeID); err != nil {
+			return "", false, err
+		}
 		return "", false, nil
 	}
 	return j.startTranscript(ctx, ownerID, episodeID)
 }
 
+// jobTerminal reports whether a job status ends scheduling for its
+// episode. A running or queued pass still covers the episode, while a
+// terminal pass only reports its outcome.
+func jobTerminal(status string) bool {
+	switch job.Status(status) {
+	case job.StatusDone, job.StatusError, job.StatusCancelled, job.StatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
+// failSilentDraft fails a draft episode whose transcript pass ended with
+// no word timeline, so the gallery agrees the pass left nothing.
+// Episodes past draft keep their state, because a later pass already
+// moved them on.
+func (j *jobs) failSilentDraft(ctx context.Context, episodeID string) error {
+	state, err := episode.Current(ctx, j.pipe.db, episodeID)
+	if err != nil {
+		return err
+	}
+	if state != episode.StateDraft {
+		return nil
+	}
+	if err := episode.Fail(ctx, j.pipe.db, episodeID); err != nil {
+		return fmt.Errorf("reprise: fail silent episode %s: %w", episodeID, err)
+	}
+	return nil
+}
+
+// transcriptWords reads the stored word count out of one transcript pass
+// result, so the chain fails an empty pass instead of staying silent.
+func transcriptWords(out []byte) (int, error) {
+	var res transcript.Result
+	if err := json.Unmarshal(out, &res); err != nil {
+		return 0, fmt.Errorf("reprise: decode transcript result: %w", err)
+	}
+	return res.Words, nil
+}
+
+// settleTranscript records one finished transcript run for its episode. A
+// failed run fails the episode with the run error, so the outcome reads
+// the failure instead of silence. A run that stored no words fails the
+// episode too, because an empty timeline starts no editorial pass. A run
+// with words schedules the editorial follow-up and only logs a follow-up
+// it cannot start, because the timeline already persists and a later
+// completion schedules the rest.
+func (j *jobs) settleTranscript(ctx context.Context, ownerID, episodeID string, out []byte, runErr error) ([]byte, error) {
+	if runErr != nil {
+		if ferr := episode.Fail(ctx, j.pipe.db, episodeID); ferr != nil {
+			log.Printf("reprise edit chain: fail episode %s: %v", episodeID, ferr)
+		}
+		return nil, runErr
+	}
+	landed, err := transcriptWords(out)
+	if err != nil {
+		return nil, err
+	}
+	if landed == 0 {
+		emptyErr := fmt.Errorf("reprise: transcript pass for %s stored no words", episodeID)
+		if ferr := episode.Fail(ctx, j.pipe.db, episodeID); ferr != nil {
+			log.Printf("reprise edit chain: fail episode %s: %v", episodeID, ferr)
+		}
+		return nil, emptyErr
+	}
+	if _, _, schedErr := j.ensureEditorial(ctx, ownerID, episodeID); schedErr != nil {
+		log.Printf("reprise edit chain: schedule editorial for %s: %v", episodeID, schedErr)
+	}
+	return out, nil
+}
+
 // startTranscript reads both stems and starts one transcript job chained to
-// its editorial follow-up. The chain schedules the editorial job when the
-// timeline lands and only logs a follow-up it cannot start, because the
-// timeline already persists and a later completion or boot recovery
-// schedules the rest. It stamps the episode on the job before returning, so
+// its settlement. It stamps the episode on the job before returning, so
 // a repeat completion meets a described job. A stamp failure cancels the job
 // and reports the error, so no silent job keeps running.
 func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
@@ -1767,13 +1850,7 @@ func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (
 	inner := j.pipe.editTranscriptFunc(ownerID, episodeID, userAudio, durationSecs, nil, transcript.Offsets{})
 	chained := func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
 		out, runErr := inner(ctx, progress)
-		if runErr != nil {
-			return nil, runErr
-		}
-		if _, _, schedErr := j.ensureEditorial(ctx, ownerID, episodeID); schedErr != nil {
-			log.Printf("reprise edit chain: schedule editorial for %s: %v", episodeID, schedErr)
-		}
-		return out, nil
+		return j.settleTranscript(ctx, ownerID, episodeID, out, runErr)
 	}
 	jobID, err := j.runner.StartKind(ctx, kindEditTranscript, chained)
 	if err != nil {
@@ -1788,8 +1865,10 @@ func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (
 
 // ensureEditorial starts one editorial job for an episode whose word
 // timeline landed and whose proposals are still empty, and reports whether
-// it started here. It returns job.ErrLimit when the kind runs at capacity,
-// and the caller answers retry.
+// it started here. A repeat call finds the proposals or the covering job,
+// terminal or not, and starts nothing, so two completions schedule one
+// pass. It returns job.ErrLimit when the kind runs at capacity, and the
+// caller answers retry.
 func (j *jobs) ensureEditorial(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
 	j.schedMu.Lock()
 	defer j.schedMu.Unlock()
@@ -1807,9 +1886,11 @@ func (j *jobs) ensureEditorial(ctx context.Context, ownerID, episodeID string) (
 	if props {
 		return "", false, nil
 	}
-	if running, err := j.unfinishedEpisode(ctx, episodeID, kindEditorial); err != nil {
+	last, err := episode.LastKindJob(ctx, j.pipe.db, episodeID, kindEditorial)
+	if err != nil {
 		return "", false, err
-	} else if running {
+	}
+	if last.Found {
 		return "", false, nil
 	}
 	return j.startEditorial(ctx, ownerID, episodeID)

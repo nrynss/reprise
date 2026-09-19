@@ -124,6 +124,35 @@ func TestCompleteStemsHealsInterruptedLinking(t *testing.T) {
 	}
 }
 
+// TestCompleteStemsRepeatOnFailedStands plants a failed episode with its
+// stem pair, as a transcript pass that landed nothing leaves it, and
+// requires a repeat completion to stand without moving, so the answer
+// above can report the standing outcome instead of refusing.
+func TestCompleteStemsRepeatOnFailedStands(t *testing.T) {
+	t.Parallel()
+	db := openDatabase(t)
+	plantEpisode(t, db, "ep-1", 1, episode.StateFailed)
+	if _, err := db.Writer().ExecContext(t.Context(),
+		`INSERT INTO stems (id, owner_id, episode_id, media_id, role, sample_rate, start_offset_ms)
+		 VALUES ('stem-1', 'owner-1', 'ep-1', 'blob-user', 'user', 48000, 0),
+		        ('stem-2', 'owner-1', 'ep-1', 'blob-host', 'host', 24000, 0)`); err != nil {
+		t.Fatalf("seed stems: %v", err)
+	}
+	svc, err := episode.NewService(episode.Config{DB: db})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if moved := completeFixture(t, svc, "owner-1", "ep-1", "blob-user", "blob-host"); moved {
+		t.Fatal("failed repeat moved = true, want the failed state to stand")
+	}
+	if got := stateOf(t, db, "ep-1"); got != episode.StateFailed {
+		t.Fatalf("state = %s, want failed to survive the repeat", got)
+	}
+	if got := stemCount(t, db, "ep-1"); got != 2 {
+		t.Fatalf("stems = %d, want the first pair to stand", got)
+	}
+}
+
 // TestCompleteStemsRefusals checks unknown and foreign episodes, episodes
 // past draft, and malformed pairs each fail with the right sentinel.
 func TestCompleteStemsRefusals(t *testing.T) {
