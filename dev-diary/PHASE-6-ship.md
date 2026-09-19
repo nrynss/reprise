@@ -19,7 +19,7 @@ requires:   T0.1, T1.5, T2.1
 fixture-ok: no
 size:       M · mid
 owns:       deploy/, cmd/reprise/main.go, Dockerfile
-status:     done:ca529d79afce44e8290bdb05250f681ea9f45acb
+status:     done:48ac233c6d3fe603ff255ad7b5b5b43397ffc623
 ```
 **Build on:** the image from T0.1, `config/reprise.box.toml` from T1.5, and the session registry from
 T2.1, which is what a drain waits on. The box is documented in
@@ -38,9 +38,12 @@ Reprise deploys the same shape at `reprise.nryn.dev`.
 
 * The container joins the `proxy` network and publishes nothing. Traefik routes to it by label.
 * The container reads `config/reprise.box.toml` through `REPRISE_CONFIG`.
-* Secrets live in `/etc/reprise/env`, root-owned, mode `0600`, mounted read-only. The TOML's
-  `env_file` references point at it, so no secret passes on the command line or through `docker run`
-  environment flags. `/etc/reprise/gemini-sa.json` mounts the same way.
+* Secrets live in `/etc/reprise/env`, mode `0600`, mounted read-only, and owned by uid 65532.
+  Root-owned was the original wording here and it is wrong: at `0600` only the owner reads the
+  file, and the container is not root. The TOML's `env_file` references point at it, so no secret
+  passes on the command line or through `docker run` environment flags.
+  `/etc/reprise/gemini-sa.json` mounts the same way. The directory stays root-owned at `0700`,
+  because each file is bind mounted by path and the container never searches the directory.
 * A host bind mount carries SQLite and media, owned by uid 65532, the distroless nonroot user. The
   box config puts them under `/var/lib/reprise` inside the container.
 * A CPU and memory limit, because the box is small, has no swap, and already runs seven containers.
@@ -70,9 +73,33 @@ which is why the `owns` line grew past `deploy/`.
 **Operator override, 2026-09-19.** The owner skipped the implement, review, remediate loop. A
 private GitHub repository now exists at `nrynss/reprise`. `.github/workflows/image.yml` publishes
 on a button. `.github/workflows/deploy.yml` loads the image over SSH and runs `redeploy.sh`.
-The box never logs into the registry. Box secrets and `/srv/reprise` are in place. The public
-edge still needs a proxied Cloudflare A record for `reprise.nryn.dev`. Commits `8eb8e76` and
-`7a1a7d0` carry the workflows. They were not reviewed.
+The box never logs into the registry. Box secrets and `/srv/reprise` are in place. Commits
+`8eb8e76` and `7a1a7d0` carry the workflows. They were not reviewed.
+
+**First live deploy, 2026-09-19.** `https://reprise.nryn.dev` answers. The unreviewed kit held
+four faults, and each one hid the next.
+
+* `image.yml` ran `go vet` and `go test -race` with no ffmpeg on the runner, so the media
+  packages failed and no image was ever published. The duplicate was a strict subset of the gate
+  `ci.yml` already runs on the same commit, missing its pinned-tool check. Publish now reads the
+  ci conclusion for the commit and refuses one that is red, still running, or never gated.
+* `run.sh` built its preflight as `ENV_FILE=... env -i bash -c`. The prefix assignment lands in
+  env's own environment, which `-i` wipes before it execs bash, so the inner `set -u` died on an
+  unbound `ENV_FILE` and the container never started.
+* `deploy.yml` piped `redeploy.sh` through `tee` with no `pipefail`, so the step took tee's exit
+  code. The first deploy reported success while the box served nothing and the edge answered
+  Traefik's 404. This is the one that mattered: it made the other three invisible.
+* The secret files were root-owned at `0600` and the container runs as uid 65532, so the process
+  could not open `/etc/reprise/env` and crash-looped. The preflight checked the mode and never
+  the owner, which is exactly the pair that makes a file unreadable to anyone but root.
+
+The health gate now prints the container's status and last fifty log lines before it rolls back.
+The gate never lied; nothing read its exit code, and nothing carried the reason off the box.
+
+**DNS, 2026-09-19.** `reprise.nryn.dev` is a proxied Cloudflare A record to `167.233.247.107`
+in zone `nryn.dev`, record id `0536a8f581a446d53d6599ece030808c`. One level deep, which is what
+the free Universal SSL certificate covers. The edge serves a Google Trust Services certificate
+and the origin is reached over Traefik's `letsencrypt` resolver.
 
 **Done when:** `reprise.nryn.dev/healthz` answers from a workstation, never from the box, because
 Cloudflare challenges the box's own address. The boot log shows the resolution plan with every secret
@@ -175,7 +202,7 @@ file or a task id. The owner flips visibility.
 
 ## Exit criteria
 
-- [ ] `reprise.nryn.dev` works end to end, verified from a workstation.
+- [x] `reprise.nryn.dev` works end to end, verified from a workstation.
 - [ ] Real voices on two browsers are recorded once.
 - [ ] The public repository builds from a clean clone.
 - [ ] Every submission item is ready for the owner.
@@ -184,12 +211,19 @@ file or a task id. The owner flips visibility.
 
 ## Handoff log
 
-### What exists now (Orchestrator-2)
-Operator override 2026-09-19, no review round. Private repo `nrynss/reprise` is live. Image
-publish is a button. Deploy loads the image over SSH. Box secrets, data dirs, and a deploy
-key are in place. DNS for `reprise.nryn.dev` is not. T6.1 kit still stands from its reviewed
-landing. Remaining owner items: DNS, workstation edge check, redeploy drill, backup
-destination, cron and restore drill.
+### What exists now
+`https://reprise.nryn.dev` is live and verified from a workstation. `/healthz` answers
+`ok <boot> version=3ab625a71b84dfd77723b1791d7df19ee5eafdf7`, `/` answers 200, and the
+certificate verifies. DNS is a proxied A record. The deploy chain runs end to end: publish is
+a button, a successful publish loads the image over SSH and redeploys, and a failed deploy now
+fails the workflow.
+
+The running build is `3ab625a`. `48ac233` and the commits between it change only the deploy
+scripts and these notes, none of which is in the image, so the box is current in substance.
+Publish again when the next code change lands.
+
+Remaining owner items: the backup destination, its cron and a restore drill. T6.1b production
+verification is next and nothing blocks it.
 
 ### What surprised us
 The owner needed to ship from GitHub while away from the workstation. The loop would have
@@ -197,9 +231,12 @@ held the first box deploy on a review round. The override skipped that so dogfoo
 once DNS exists.
 
 ### Notes for the next developer
-First deploy is the current priority. The catalog starts empty. Seed files are dogfood after
-the box is up. Images publish from GitHub Actions with a button. A successful publish loads
-the image on the box over SSH. The box never logs into the registry. The private repository
-is `nrynss/reprise`. Add a proxied Cloudflare A record for `reprise.nryn.dev` before the
-public edge check. Task numbers keep their order of creation, so T6.4b runs before T6.2
-despite its number.
+The box is up and the catalog starts empty. Seed files are dogfood from here. Images publish
+from GitHub Actions with a button, and a publish only proceeds when the gate was green on that
+exact commit. A successful publish loads the image on the box over SSH. The box never logs
+into the registry. The private repository is `nrynss/reprise`.
+
+Verify the edge from a workstation and never over SSH from the box, because Cloudflare
+challenges the box's own address. A green deploy is not a working edge: the gate checks the
+container IP and bypasses Traefik entirely, so read both. Task numbers keep their order of
+creation, so T6.4b runs before T6.2 despite its number.
