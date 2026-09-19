@@ -117,6 +117,14 @@ jobs:
           echo "Ensuring /srv/reprise/deploy exists..."
           "${SSH[@]}" "${DEPLOY_TARGET}" "mkdir -p /srv/reprise/deploy /srv/reprise/data /srv/reprise/media && chown -R 65532:65532 /srv/reprise"
 
+          # The secret files are mode 0600, so only their owner reads them,
+          # and the container is uid 65532 rather than root. Created by root
+          # they mount fine and the process then crash-loops on "permission
+          # denied". Converge the ownership the same way the data directory
+          # above is converged. Nothing here reads a value.
+          echo "Ensuring the secret files are readable by uid 65532..."
+          "${SSH[@]}" "${DEPLOY_TARGET}" "for f in /etc/reprise/env /etc/reprise/gemini-sa.json; do [ -e \"\$f\" ] && chown 65532:65532 \"\$f\" && echo \"  owned by 65532: \$f\"; done; true"
+
           echo "Shipping deploy scripts..."
           "${SCP[@]}" deploy/run.sh deploy/redeploy.sh deploy/backup.sh "${DEPLOY_TARGET}:/srv/reprise/deploy/"
           "${SSH[@]}" "${DEPLOY_TARGET}" "chmod 0755 /srv/reprise/deploy/run.sh /srv/reprise/deploy/redeploy.sh /srv/reprise/deploy/backup.sh"

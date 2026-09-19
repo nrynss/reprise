@@ -52,6 +52,10 @@ CPUS="${CPUS:-1.0}"
 ENV_FILE="${ENV_FILE:-/etc/reprise/env}"
 KEY_FILE="${KEY_FILE:-/etc/reprise/gemini-sa.json}"
 
+# The uid the distroless runtime stage runs as. The secret files are bind
+# mounted, so this uid must be able to read them from inside the container.
+RUNTIME_UID=65532
+
 # The settings file baked into the image. It carries inline values and
 # secret references only, so passing its path on the command line is safe.
 CONFIG_PATH="/srv/config/reprise.box.toml"
@@ -73,6 +77,18 @@ for secret_file in "${ENV_FILE}" "${KEY_FILE}"; do
       exit 1
       ;;
   esac
+
+  # Mode alone is not enough. At 600 or 400 only the owner reads the file,
+  # and the container is not root. A root-owned 0600 secret mounts without
+  # complaint, the process cannot open it, and it crash-loops on
+  # "permission denied" long after this script reported success.
+  owner="$(stat -c '%u' "${secret_file}" 2>/dev/null || echo '')"
+  if [[ "${owner}" != "${RUNTIME_UID}" ]]; then
+    echo "error: ${secret_file} is owned by uid ${owner}, want ${RUNTIME_UID}." >&2
+    echo "       The container runs as uid ${RUNTIME_UID} and cannot read it." >&2
+    echo "       Fix it with: sudo chown ${RUNTIME_UID}:${RUNTIME_UID} ${secret_file}" >&2
+    exit 1
+  fi
 done
 
 # The service account key must parse as JSON. This check reads the file and

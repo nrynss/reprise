@@ -36,13 +36,21 @@ was built from, stamped in through the `VERSION` build argument.
 
 ## One-time setup on the box
 
-Create the secret files. Both are root-owned and readable by owner only.
+Create the secret files. Both are readable by owner only, and the owner is
+uid 65532, the nonroot user the container runs as. Mode alone is not enough:
+a root-owned `0600` file bind mounts without complaint and the process then
+cannot open it, so it crash-loops on `permission denied`. The run script
+refuses to start on a secret owned by anyone else, and the deploy workflow
+converges the ownership on every run.
 
 ```
 sudo install -d -m 0700 /etc/reprise
-sudo install -m 0600 /dev/null /etc/reprise/env
+sudo install -o 65532 -g 65532 -m 0600 /dev/null /etc/reprise/env
 sudo $EDITOR /etc/reprise/env
 ```
+
+The directory stays root-owned at `0700`. Each file is bind mounted by
+path, so the container never needs to search the directory.
 
 The env file carries two lines and nothing else:
 
@@ -54,7 +62,7 @@ SESSION_SIGNING_KEY=...
 Place the Vertex AI service account key beside it:
 
 ```
-sudo install -m 0600 /path/to/downloaded-key.json /etc/reprise/gemini-sa.json
+sudo install -o 65532 -g 65532 -m 0600 /path/to/downloaded-key.json /etc/reprise/gemini-sa.json
 ```
 
 Never export a secret in an interactive shell. It persists in shell history
