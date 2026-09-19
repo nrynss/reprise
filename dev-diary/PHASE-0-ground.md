@@ -332,12 +332,12 @@ auto chapters are deprecated. `project.md` records both departures.
 The token cap does not end the session: three idle runs stayed open past a 60 second cap with
 billing continuing until the client sent `session.end`. The browser runs its own timer.
 
-### Notes for the next developer (Orchestrator-2, phase close)
-P0 is closed. The close review's HOLD is resolved: T0.7 went through round 1 afterward and
-approved with two non-blocking L findings, and its owns line now covers the notes hunk. The
-close carries both debts: no triple-green log for the gate change, and the documented owns
-exception. `audit_docs.py` exits 0. All six exit boxes hold.
-T0.8 opened post-close as a follow-up, not a criterion item: T2.5's driver gates its 40 ms
-verdict on start records the committed fixtures never logged, so each session dir needs a
-`clips.json` measured fresh under T0.2's spend discipline. P1, P2 (less T2.5's verdict), P3
-partial, and P6 deploy are done on this watch; P3 closed tasks read the fixtures offline.
+### Notes for the next developer (Orchestrator-2, phase close pending T0.8)
+P0 closes when T0.8 lands. The close review's HOLD is resolved: T0.7 went through round 1
+afterward and approved with two non-blocking L findings, and its owns line now covers the
+notes hunk. The close carries both debts: no triple-green log for the gate change, and the
+documented owns exception. `audit_docs.py` exits 0. All six exit boxes hold.
+T0.8 is the last open item: T2.5's driver gates its 40 ms verdict on start records the
+committed fixtures never logged, so each session dir needs a `clips.json` measured fresh
+under T0.2's spend discipline. P1, P2 (less T2.5's verdict), P3 closed tasks, and P6 deploy
+are done on this watch; P3 tasks read the fixtures offline.
