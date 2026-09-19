@@ -156,7 +156,7 @@ requires:   T6.1b, T7.1, T7.2, T7.3
 fixture-ok: no
 size:       S · frontier
 owns:       dev-diary/probes/production.md
-status:     in-progress:review-r2:t7.5-rev-r2@162ff9c8f520ff083077e7864862951cfa883567
+status:     done:76fd95ed6a52a6a3f0098a6225adc9006fc79ff7
 ```
 Automated, from a workstation, never from the box. No person needed.
 Runs once, after P7 lands and the new image deploys.
@@ -175,6 +175,34 @@ Runs once, after P7 lands and the new image deploys.
 output against the deployed P7 build. No check still cites round 1
 evidence.
 
+### T7.6: Schedule the edit pipeline on stem completion
+```yaml
+requires:   T7.1, T7.3, T3.1
+fixture-ok: yes
+size:       S · frontier
+owns:       cmd/reprise/main.go, internal/episode/
+status:     not-started
+```
+Round 2 carried one item: the binary registers the transcript and
+editorial kinds but schedules neither, and nothing calls the
+stems-uploaded transition, so episodes stall in `recording` with zero
+proposals. This task closes the pipe from upload to draft.
+
+* When both stems finish uploading, move the episode through the
+  guarded `recording` to `draft` transition and schedule exactly one
+  `edit_transcript` job. A repeated completion signal schedules
+  nothing twice.
+* When the transcript job lands the word timeline, schedule one
+  `editorial` job. Paid kinds stay non-idempotent through the
+  existing registration.
+* Touch `internal/episode/` only for the completion entry point.
+  Lifecycle and render seams stay as T1.2 and T7.1 left them.
+
+**Done when:** Fixture stems completing twice move the episode to
+`draft` once with a word timeline and schedule one transcript job,
+and the transcript landing schedules one editorial job. A restart
+between completion and schedule recovers to the same single pair.
+
 ---
 
 ## Exit criteria
@@ -190,10 +218,12 @@ evidence.
 
 ### What exists now
 
-T7.3 landed after round 1 APPROVE with zero findings. Upload opens
-resolve to the session user and media refusals carry private
-no-store. Keel issue nrynss/keel#1 tracks the library header. Only
-T7.4 (blocked) and T7.5 remain.
+T7.5 landed after round 2 APPROVE with zero residue. Round 2 closes
+media, uploader, and ledger, skips the switch to T7.4, and carries
+one item: nothing schedules transcript and editorial after stem
+upload, so episodes stall in `recording`. That carry opens T7.6.
+Keel issue nrynss/keel#1 tracks the library header.
+T7.3 landed after round 1 APPROVE with zero findings.
 T7.2 landed after round 1 APPROVE with zero findings. Shared
 Gemini client, eight kinds, reconcile per close, sweep on schedule.
 The ceiling stops leaking.
