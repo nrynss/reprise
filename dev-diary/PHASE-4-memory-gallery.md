@@ -92,7 +92,7 @@ requires:   T1.4, T3.5
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/privacy/, web/src/routes/share/, web/src/routes/privacy/
-status:     in-progress:land:t4.4-rem-r1@23deef39e342399fb47cc33146ef8c6bdc612104
+status:     done:0ff54b2ca1b7ab5979bce8767138f5ca02c1d778
 ```
 **Mockup:** the publish gate and the erase confirmation on `#/episode`, the public page the share
 link opens at `#/share`, and the `privacy` view ([`mockup`](mockup)).
@@ -135,8 +135,13 @@ workstation. A restart mid-erase resumes and finishes.
 
 ## Handoff log
 
-### What exists now
-Not started.
+### What exists now (Orchestrator-2)
+T4.4 landed after round 3 APPROVE with zero residue against rounds 1 and 2. Publish mints
+unguessable tokens serving render plus cover to signed-out visitors and nothing else; unpublish
+revokes every render blob; erase fans out across rows, blobs, files, and provider copies with
+restart resume. Three review rounds: the C revoked-blob leak, the H dead-public episode, the L
+unseeding erase tables, and the L gate-scan hit, all fixed with pins. Standing opens: the
+ReErase retry route (wiring owner) and the workstation share remeasure.
 
 ### What surprised us
 Nothing yet.
