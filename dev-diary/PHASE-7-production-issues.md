@@ -156,7 +156,7 @@ requires:   T6.1b, T7.1, T7.2, T7.3
 fixture-ok: no
 size:       S · frontier
 owns:       dev-diary/probes/production.md
-status:     in-progress:implement:t7.5-impl
+status:     in-progress:review-r1:t7.5-rev-r1@c5f8934ceaf9595cc402d8937959b1af44fec941
 ```
 Automated, from a workstation, never from the box. No person needed.
 Runs once, after P7 lands and the new image deploys.
