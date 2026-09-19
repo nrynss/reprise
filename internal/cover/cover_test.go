@@ -248,6 +248,46 @@ func seedExtra(t *testing.T, db *sql.DB, id string, number int, title, notes str
 		"prop-notes-"+id, id, notes)
 }
 
+// TestRerunReplacesCoverRow runs the pass twice on one episode. The
+// second run overwrites the same file and replaces the row, so no
+// duplicate survives and the fallback mark stays clear.
+func TestRerunReplacesCoverRow(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	seedEpisode(t, db, "ep-1", "owner-a", 3, "Harbor Light", "We talked about the ferry.")
+	model := &cover.ScriptedModel{}
+	budgets := &fakeBudget{}
+	var receipt []byte
+	cfg := runCfg(t, db, model, budgets, &receipt)
+	first, err := cover.Run(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	second, err := cover.Run(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if second.File != first.File || second.File != "ep-1.png" {
+		t.Fatalf("file holds %q after rerun, want %q", second.File, first.File)
+	}
+	if second.SHA256 != first.SHA256 {
+		t.Fatal("rerun stored different bytes for the same brief")
+	}
+	if model.Calls != 2 {
+		t.Fatalf("model calls = %d, want one per run", model.Calls)
+	}
+	var count int
+	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM covers").Scan(&count); err != nil {
+		t.Fatalf("count covers: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("covers = %d, want one row after rerun", count)
+	}
+	if file, sha, _, _, fallback := coverRow(t, db, "ep-1"); file != "ep-1.png" || sha != second.SHA256 || fallback != 0 {
+		t.Fatalf("row holds file=%q sha=%q fallback=%d, want the replaced model row", file, sha, fallback)
+	}
+}
+
 // TestPromptConstrainsTheRender checks the brief names the episode and
 // refuses faces and lettering, since the app sets the title itself.
 func TestPromptConstrainsTheRender(t *testing.T) {
