@@ -124,6 +124,25 @@ workstation. A restart mid-erase resumes and finishes.
 
 ---
 
+### T4.5: Shell heading follows the gallery ★
+```yaml
+requires:   T0.1, T4.3
+fixture-ok: yes
+size:       XS · light
+owns:       web/tests/shell.spec.ts
+status:     in-progress:implement:t4.5-impl
+```
+Opened from T4.3 round 1's out-of-scope row. The gallery heads the season view, so the shell
+spec's root-h1 `Reprise` assertion fails. Branding is intact (`appName` still `Reprise`, titles
+still suffix it). T4.3 lands on this task's green gate, so this goes first.
+
+Update the one expected heading line to the gallery heading. If the gallery heading ever
+changes, this spec must move with it — say so in the handoff.
+
+**Done when:** The shell spec passes beside the full gate with no other change.
+
+---
+
 ## Exit criteria
 
 - [ ] Threads come from stored quotes only.
