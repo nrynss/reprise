@@ -313,7 +313,7 @@ requires:   T2.1, T2.4, T2.6
 fixture-ok: yes
 size:       S · mid
 owns:       dev-diary/probes/latency.md, internal/broker/timeouts.go
-status:     in-progress:land:t2.10-impl@483e6c71eca724a567e29b9d9003005930fc2d86
+status:     done:cebe3a9293d054c094428917e46e3408dfb62ff1
 ```
 Opened after live measurement showed the provider answering ~10x slower than baseline (greeting
 `reply.done` near 50 s against 4 s, transport and teardown healthy). The product must assume a
@@ -380,6 +380,9 @@ episode clock, correlation math, and the real-layout driver are on main. The 40 
 on one cross-lane record both reviewers upheld: each testdata/sessions/ dir needs a clips.json
 mapping clip names to start seconds, because detector times lag true onsets by up to a second.
 P2 is fully done with that single fixture record outstanding.
+T2.10 landed (Orchestrator-2) after round 1 APPROVE with zero findings. The 60 s latency floors
+live in broker constants with a zero-spend audit record; call-site swaps and the unwired
+scheduler stay follow-up rows for their owners.
 
 ### What surprised us
 Nothing yet.
