@@ -42,27 +42,45 @@ captions parse in a validator. The description's chapter lines follow YouTube's 
 
 ### T5.2: Seeded season ★
 ```yaml
-requires:   T4.1, T4.2
+requires:   T1.4, T4.1, T4.2
 fixture-ok: yes
-size:       L · frontier
+size:       M · frontier
 owns:       internal/seed/, data/season/
-status:     blocked:seeded season voice and sharing decisions in project.md
+status:     not-started
 ```
-Four finished episodes a visitor lands on. Episode one plants the dread. Episode four still has not
-resolved it. Episode five, recorded by the visitor, opens on it.
+One or two finished episodes sit in `data/season/` as the catalog. The operator places them by
+hand. This task does not record them and does not run the pipeline. A tiny fixture season pins
+the copy and the drop.
 
-**Build on:** `keel/sqlite` and `keel/mediastore`. Exporting and importing finished artifacts is
-Reprise's, because the fixtures are this product's own content.
+Each new guest, and each new account with no season, gets their own copy of those rows. A
+returning user never gets a second copy. Sign-up from a guest keeps the copies they already
+have, because the user id does not change. The owner does not receive a copy.
 
-* Each seeded row carries `seeded = true` and a stable key, so an import re-runs safely and one query
-  finds everything seeded.
-* The season ships inside the image, so a fresh deploy already has it.
-* The seeded episodes go through the real pipeline once. Their proposals, renders, analyses and
-  mentions are real outputs, exported as fixtures.
-* A remove command deletes every seeded row and blob.
+**Build on:** `keel/sqlite` and `keel/mediastore`. The catalog ships inside the image.
 
-**Done when:** A fresh container shows four episodes to a new guest. Removing the seed leaves no
-seeded row. The season's threads drive T4.2's callback.
+* Catalog media lives once. User copies are diary rows (`seeded = true`) plus mentions and the
+  planted callback, so T4.2 still has a stored row to open on.
+* The catalog belongs to one reserved user this package inserts, with kind `seed`, never a
+  guest. T5.4 already skips non-guest owners.
+* Copy runs once per user, on the first request that lists their season, never inside session
+  mint. A receipt in this package records the offer. Dropping the copies does not clear the
+  receipt, so the seed does not come back.
+* The catalog file names each stable key. Copies set `seeded = 1`. Do not add columns to the
+  diary schema. Raise a contract change if an episode column is required.
+* User delete of a seeded episode drops that user's copy rows only. Catalog blobs and other
+  users stay. Recorded episodes (`seeded = 0`) still take the T4.4 erase path. If the episode
+  erase entry point must branch, raise a contract change. Do not edit privacy files from this
+  task.
+* One query finds every seeded row by the flag. An operator remove deletes the catalog and
+  stops new copies. Existing user copies stay until the user drops them or the guest sweep
+  takes them.
+
+**Done when:** A new guest sees the catalog count as their own episodes, with ids that differ
+from a second guest's copies. Dropping a seeded episode removes it from that user and leaves
+the catalog and the other guest intact, including catalog audio. A later list for the same
+user does not re-import. A new empty account gets a copy. The owner does not. T4.2's callback
+still resolves on a copied mention. Removing the catalog leaves existing copies and gives a
+new guest an empty season.
 
 ---
 
@@ -137,18 +155,18 @@ status:     not-started
 
 **Build on:** Chaaya's `AudioPlayer`, whose first gesture unlocks playback.
 
-The landing screen explains nothing it can show instead. It plays thirty seconds of episode four,
-then offers one button: record episode five.
+The landing screen explains nothing it can show instead. It plays thirty seconds of the latest
+seeded episode, then offers one button to record the next one.
 
 **Done when:** A new guest reaches a live session in two clicks. Playwright confirms the seeded
-episodes and the button, and WebKit plays after the first gesture.
+copies and the button, and WebKit plays after the first gesture.
 
 ---
 
 ## Exit criteria
 
 - [ ] An export package carries audio, video, captions, cover and a chapter description.
-- [ ] A fresh container lands a guest on a four-episode season.
+- [ ] A fresh container lands a guest on their own copy of the seeded catalog.
 - [ ] The kill switch, guest cap and spend ceiling each refuse correctly, and an honest guest still
       records.
 - [ ] Expired guest data is gone, and unexpired guest data survives the same sweep.
@@ -158,6 +176,8 @@ episodes and the button, and WebKit plays after the first gesture.
 ## Handoff log
 
 ### What exists now (Orchestrator-2)
+T5.2 is unblocked and not started. Sharing is a per-user copy of a one or two episode
+catalog the operator places in `data/season/`. User drop is that user's rows only.
 T5.3 landed after round 1 APPROVE with zero in-scope findings. Guest caps, kill switch, and the
 Keel-backed spend view are on main with both sides pinned. The owner login stays an explicit
 stub seam (`StubOwnerAuth` denies all) until the open login decision lands. Opened T1.7 below
@@ -175,4 +195,8 @@ the error docs.
 Nothing yet.
 
 ### Notes for the next developer
-Nothing yet.
+The seeded catalog is one or two hand-placed episodes, copied per user, not one shared
+season and not four pipeline fixtures. User drop removes that user's rows only. Catalog
+audio stays. Whose voice those files use is operator content in `data/season/`, not a
+blocker. Copy on first season list, never on session mint. A receipt prevents re-import
+after drop. The owner does not receive a copy.

@@ -148,13 +148,19 @@ through a Cloud Storage URI, and the object must live in the same project. A twe
 stem is roughly five to ten megabytes, so inline should hold and no bucket should be needed. T0.3
 measures that rather than assuming it.
 
+### Seeded season is a per-user copy of a small catalog
+
+`product.md` describes four finished episodes and a visitor recording episode five. The catalog is
+one or two episodes the operator places by hand in `data/season/`. Each new guest and each new
+empty account receives a copy of those rows. The owner does not. A returning user does not get a
+second copy. User delete drops that user's copy only. Catalog audio stays. Whose voice those files
+use is operator content, not a task blocker.
+
 ## Open decisions
 
 Each belongs to the owner. The task that needs it stays `blocked` until it is made.
 
 | Decision | Needed by |
 |---|---|
-| Whose life the seeded season records, and whose voice | T5.2 |
-| One shared read-only season, or a copy per guest | T5.2 |
 | How long guest data lives | T5.4 |
 | Which owner login, if any, beyond guest mode | T1.4 |
