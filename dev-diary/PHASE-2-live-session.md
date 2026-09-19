@@ -306,6 +306,34 @@ without it, the loud evidence block stands as today.
 
 ---
 
+### T2.10: Slow-provider hardening ★
+```yaml
+requires:   T2.1, T2.4, T2.6
+fixture-ok: yes
+size:       S · mid
+owns:       dev-diary/probes/latency.md, internal/broker/timeouts.go
+status:     in-progress:implement:t2.10-impl
+```
+Opened after live measurement showed the provider answering ~10x slower than baseline (greeting
+`reply.done` near 50 s against 4 s, transport and teardown healthy). The product must assume a
+slow provider, not a fast one. No more live probes for this task: the measurements on record
+suffice, and probing spend stays at zero.
+
+* Audit every timeout, deadline, poll interval, and give-up in the session path (broker mint,
+  voice socket reply waits, reconcile reads, sweep settle/delete, job attempts) against 60 s+
+  reply latency. Anything that fails below it is a finding with a pin.
+* Fix inside `internal/broker/timeouts.go`: one shared constants file naming each bound and
+  its reason, wired into the call sites the audit names. No magic numbers left inline.
+* Record the audit (every bound checked, pins for failures) in `dev-diary/probes/latency.md`.
+  Findings outside `timeouts.go` become follow-up rows with owning paths, never drive-by edits.
+* UX waiting states (thinking indicators, barge-in affordances during long waits) belong to a
+  later screen task, recorded as a follow-up row, not built here.
+
+**Done when:** No bound below 60 s survives on the session path, the record lists every bound
+checked, and the gate passes with no behavior change on the fast path.
+
+---
+
 ## Exit criteria
 
 - [ ] No path mints a token without passing gate, kill switch, quota, global budget and owner spend.
