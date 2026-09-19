@@ -180,8 +180,9 @@ evidence.
 requires:   T7.1, T7.3, T3.1
 fixture-ok: yes
 size:       S · frontier
-owns:       cmd/reprise/main.go, internal/episode/
-status:     in-progress:review-r2:t7.6-rev-r2@b8dcf6ae854312c46575db077fac55a4f47dae90
+owns:       cmd/reprise/main.go, internal/episode/, internal/store/migrations/0002_stems_pair_unique.sql,
+            internal/store/store_test.go
+status:     done:0b4ff25af862409f63a3cafbb964f258e695a4bc
 ```
 Round 2 carried one item: the binary registers the transcript and
 editorial kinds but schedules neither, and nothing calls the
@@ -218,10 +219,14 @@ between completion and schedule recovers to the same single pair.
 
 ### What exists now
 
-T7.5 landed after round 2 APPROVE with zero residue. Round 2 closes
-media, uploader, and ledger, skips the switch to T7.4, and carries
-one item: nothing schedules transcript and editorial after stem
-upload, so episodes stall in `recording`. That carry opens T7.6.
+T7.6 landed after round 2 APPROVE with zero residue. Stem completion
+moves recording to draft and chains one transcript job to one
+editorial job, with per-episode cover, 429 on a full queue, and one
+stem pair under concurrency. Round 2 widened owns by decision to the
+new store migration plus its ledger assertion, since the landed
+schema cannot change in place. The browser still posts nothing to
+the new route. Only T7.4 (blocked) remains.
+T7.5 landed after round 2 APPROVE with zero residue.
 Keel issue nrynss/keel#1 tracks the library header.
 T7.3 landed after round 1 APPROVE with zero findings.
 T7.2 landed after round 1 APPROVE with zero findings. Shared
