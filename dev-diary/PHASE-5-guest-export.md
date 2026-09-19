@@ -105,7 +105,7 @@ requires:   T1.4, T4.4
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/retention/
-status:     in-progress:land:t5.4-rem-r1@326a2e6960206951f5d9010435ed0eb994f59c6a
+status:     done:53922ffd6f175ef6a5c0d6ccdea880f96d8374ba
 ```
 **Build on:** `keel/erase` for the fan-out and `keel/job` for the kind that runs it. Reprise names
 the targets, which are the same ones T4.4 registers.
@@ -162,6 +162,10 @@ T5.3 landed after round 1 APPROVE with zero in-scope findings. Guest caps, kill 
 Keel-backed spend view are on main with both sides pinned. The owner login stays an explicit
 stub seam (`StubOwnerAuth` denies all) until the open login decision lands. Opened T1.7 below
 for the route mounting the round 1 review records as out of scope.
+T5.4 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. The
+90-day retention sweep deletes expired guests with owner-kept episodes surviving, and retries
+read expiry fresh. Round 1 fixed the frozen-cutoff retry. Retention window decided at 90 days
+by the owner this session.
 
 ### What surprised us
 Nothing yet.
