@@ -608,3 +608,236 @@ One live voice session of 16.8 connected seconds costs about 2.1
 cents. One further mint and the closing mint never connected, so they
 bill nothing. Upload bytes bill nothing. Total live spend for this
 verification is about 2.1 cents.
+
+---
+
+# Round 3: check-2 live re-run after the stem schedule
+
+Live run on 2026-09-19 and 2026-09-20 from a workstation against
+`https://reprise.nryn.dev`. Every check ran from this machine, never
+from the box. No real voice appears anywhere. All speech is
+generated: the guest lines reuse `testdata/sessions/steady/`, and the
+host stem is the provider reply audio from this run, decoded from the
+socket frames. Tokens and keys are redacted below. Cookie jars lived
+in `/tmp` and are deleted. Rounds 1 and 2 above stay untouched.
+
+## Edge identity
+
+Command:
+
+```bash
+curl -sS https://reprise.nryn.dev/healthz
+curl -sS -o /dev/null -w "%{http_code}\n" https://reprise.nryn.dev/
+```
+
+Output:
+
+```text
+ok bd8cf55eda562fa9b7365e431691746f version=c4c3676576203339ca724af8ff7b977b962395df
+200
+```
+
+Result: pass. The version matches the required
+`c4c3676576203339ca724af8ff7b977b962395df`.
+
+## 1. Scripted guest records an episode
+
+One guest mints a session, streams the two generated lines, hears
+the host reply, and ends the call explicitly.
+
+Command:
+
+```bash
+curl -sS -c jar.txt -b jar.txt -X POST https://reprise.nryn.dev/api/sessions \
+  -H 'Content-Type: application/json' -d '{}' -o mint.json -w 'HTTP %{http_code}\n'
+```
+
+Output (token redacted):
+
+```text
+HTTP 201
+```
+
+The body carries `session_id`
+`6b90a523ed888e1dffe64221f4993108`, `episode_id`
+`7af663b0f8682f59113cf775bc62c9b4`, a single use provider token,
+`expires_in_seconds` 60, `max_session_duration_seconds` 1800, and the
+first episode greeting with empty keyterms.
+
+The live call streams `steady/user-a.wav` plus `steady/user-b.wav`
+resampled to 24 kHz mono PCM, sends `session.update` with the
+returned config, streams 4800 sample frames every 200 ms, then sends
+`session.end`. The script is `/tmp/t77/live.py` (workstation only,
+not tracked).
+
+Output:
+
+```text
+stream samples: 130927 = 5.46s
+- transcript.user The garden gate needs paint before winter.
+- transcript.agent I've
+- transcript.user should buy brushes on a morning.
+- transcript.agent I have added buy brushes on a morning to your tasks.
+session.ended session_duration_seconds=66.767942 audio_duration_seconds=None
+events: 652 provider_session sess_23eaae3b38364ba68eeae9415ee3a086
+```
+
+Recognition read back both generated lines with small wording
+shifts ("garden gate" for "gate", "on a morning" for "Saturday
+morning"). The host answered with one uninterrupted reply plus one
+interrupted fragment. The client sent `session.end` explicitly and
+the socket answered `session.ended`. No session was left open. The
+connected duration is longer than rounds 1 and 2 because this
+script waited a full 60 seconds for the reply before sending the
+close. That wait is script overhead, not provider behavior.
+
+The session end records against the handler:
+
+```bash
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/sessions/<session_id>/end" \
+  -H 'Content-Type: application/json' -d '{"provider_session_id":"sess_23eaae3b38364ba68eeae9415ee3a086"}'
+```
+
+Output:
+
+```text
+{"session_id":"6b90a523ed888e1dffe64221f4993108","episode_id":"7af663b0f8682f59113cf775bc62c9b4","provider_session_id":"sess_23eaae3b38364ba68eeae9415ee3a086"}
+
+HTTP 200
+```
+
+The episode lists in the gallery with the owner cookie:
+
+```bash
+curl -sS -b jar.txt https://reprise.nryn.dev/api/episodes
+```
+
+Output:
+
+```text
+{"episodes":[{"id":"7af663b0f8682f59113cf775bc62c9b4","number":1,"title":"Episode 1","state":"recording","visibility":"private"}]}
+
+HTTP 200
+```
+
+Result: pass. The gallery lists the recorded episode privately
+under its owner.
+
+## 2. Both stems upload, completion moves recording to draft
+
+The user stem concatenates the two generated clips at 48 kHz mono
+(`user-48k.wav`, 523782 bytes, 5.46 seconds). The host stem is the
+608 provider reply frames decoded to 48 kHz mono (`host-48k.wav`,
+583758 bytes, 6.08 seconds). Both are generated speech.
+
+Each stem uploads through the chunked flow with the browser shape
+(placeholder owner `guest`, private visibility, 64 KB chunks with
+`X-Chunk-SHA256` per chunk, full `sha256` on complete):
+
+```bash
+curl -sS -b jar.txt -X POST https://reprise.nryn.dev/api/uploads \
+  -H 'Content-Type: application/json' \
+  -d '{"owner":"guest","content_type":"audio/wav","visibility":"private"}'
+curl -sS -b jar.txt -X PUT "https://reprise.nryn.dev/api/uploads/<id>/chunks/<n>" \
+  -H 'Content-Type: application/octet-stream' -H "X-Chunk-SHA256: $SHA" \
+  --data-binary @piece.bin
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/uploads/<id>/complete" \
+  -H 'Content-Type: application/json' -d "{\"sha256\":\"$FULL\"}"
+```
+
+Output:
+
+```text
+user complete: size_bytes=523782 sha256=5976e75f... HTTP 201
+host complete: size_bytes=583758 sha256=7354eea7... HTTP 201
+```
+
+The persisted ids are `befcc18a6a67d62fb5d09aaa9890b239` (user)
+and `49dfc7d9205d4ed50c50fdc7cc29b661` (host). The open resolved
+both owners to the session user `7726a09a41b250df6a172d1d65172489`.
+
+The completion posts the media pair to the new route:
+
+```bash
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/episodes/<episode_id>/stems/complete" \
+  -H 'Content-Type: application/json' \
+  -d '{"user_media_id":"<user>","host_media_id":"<host>","user_sample_rate":48000,"host_sample_rate":48000}'
+```
+
+Output:
+
+```text
+{"episode_id":"7af663b0f8682f59113cf775bc62c9b4","moved":true,"scheduled":true,"job_id":"4824c99d9860f0b6171c0cc85ef82117","state":"draft"}
+
+HTTP 200
+```
+
+Result: pass. First completion moves recording to draft and
+schedules one transcript job. The round 2 stall (nothing calls the
+transition, nothing schedules) is gone on the live build.
+
+## 3. Draft to proposals: carried forward
+
+The detail route answers the episode with its proposals:
+
+```bash
+curl -sS -b jar.txt "https://reprise.nryn.dev/api/episodes/<episode_id>"
+```
+
+Output, repeated over 45 minutes of polling at 1 to 3 minute
+intervals:
+
+```text
+{"episode":{"id":"7af663b0f8682f59113cf775bc62c9b4","number":1,"title":"Episode 1","state":"draft","visibility":"private"},"proposals":[]}
+```
+
+A repeat completion during the wait answered:
+
+```text
+{"episode_id":"7af663b0f8682f59113cf775bc62c9b4","moved":false,"scheduled":true,"job_id":"356c008589d4673ec60f18b67a0d587c","state":"draft"}
+
+HTTP 200
+```
+
+Result: carried forward. The episode sits in `draft` with zero
+proposals 45 minutes after the first completion and 20 minutes
+after the second transcript job started. The repeat found no
+landed word timeline and no covering job, so it started a second
+transcript job (`moved` false, `scheduled` true, new job id)
+instead of reporting the first job outcome. Two paid transcript
+passes left no words, no proposals, and no failure: the episode
+stays `draft`, never `failed`. The defect names itself. The edit
+chain runs silent on the live build. Its jobs vanish without a
+landed timeline and without a surfaced error, and a repeat
+completion schedules again rather than telling the caller what
+the last job did. The owning paths are the draft schedule in
+`cmd/reprise/main.go` and the completion entry in
+`internal/episode/`. The follow-up task wires visible job
+outcome (landed, running, or failed with its reason) onto the
+completion answer and the episode detail, then re-runs this
+check live.
+
+## Observation for the next task
+
+The edge rate gate shaped this run throughout. Upload chunks
+answered 429 `rate_limited` after every second PUT, each with a
+`retry_after_seconds` hint (39, then 14, then shorter). Opens,
+gallery polls, and the completion also met 429s between the
+chunks. Every retry honored the hint and recovered. Poll and
+upload loops must keep honoring the hint instead of retrying
+hot. The gate never blocked the pipeline itself: both stems
+completed byte exact and the completion scheduled on the first
+try after its wait.
+
+No admin call ran in this round, so the kill switch section from
+round 2 stands as written. The site was never paused and no
+limit was flipped.
+
+## Spend total
+
+One live voice session of 66.8 connected seconds costs about 8.4
+cents at 4.50 dollars per connected hour. The mint never
+connected, so it bills nothing. Upload bytes bill nothing. Two
+batch transcript passes over 5.5 seconds of audio cost fractions
+of a cent. Total live spend for this verification is about 9
+cents.
