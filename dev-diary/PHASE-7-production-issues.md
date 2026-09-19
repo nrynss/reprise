@@ -323,7 +323,7 @@ requires:   T7.11, T2.4
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/
-status:     not-started
+status:     in-progress:implement:t7.12-impl
 ```
 Round 1 scoped the gap: nothing in a real take calls the completion
 driver. The controller finishes both uploads in `endTake` and
