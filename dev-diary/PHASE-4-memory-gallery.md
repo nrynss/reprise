@@ -65,7 +65,7 @@ fixture-ok: yes
 size:       L · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/episode/[id]/+page.svelte,
             web/src/routes/threads/
-status:     in-progress:implement:t4.3-impl
+status:     in-progress:review-r1:t4.3-rev-r1@e0417e6f420147faf2db1f9535c4b09c9cd7c1e3
 ```
 **Mockup:** the `gallery`, `episode` and `threads` views ([`mockup`](mockup), `#/gallery`,
 `#/episode`, `#/threads`). The state lab carries the rendering, ready and draft card states.
