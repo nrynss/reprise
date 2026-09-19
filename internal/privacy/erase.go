@@ -189,6 +189,9 @@ func (s *Service) Erase(ctx context.Context, episodeID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if s.runner == nil {
+		return "", fmt.Errorf("privacy: erase %s: %w: no runner bound", episodeID, ErrInvalid)
+	}
 	ref, err := s.inventory(ctx, ep.owner, ep.id)
 	if err != nil {
 		return "", err
@@ -202,6 +205,45 @@ func (s *Service) Erase(ctx context.Context, episodeID string) (string, error) {
 		return "", fmt.Errorf("privacy: erase %s: %w", episodeID, err)
 	}
 	return jobID, nil
+}
+
+// ReErase restarts a stuck erasure from its recorded ref. A provider
+// outage fails an erasure with its local deletes done and its provider
+// deletes owed, and the episode row is already gone, so no fresh
+// inventory could rebuild the list. The job ledger still holds the ref,
+// which names every target and the owner it was scoped to. Ownership
+// checks against that recorded owner, because the rows are gone. A
+// complete erasure reports ErrComplete instead of starting new work.
+func (s *Service) ReErase(ctx context.Context, jobID string) (string, error) {
+	if jobID == "" {
+		return "", fmt.Errorf("privacy: re-erase: %w: empty job", ErrInvalid)
+	}
+	if s.runner == nil {
+		return "", fmt.Errorf("privacy: re-erase %s: %w: no runner bound", jobID, ErrInvalid)
+	}
+	rep, err := s.eraser.Inspect(ctx, s.runner, jobID)
+	if err != nil {
+		return "", fmt.Errorf("privacy: re-erase %s: %w", jobID, err)
+	}
+	if rep.Complete() {
+		return "", fmt.Errorf("privacy: re-erase %s: %w", jobID, ErrComplete)
+	}
+	targets, err := s.source(ctx, rep.Ref)
+	if err != nil {
+		return "", err
+	}
+	var decoded eraseRef
+	if err := json.Unmarshal([]byte(rep.Ref), &decoded); err != nil {
+		return "", fmt.Errorf("privacy: re-erase %s: %w", jobID, err)
+	}
+	if !s.owns.Owns(ctx, decoded.Owner) {
+		return "", fmt.Errorf("privacy: re-erase %s: %w", jobID, ErrNotOwner)
+	}
+	next, err := s.eraser.Start(ctx, s.runner, rep.Ref, targets)
+	if err != nil {
+		return "", fmt.Errorf("privacy: re-erase %s: %w", jobID, err)
+	}
+	return next, nil
 }
 
 // rowsTarget deletes the episode row. The delete cascades to every

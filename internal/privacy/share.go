@@ -94,12 +94,12 @@ func (s *Service) coverPath(episodeID string) string {
 func (s *Service) ServeCover(w http.ResponseWriter, r *http.Request, token string) {
 	share, err := s.LookupShare(r.Context(), token)
 	if err != nil {
-		writeRefusal(w, http.StatusNotFound, CodeNotFound, "that link opens nothing")
+		writeRefusal(w, http.StatusNotFound, CodeNotFound, "that episode opens nothing")
 		return
 	}
 	f, err := os.Open(s.coverPath(share.EpisodeID))
 	if errors.Is(err, os.ErrNotExist) {
-		writeRefusal(w, http.StatusNotFound, CodeNotFound, "that link opens nothing")
+		writeRefusal(w, http.StatusNotFound, CodeNotFound, "that episode opens nothing")
 		return
 	}
 	if err != nil {

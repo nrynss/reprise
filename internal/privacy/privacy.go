@@ -57,6 +57,9 @@ var (
 	// no longer holds. The row and the bytes disagree, so publish stops
 	// instead of opening a link with dead audio.
 	ErrMediaMissing = errors.New("privacy: render blob is missing")
+	// ErrComplete reports a re-erase for an erasure with nothing left
+	// owed. Every target already confirmed, so no new job starts.
+	ErrComplete = errors.New("privacy: erasure already complete")
 )
 
 // BlobStore deletes media blobs by id. The media store implements it.
@@ -96,17 +99,16 @@ type OwnerCheck interface {
 // Config configures a Service. DB is the shared diary handle. Media
 // deletes media blobs. CoverDir holds one cover file per episode named
 // for its episode id. Sessions ends provider sessions. Transcripts
-// removes provider batch copies. Runner carries the erasure jobs, and
-// its erase kind must be registered from Eraser before it opens, or a
-// restart leaves an erase interrupted. Owns checks episode ownership
-// per request.
+// removes provider batch copies. Owns checks episode ownership per
+// request. The runner arrives through BindRunner after the job runner
+// opens with the eraser kind registered, because the kind must exist
+// before the runner can resume an erase after a restart.
 type Config struct {
 	DB          *sqlite.DB
 	Media       BlobStore
 	CoverDir    string
 	Sessions    SessionClient
 	Transcripts TranscriptClient
-	Runner      *job.Runner
 	Owns        OwnerCheck
 }
 
@@ -144,9 +146,6 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Transcripts == nil {
 		return nil, fmt.Errorf("%w: transcript client must not be nil", ErrInvalid)
 	}
-	if cfg.Runner == nil {
-		return nil, fmt.Errorf("%w: job runner must not be nil", ErrInvalid)
-	}
 	if cfg.Owns == nil {
 		return nil, fmt.Errorf("%w: ownership check must not be nil", ErrInvalid)
 	}
@@ -156,7 +155,6 @@ func New(cfg Config) (*Service, error) {
 		coverDir:    cfg.CoverDir,
 		sessions:    cfg.Sessions,
 		transcripts: cfg.Transcripts,
-		runner:      cfg.Runner,
 		owns:        cfg.Owns,
 	}
 	eraser, err := erase.New(svc.source, erase.Config{})
@@ -165,6 +163,19 @@ func New(cfg Config) (*Service, error) {
 	}
 	svc.eraser = eraser
 	return svc, nil
+}
+
+// BindRunner carries the erasure jobs on r. Open the runner with the
+// Eraser kind registered, then bind it before any erase starts. A nil
+// runner reports ErrInvalid, and an erase with no runner bound reports
+// ErrInvalid too, because the work must land in the job ledger to
+// survive a restart.
+func (s *Service) BindRunner(r *job.Runner) error {
+	if r == nil {
+		return fmt.Errorf("privacy: bind runner: %w: runner must not be nil", ErrInvalid)
+	}
+	s.runner = r
+	return nil
 }
 
 // Eraser returns the erasure runner this service starts jobs on.
