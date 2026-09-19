@@ -20,7 +20,7 @@ requires:   T3.5
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/memory/
-status:     not-started
+status:     in-progress:implement:t4.1-impl
 ```
 Derive threads from `mentions` in SQL.
 
@@ -92,7 +92,7 @@ requires:   T1.4, T3.5
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/privacy/, web/src/routes/share/, web/src/routes/privacy/
-status:     not-started
+status:     in-progress:implement:t4.4-impl
 ```
 **Mockup:** the publish gate and the erase confirmation on `#/episode`, the public page the share
 link opens at `#/share`, and the `privacy` view ([`mockup`](mockup)).

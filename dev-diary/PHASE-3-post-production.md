@@ -172,7 +172,7 @@ requires:   T3.4, T0.4
 fixture-ok: yes
 size:       M · mid
 owns:       internal/analysis/
-status:     in-progress:land:t3.5-rem-r1@8998a3201944b1bb588420ea69d0423746afb2a3
+status:     done:96dec18d82486ac2eace2161e2dbbfb2f41a147d
 ```
 A `keel/job` of kind `analysis` on the **rendered** file.
 
@@ -237,6 +237,10 @@ T3.6 landed (Orchestrator-2) after round 2 APPROVE with zero residue against rou
 cover per episode with a deterministic episode-number fallback; paid seam reserves first with no
 auto-retry. Round 1 pinned the rerun-overwrite safety. The live image binding belongs in
 `internal/gemini` per the stack rule and arrives with the wiring.
+T3.5 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. The render
+analysis pass transcribes the render, shapes gateway chapters onto word starts, and stores
+mentions with rendered offsets. Round 1 floored every split chapter at ten seconds. That landing
+opens P4: T4.1 and T4.4 claimed.
 T3.4 landed (Orchestrator-2) after round 2 APPROVE with zero residue against round 1. The render
 runs stems plus decisions through mix, cold-open-first assembly, and two-pass loudness with
 content-hash reuse. Round 1 fixed the cold-open revert and the hash preimage. That landing opens
