@@ -83,17 +83,21 @@ size:       M · frontier
 owns:       dev-diary/probes/production.md
 status:     not-started
 ```
-Automated, from a workstation, never from the box. No person needed.
+Automated, from a workstation, never from the box. No person needed. First deploy has no
+catalog. This check does not wait on seed files.
 
-* A scripted guest records episode five from generated speech and the host's greeting names the
-  seeded callback, read from the session's `transcript.agent` events.
+* A scripted guest records the next episode from generated speech. With an empty catalog that
+  is episode one.
 * The episode renders, analyses and shows in the gallery.
 * A private media URL without the cookie returns 404, with `Cache-Control: private, no-store`.
 * The kill switch refuses a session.
 * Outbound calls from the box to AssemblyAI and Gemini succeed, and Cloudflare does not block them.
 * Connected seconds from the Sessions API match the ledger.
+* The host greeting that names a seeded callback is a later re-run, after the operator places
+  the catalog. It is not a first-deploy gate.
 
-**Done when:** Every check is recorded with its command and output.
+**Done when:** Every first-deploy check is recorded with its command and output. The seeded
+callback re-run is recorded once the catalog exists, not before.
 
 ---
 
@@ -186,4 +190,6 @@ PHASE-0 dirt sat through this landing and was left untouched.
 Nothing yet.
 
 ### Notes for the next developer
-Task numbers keep their order of creation, so T6.4b runs before T6.2 despite its number.
+First deploy is the current priority. The catalog starts empty. Seed files are dogfood after
+the box is up. Task numbers keep their order of creation, so T6.4b runs before T6.2 despite
+its number.

@@ -48,22 +48,24 @@ size:       M · frontier
 owns:       internal/seed/, data/season/
 status:     not-started
 ```
-One or two finished episodes sit in `data/season/` as the catalog. The operator places them by
-hand. This task does not record them and does not run the pipeline. A tiny fixture season pins
-the copy and the drop.
+The shipped catalog starts empty. This task builds copy, receipt, and drop. It does not wait on
+episodes. The operator places one or two finished episodes in `data/season/` after the box is
+up, as dogfood. A test fixture pins copy and drop. That fixture does not ship.
 
-Each new guest, and each new account with no season, gets their own copy of those rows. A
+Each new guest, and each new account with no season, gets a copy when the catalog has rows. A
 returning user never gets a second copy. Sign-up from a guest keeps the copies they already
 have, because the user id does not change. The owner does not receive a copy.
 
-**Build on:** `keel/sqlite` and `keel/mediastore`. The catalog ships inside the image.
+**Build on:** `keel/sqlite` and `keel/mediastore`. An empty catalog ships inside the image.
 
+* An empty catalog copies nothing and writes no receipt. After the operator adds files, a user
+  with no receipt and no season gets the copy on the next list.
 * Catalog media lives once. User copies are diary rows (`seeded = true`) plus mentions and the
-  planted callback, so T4.2 still has a stored row to open on.
+  planted callback, so T4.2 still has a stored row to open on once files exist.
 * The catalog belongs to one reserved user this package inserts, with kind `seed`, never a
   guest. T5.4 already skips non-guest owners.
-* Copy runs once per user, on the first request that lists their season, never inside session
-  mint. A receipt in this package records the offer. Dropping the copies does not clear the
+* Copy runs on the first request that lists their season, never inside session mint. A receipt
+  is written only when at least one row is copied. Dropping the copies does not clear the
   receipt, so the seed does not come back.
 * The catalog file names each stable key. Copies set `seeded = 1`. Do not add columns to the
   diary schema. Raise a contract change if an episode column is required.
@@ -75,12 +77,12 @@ have, because the user id does not change. The owner does not receive a copy.
   stops new copies. Existing user copies stay until the user drops them or the guest sweep
   takes them.
 
-**Done when:** A new guest sees the catalog count as their own episodes, with ids that differ
-from a second guest's copies. Dropping a seeded episode removes it from that user and leaves
-the catalog and the other guest intact, including catalog audio. A later list for the same
-user does not re-import. A new empty account gets a copy. The owner does not. T4.2's callback
-still resolves on a copied mention. Removing the catalog leaves existing copies and gives a
-new guest an empty season.
+**Done when:** With an empty catalog, a new guest sees no seeded episodes and can record.
+With a fixture catalog, a new guest sees those rows as their own, with ids that differ from a
+second guest's copies. Dropping a seeded episode removes it from that user and leaves the
+catalog and the other guest intact, including catalog audio. A later list for the same user
+does not re-import. A new empty account gets a copy when the catalog has rows. The owner does
+not. T4.2's callback still resolves on a copied mention once files exist.
 
 ---
 
@@ -128,12 +130,16 @@ status:     done:53922ffd6f175ef6a5c0d6ccdea880f96d8374ba
 **Build on:** `keel/erase` for the fan-out and `keel/job` for the kind that runs it. Reprise names
 the targets, which are the same ones T4.4 registers.
 
-Guest data expires after the retention the owner chooses, and expiry deletes rather than hides.
+Guest data expires after 90 days, and expiry deletes rather than hides. The sweep does not wait
+on a catalog. An empty season, or a guest with only their own recordings, is enough.
 
 * The sweep runs as a job kind, so it resumes and retries like every other durable delete.
 * A guest is expired by its own last-seen time, read at sweep time rather than stamped on arrival.
 * A guest whose episode the owner has kept is not swept, because the owner's copy is the owner's.
-* The retention window comes from settings, so it changes without a deploy.
+* The retention window comes from settings, so it changes without a deploy. Ninety days is the
+  current value.
+* Seeded copies, when a catalog exists later, belong to the guest and sweep with them. The
+  reserved seed user is not a guest, so the catalog stays.
 
 **Done when:** Both sides are pinned, because a sweep that deletes everything satisfies the deletion
 alone. **Deletes:** an expired guest's rows and media are gone, and its provider copies return not
@@ -155,18 +161,19 @@ status:     not-started
 
 **Build on:** Chaaya's `AudioPlayer`, whose first gesture unlocks playback.
 
-The landing screen explains nothing it can show instead. It plays thirty seconds of the latest
-seeded episode, then offers one button to record the next one.
+The landing screen explains nothing it can show instead. With no seeded copies it offers one
+button to record. With copies it plays thirty seconds of the latest seeded episode, then offers
+one button to record the next one.
 
-**Done when:** A new guest reaches a live session in two clicks. Playwright confirms the seeded
-copies and the button, and WebKit plays after the first gesture.
+**Done when:** A new guest with an empty catalog reaches a live session in two clicks. Playwright
+confirms the button with no seed, and WebKit plays after the first gesture when copies exist.
 
 ---
 
 ## Exit criteria
 
 - [ ] An export package carries audio, video, captions, cover and a chapter description.
-- [ ] A fresh container lands a guest on their own copy of the seeded catalog.
+- [ ] A fresh container lands a guest on an empty season, or on their copy if a catalog exists.
 - [ ] The kill switch, guest cap and spend ceiling each refuse correctly, and an honest guest still
       records.
 - [ ] Expired guest data is gone, and unexpired guest data survives the same sweep.
@@ -176,8 +183,9 @@ copies and the button, and WebKit plays after the first gesture.
 ## Handoff log
 
 ### What exists now (Orchestrator-2)
-T5.2 is unblocked and not started. Sharing is a per-user copy of a one or two episode
-catalog the operator places in `data/season/`. User drop is that user's rows only.
+T5.2 is unblocked and not started. The shipped catalog starts empty. Copy, receipt, and drop
+do not wait on episodes. The operator places catalog files after first deploy, as dogfood.
+T5.4 already landed. The sweep does not wait on a catalog. Retention is 90 days.
 T5.3 landed after round 1 APPROVE with zero in-scope findings. Guest caps, kill switch, and the
 Keel-backed spend view are on main with both sides pinned. The owner login stays an explicit
 stub seam (`StubOwnerAuth` denies all) until the open login decision lands. Opened T1.7 below
@@ -195,8 +203,7 @@ the error docs.
 Nothing yet.
 
 ### Notes for the next developer
-The seeded catalog is one or two hand-placed episodes, copied per user, not one shared
-season and not four pipeline fixtures. User drop removes that user's rows only. Catalog
-audio stays. Whose voice those files use is operator content in `data/season/`, not a
-blocker. Copy on first season list, never on session mint. A receipt prevents re-import
-after drop. The owner does not receive a copy.
+The shipped catalog starts empty. First deploy does not wait on seed files. Copy writes a
+receipt only when rows are copied, so a later catalog still reaches users with no season.
+User drop removes that user's rows only. Catalog audio stays. The owner does not receive a
+copy. T5.4 sweeps guests with or without seeded copies. Retention is 90 days.

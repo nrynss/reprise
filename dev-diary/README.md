@@ -6,7 +6,10 @@ How work runs lives only in [`../AGENTS.md`](../AGENTS.md). This file holds fact
 - [`project.md`](project.md): the build, and every departure from the product spec.
 - [`libraries.md`](libraries.md): what Keel and Chaaya carry, and what Reprise builds.
 
-**Current status (Orchestrator-2):** Built on Keel `v0.3.0` and Chaaya `0.2.0`. Done: P0 (closed, T0.8 probe-complete), P1 in full (incl. T1.7 wiring), P2 (T2.1-T2.8; T2.9 flip in review), P3 (T3.1-T3.6 plus T3.3a), P4 in full, plus T5.3, T6.1. In review: T2.9-r2, T2.10-r1, T5.1-r1, T5.4-r1. T5.2 is unblocked and not started (per-user copy of a one or two episode catalog). Still queued: T5.5, T6.1b, T6.2, T6.3 (chains), T6.4b (needs a person). clips.json has no open task.
+**Current status:** Built on Keel `v0.3.0` and Chaaya `0.2.0`. Priority is first deploy. The
+catalog starts empty. Seed files are dogfood after the box is up. T5.2 and T5.4 do not wait on
+them. T5.2 is not started. T5.4 is done (90 day sweep). T5.5 welcome must work with no seed.
+T6.1 kit is on main. T6.1b first-deploy checks do not wait on a seeded greeting.
 
 The libraries carry the general work. Chaaya `0.2.0` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered

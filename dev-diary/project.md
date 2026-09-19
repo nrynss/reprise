@@ -156,11 +156,15 @@ a task.
 
 ### Seeded season is a per-user copy of a small catalog
 
-`product.md` describes four finished episodes and a visitor recording episode five. The catalog is
-one or two episodes the operator places by hand in `data/season/`. Each new guest and each new
-empty account receives a copy of those rows. The owner does not. A returning user does not get a
-second copy. User delete drops that user's copy only. Catalog audio stays. Whose voice those files
-use is operator content, not a task blocker.
+`product.md` describes four finished episodes and a visitor recording episode five. The shipped
+catalog starts empty. Copy, receipt, and drop do not wait on episodes. The operator places one
+or two finished episodes in `data/season/` after first deploy, as dogfood. Each new guest and
+each new empty account then receives a copy of those rows. The owner does not. A returning user
+does not get a second copy. User delete drops that user's copy only. Catalog audio stays.
+
+### Guest retention is 90 days
+
+T5.4 landed with a 90 day window from settings. The sweep does not wait on a catalog.
 
 ## Open decisions
 
@@ -168,5 +172,4 @@ Each belongs to the owner. The task that needs it stays `blocked` until it is ma
 
 | Decision | Needed by |
 |---|---|
-| How long guest data lives | T5.4 |
 | Which owner login, if any, beyond guest mode | T1.4 |
