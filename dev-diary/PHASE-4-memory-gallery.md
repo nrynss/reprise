@@ -64,8 +64,9 @@ requires:   T4.1, T1.3
 fixture-ok: yes
 size:       L · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/episode/[id]/+page.svelte,
+owns:       web/src/routes/+page.svelte, web/src/routes/episode/[id]/+page.svelte,
             web/src/routes/threads/
-status:     in-progress:review-r1:t4.3-rev-r1@e0417e6f420147faf2db1f9535c4b09c9cd7c1e3
+status:     in-progress:land:t4.3-impl@e0417e6f420147faf2db1f9535c4b09c9cd7c1e3
 ```
 **Mockup:** the `gallery`, `episode` and `threads` views ([`mockup`](mockup), `#/gallery`,
 `#/episode`, `#/threads`). The state lab carries the rendering, ready and draft card states.
@@ -130,7 +131,7 @@ requires:   T0.1, T4.3
 fixture-ok: yes
 size:       XS · light
 owns:       web/tests/shell.spec.ts
-status:     in-progress:land:t4.5-impl@d747703724540048a7e96c3da44c9004f1d1aa95
+status:     done:0dee375cebc2380774eba5add88d37e3e8fca5ed
 ```
 Opened from T4.3 round 1's out-of-scope row. The gallery heads the season view, so the shell
 spec's root-h1 `Reprise` assertion fails. Branding is intact (`appName` still `Reprise`, titles
