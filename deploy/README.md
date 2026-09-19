@@ -74,10 +74,23 @@ Copy this directory to the box so the scripts run where Docker lives:
 
 ## Getting the image to the box
 
-The run script supports two flows and prefers neither. Pick one per deploy.
+Publishing is a button. `.github/workflows/image.yml` builds, tests, and
+pushes to GHCR. A successful publish starts `.github/workflows/deploy.yml`,
+which loads the image over SSH and runs `redeploy.sh` on the box. The box
+never logs into the registry.
 
-**Build on the box.** Clone the repository on the box and build there. This
-needs nothing but Docker and the sources.
+```
+gh workflow run image.yml
+gh workflow run image.yml -f latest=true
+```
+
+The package is private while this repository is private. The runner pulls
+with `GITHUB_TOKEN` and pipes the image to the box. No registry credential
+lives on the host.
+
+Manual fallbacks still work.
+
+**Build on the box.** Clone the repository on the box and build there.
 
 ```
 docker build --build-arg VERSION=$(git rev-parse HEAD) -t reprise:local .
@@ -85,22 +98,16 @@ IMAGE=reprise:local ./deploy/run.sh
 ```
 
 **Ship over SSH.** Build on a workstation, save the image, and load it on
-the box. The run script uses the loaded tag as is and pulls nothing.
+the box.
 
 ```
 docker build --build-arg VERSION=$(git rev-parse HEAD) -t reprise:local .
 docker save reprise:local | ssh root@<box> 'docker load'
-```
-
-Then on the box:
-
-```
 IMAGE=reprise:local ./deploy/run.sh
 ```
 
-A value with a slash is treated as a registry reference and pulled. A plain
-tag is used as a local image. That rule is what lets both flows share one
-script with no mode flag.
+A value with a slash is pulled only when that image is not already local.
+A plain tag is used as a local image.
 
 ## Deploy and redeploy
 

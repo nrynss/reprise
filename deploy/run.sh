@@ -155,11 +155,16 @@ DOCKER_ARGS=(
 )
 
 echo "Starting ${NAME} from ${IMAGE}..."
-# A registry reference moves, so pull it and let a registry failure surface
-# here. A local tag is used as is, which is what makes the box build and the
-# SSH shipped image both work with no flag day.
+# A registry reference is pulled only when it is not already on the box.
+# The GitHub deploy workflow loads the image over SSH, so a pull would
+# fail here. A later docker login on the box still works, because a
+# missing image falls through to pull.
 if [[ "${IMAGE}" == *"/"* ]]; then
-  docker pull "${IMAGE}"
+  if docker image inspect "${IMAGE}" >/dev/null 2>&1; then
+    echo "Using local image ${IMAGE}."
+  else
+    docker pull "${IMAGE}"
+  fi
 fi
 if docker inspect "${NAME}" >/dev/null 2>&1; then
   echo "Replacing existing container ${NAME}..."
