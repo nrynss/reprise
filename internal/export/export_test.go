@@ -270,8 +270,8 @@ func TestVideoIs1080PWithAudio(t *testing.T) {
 	if info.AudioCodec != "aac" {
 		t.Fatalf("audio codec is %q, want aac", info.AudioCodec)
 	}
-	if gap := info.DurationMs - renderMs; gap < -150 || gap > 150 {
-		t.Fatalf("video lasts %d ms, render lasts %d ms, gap %d past 150", info.DurationMs, renderMs, gap)
+	if gap := info.DurationMs - renderMs; gap < -50 || gap > 50 {
+		t.Fatalf("video lasts %d ms, render lasts %d ms, gap %d past 50", info.DurationMs, renderMs, gap)
 	}
 }
 
