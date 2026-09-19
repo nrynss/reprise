@@ -20,7 +20,7 @@ requires:   T3.5
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/memory/
-status:     in-progress:remediate-r1:t4.1-rem-r1
+status:     in-progress:review-r2:t4.1-rev-r2@e4eb7fae38344f2ad03618b654a551087202561c
 ```
 Derive threads from `mentions` in SQL.
 
