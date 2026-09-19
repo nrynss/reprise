@@ -210,7 +210,7 @@ requires:   T7.6
 fixture-ok: no
 size:       XS · light
 owns:       dev-diary/probes/production.md
-status:     in-progress:review-r1:t7.7-rev-r1@bced463181f8e2389f1e03297d5c4b95002bd414
+status:     in-progress:remediate-r1:t7.7-rem-r1
 ```
 Runs once, after T7.6 deploys. A scripted guest records from
 generated speech, posts stem completion, and follows the episode to
