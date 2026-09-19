@@ -48,6 +48,78 @@ describe('draft controller', () => {
 		expect(controller.removedSpans()).toHaveLength(2);
 	});
 
+	it('reverts the cold open and writes its decision row', () => {
+		const { controller } = openDraft();
+		const quote = controller.snapshot.coldOpen.quote;
+		controller.revertColdOpen();
+		const snap = controller.snapshot;
+		expect(snap.coldOpenReverted).toBe(true);
+		expect(snap.coldOpen.quote).toBe(quote);
+		expect(snap.decisions).toHaveLength(1);
+		expect(snap.decisions[0]).toMatchObject({
+			id: 'dec-cold-open',
+			proposalId: 'prop-cold-open',
+			decision: 'reverted'
+		});
+		controller.revertColdOpen();
+		expect(controller.snapshot.decisions).toHaveLength(1);
+	});
+
+	it('reverts the title to the plain fallback', () => {
+		const { controller } = openDraft();
+		const proposed = controller.snapshot.proposedTitle;
+		expect(proposed).not.toBe('');
+		controller.revertTitle();
+		const snap = controller.snapshot;
+		expect(snap.titleReverted).toBe(true);
+		expect(snap.title).toBe('Episode draft-1');
+		expect(snap.decisions).toHaveLength(1);
+		expect(snap.decisions[0]).toMatchObject({
+			id: 'dec-title',
+			proposalId: 'prop-title',
+			decision: 'reverted',
+			reason: proposed
+		});
+		controller.revertTitle();
+		expect(controller.snapshot.decisions).toHaveLength(1);
+	});
+
+	it('reverts the show notes to empty', () => {
+		const { controller } = openDraft();
+		expect(controller.snapshot.notes).not.toBe('');
+		controller.revertNotes();
+		const snap = controller.snapshot;
+		expect(snap.notesReverted).toBe(true);
+		expect(snap.notes).toBe('');
+		expect(snap.decisions).toHaveLength(1);
+		expect(snap.decisions[0]).toMatchObject({
+			id: 'dec-notes',
+			proposalId: 'prop-notes',
+			decision: 'reverted'
+		});
+		controller.revertNotes();
+		expect(controller.snapshot.decisions).toHaveLength(1);
+	});
+
+	it('reverts the callback and clears its planted row', () => {
+		const { controller } = openDraft();
+		expect(controller.snapshot.callback).not.toBe('');
+		controller.revertCallback();
+		const snap = controller.snapshot;
+		expect(snap.callbackReverted).toBe(true);
+		expect(snap.callback).toBe('');
+		expect(snap.callbackQuote).toBe('');
+		expect(snap.callbacksCleared).toBe(true);
+		expect(snap.decisions).toHaveLength(1);
+		expect(snap.decisions[0]).toMatchObject({
+			id: 'dec-callback',
+			proposalId: 'prop-callback',
+			decision: 'reverted'
+		});
+		controller.revertCallback();
+		expect(controller.snapshot.decisions).toHaveLength(1);
+	});
+
 	it('leaves every cut alone on an unknown revert', () => {
 		const { controller } = openDraft();
 		controller.revertCut('cut-9');

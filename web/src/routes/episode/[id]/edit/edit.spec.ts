@@ -18,6 +18,32 @@ test('reverting a cut writes its decision row', async ({ page }) => {
 	await expect(decisions.getByText('Reverted: False start at the top of the answer. (prop-cut-1)')).toBeVisible();
 });
 
+test('reverting each non-cut proposal persists its decision row', async ({ page }) => {
+	await page.goto(DRAFT);
+	await expect(page.getByRole('heading', { name: 'The only place nobody needs anything' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Revert cold open proposal' }).click();
+	await expect(page.getByText('Cold open reverted. The episode starts at the top.')).toBeVisible();
+
+	await page.getByRole('button', { name: 'Revert title proposal' }).click();
+	await expect(page.getByRole('heading', { name: 'Episode draft-1' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Revert show notes proposal' }).click();
+	await expect(page.getByText('Show notes reverted. Nothing stands in their place.')).toBeVisible();
+
+	const callback = page.getByRole('button', { name: 'Revert callback proposal' });
+	await callback.focus();
+	await expect(callback).toBeFocused();
+	await page.keyboard.press('Enter');
+	await expect(page.getByText('Callback reverted and cleared from the next opening.')).toBeVisible();
+
+	const decisions = page.getByRole('region', { name: 'Decisions' });
+	await expect(decisions.getByText('(prop-cold-open)')).toBeVisible();
+	await expect(decisions.getByText('(prop-title)')).toBeVisible();
+	await expect(decisions.getByText('(prop-notes)')).toBeVisible();
+	await expect(decisions.getByText('(prop-callback)')).toBeVisible();
+});
+
 test('a keyboard-only run completes the edit and marks done', async ({ page }) => {
 	await page.goto(DRAFT);
 	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');

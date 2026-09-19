@@ -154,14 +154,58 @@
 		<aside aria-label="Proposals">
 			<section aria-label="Proposed cold open">
 				<h2>Proposed cold open</h2>
-				<blockquote>{snap.coldOpen.quote}</blockquote>
-				<p>{snap.coldOpen.reason}</p>
-				<button
-					aria-label="Preview the cold open"
-					onclick={() => void controller?.previewColdOpen()}
-				>
-					Preview the cold open
-				</button>
+				{#if snap.coldOpenReverted}
+					<p><s>{snap.coldOpen.quote}</s></p>
+					<p>{snap.coldOpen.reason}</p>
+					<p>Cold open reverted. The episode starts at the top.</p>
+				{:else}
+					<blockquote>{snap.coldOpen.quote}</blockquote>
+					<p>{snap.coldOpen.reason}</p>
+					<button
+						aria-label="Preview the cold open"
+						onclick={() => void controller?.previewColdOpen()}
+					>
+						Preview the cold open
+					</button>
+					<button
+						aria-label="Revert cold open proposal"
+						onclick={() => controller?.revertColdOpen()}
+					>
+						Revert the cold open
+					</button>
+				{/if}
+			</section>
+
+			<section aria-label="Proposed title">
+				<h2>Proposed title</h2>
+				{#if snap.titleReverted}
+					<p><s>{snap.proposedTitle}</s></p>
+					<p>Title reverted. The heading shows the plain episode number.</p>
+				{:else}
+					<p>{snap.proposedTitle}</p>
+					<button
+						aria-label="Revert title proposal"
+						onclick={() => controller?.revertTitle()}
+					>
+						Revert the title
+					</button>
+				{/if}
+			</section>
+
+			<section aria-label="Proposed show notes">
+				<h2>Proposed show notes</h2>
+				{#if snap.notesReverted}
+					<p><s>{snap.proposedNotes}</s></p>
+					<p>Show notes reverted. Nothing stands in their place.</p>
+				{:else}
+					<p>{snap.notes}</p>
+					<button
+						aria-label="Revert show notes proposal"
+						onclick={() => controller?.revertNotes()}
+					>
+						Revert the show notes
+					</button>
+				{/if}
 			</section>
 
 			<section aria-label="Proposed cuts, applied by default">
@@ -188,14 +232,25 @@
 
 			<section aria-label="Planted for next time">
 				<h2>Planted for next time</h2>
-				<p>{snap.callback}</p>
-				<p>{snap.callbackQuote}</p>
+				{#if snap.callbackReverted}
+					<p><s>{snap.proposedCallback}</s></p>
+					<p>Callback reverted and cleared from the next opening.</p>
+				{:else}
+					<p>{snap.callback}</p>
+					<p>{snap.callbackQuote}</p>
+					<button
+						aria-label="Revert callback proposal"
+						onclick={() => controller?.revertCallback()}
+					>
+						Revert the callback
+					</button>
+				{/if}
 			</section>
 
 			<section aria-label="Decisions">
 				<h2>Decisions</h2>
 				{#if snap.decisions.length === 0}
-					<p>No decisions yet. Reverting a cut writes its row here.</p>
+					<p>No decisions yet. Reverting a proposal writes its row here.</p>
 				{:else}
 					<ol>
 						{#each snap.decisions as row (row.id)}

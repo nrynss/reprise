@@ -62,10 +62,18 @@ export interface DraftSnapshot {
 	peaks: Peaks | null;
 	regions: WaveformRegion[];
 	coldOpen: ColdOpen;
+	coldOpenReverted: boolean;
+	proposedTitle: string;
+	titleReverted: boolean;
+	proposedNotes: string;
+	notesReverted: boolean;
 	cutCards: CutCard[];
 	callback: string;
 	callbackQuote: string;
+	proposedCallback: string;
 	notes: string;
+	callbackReverted: boolean;
+	callbacksCleared: boolean;
 	appliedCount: number;
 	decisions: DecisionRow[];
 	renderStage: RenderStage;
@@ -93,9 +101,17 @@ export function emptyDraft(episodeId: string): DraftSnapshot {
 		peaks: null,
 		regions: [],
 		coldOpen: { start: 0, end: 0, reason: '', quote: '' },
+		coldOpenReverted: false,
+		proposedTitle: '',
+		titleReverted: false,
+		proposedNotes: '',
+		notesReverted: false,
 		cutCards: [],
 		callback: '',
 		callbackQuote: '',
+		proposedCallback: '',
+		callbackReverted: false,
+		callbacksCleared: false,
 		notes: '',
 		appliedCount: 0,
 		decisions: [],
@@ -278,8 +294,19 @@ export class DraftController {
 				reason: args.coldReason,
 				quote: quoteRange(args.words, args.coldStart, args.coldEnd)
 			},
+			coldOpenReverted: false,
+			proposedTitle: args.title,
+			titleReverted: false,
+			proposedNotes: args.notes,
+			notesReverted: false,
 			callback: args.callback,
 			callbackQuote: args.callbackQuote,
+			proposedCallback: args.callback,
+			callbackReverted: false,
+			callbacksCleared: false,
+			decisions: [],
+			renderStage: 'idle',
+			renderDetail: '',
 			notes: args.notes
 		};
 		this.refreshCuts();
@@ -353,13 +380,115 @@ export class DraftController {
 		};
 		this.refreshCuts();
 		this.emit();
+		this.postDecision(row.proposalId);
+	}
+
+	// Post one decision row to the decisions endpoint. The local row above
+	// is the record, so a refused POST changes nothing on screen.
+	private postDecision(proposalId: string): void {
 		void fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}/decisions`, {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ proposal_id: row.proposalId, decision: 'reverted' })
+			body: JSON.stringify({ proposal_id: proposalId, decision: 'reverted' })
 		}).catch(() => {
 			// The stub endpoint refuses. The local row above is the record.
 		});
+	}
+
+	// Write one decision row for a non-cut revert. A second revert of the
+	// same kind changes nothing, so the row stays the single record.
+	private recordNonCutRevert(proposalId: string, rowId: string, reason: string): boolean {
+		if (this.snap.decisions.some((row) => row.proposalId === proposalId)) {
+			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.emit();
+			return false;
+		}
+		const row: DecisionRow = {
+			id: rowId,
+			proposalId,
+			cutId: '',
+			decision: 'reverted',
+			reason
+		};
+		this.snap = { ...this.snap, decisions: [...this.snap.decisions, row] };
+		this.postDecision(row.proposalId);
+		return true;
+	}
+
+	// Revert the cold open with one action. The range stays on screen
+	// struck through, while the flag tells the render to start at the top.
+	revertColdOpen(): void {
+		if (!this.editor) return;
+		if (this.snap.coldOpenReverted) {
+			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.emit();
+			return;
+		}
+		const reason = this.snap.coldOpen.reason || 'Proposed cold open.';
+		if (!this.recordNonCutRevert('prop-cold-open', 'dec-cold-open', reason)) return;
+		this.snap = {
+			...this.snap,
+			coldOpenReverted: true,
+			notice: `Reverted the cold open. The episode starts at the top.`
+		};
+		this.emit();
+	}
+
+	// Revert the title with one action. The heading falls back to the
+	// plain episode number, and the proposal stays on screen struck through.
+	revertTitle(): void {
+		if (!this.editor) return;
+		if (this.snap.titleReverted) {
+			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.emit();
+			return;
+		}
+		const reason = this.snap.proposedTitle || 'Proposed title.';
+		if (!this.recordNonCutRevert('prop-title', 'dec-title', reason)) return;
+		this.snap = {
+			...this.snap,
+			title: `Episode ${this.episodeId}`,
+			titleReverted: true,
+			notice: `Reverted the title.`
+		};
+		this.emit();
+	}
+
+	// Revert the show notes with one action. Notes fall back to empty,
+	// and the proposal stays on screen struck through.
+	revertNotes(): void {
+		if (!this.editor) return;
+		if (this.snap.notesReverted) {
+			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.emit();
+			return;
+		}
+		const reason = this.snap.proposedNotes || 'Proposed show notes.';
+		if (!this.recordNonCutRevert('prop-notes', 'dec-notes', reason)) return;
+		this.snap = { ...this.snap, notes: '', notesReverted: true, notice: `Reverted the show notes.` };
+		this.emit();
+	}
+
+	// Revert the callback with one action. The proposal state flips and the
+	// planted row clears with it, so the next opening cites nothing new.
+	revertCallback(): void {
+		if (!this.editor) return;
+		if (this.snap.callbackReverted) {
+			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.emit();
+			return;
+		}
+		const reason = this.snap.proposedCallback || 'Planted callback.';
+		if (!this.recordNonCutRevert('prop-callback', 'dec-callback', reason)) return;
+		this.snap = {
+			...this.snap,
+			callback: '',
+			callbackQuote: '',
+			callbackReverted: true,
+			callbacksCleared: true,
+			notice: `Reverted the callback and cleared it from the next opening.`
+		};
+		this.emit();
 	}
 
 	// Seek playback to one word start. The position state moves at once so
