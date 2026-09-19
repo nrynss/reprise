@@ -20,6 +20,13 @@ import {
 	rehydrateServerFromBrowser,
 	type MockScript
 } from '$lib/voice/mock';
+import {
+	completionPair,
+	createCompletionDriver,
+	type CompletionDriver,
+	type CompletionView,
+	type StemPair
+} from '../../routes/record/stems-complete';
 import { drainHostBlock, drainUserBlock, type HostMark } from '$lib/voice/take';
 import { makeTestTone } from '$lib/voice/pcm';
 import { parseSessionStart, socketUrl, type SessionStart } from '$lib/voice/session';
@@ -66,6 +73,9 @@ export interface MockVoiceHarness {
 	uploadState(): { user: string; host: string; userError: string; hostError: string };
 	finishUploads(): Promise<{ userBytes: number; hostBytes: number }>;
 	finishTake(): Promise<void>;
+	retryCompletion(): Promise<void>;
+	completionState(): string;
+	completionText(): string;
 	capAdvance(ms: number): void;
 	capJump(ms: number): void;
 	capWake(): void;
@@ -197,6 +207,10 @@ export class RecordController {
 	private capClock: HarnessClock | null = null;
 	private capWarning = false;
 	private capText = '';
+	private completionDriver: CompletionDriver | null = null;
+	private completion: CompletionView | null = null;
+	private pendingCompletion: { episode: string; pair: StemPair; userBytes: number; hostBytes: number } | null =
+		null;
 
 	constructor(options: {
 		mock: boolean;
@@ -325,12 +339,66 @@ export class RecordController {
 			this.guard?.close();
 			const userBytes = this.userUpload?.receipt?.sizeBytes ?? 0;
 			const hostBytes = this.hostUpload?.receipt?.sizeBytes ?? 0;
-			const suffix = this.mockMode ? '&mock=1' : '';
-			window.location.assign(
-				`/processing?episode=${encodeURIComponent(session.episode_id)}&uploads=done&userBytes=${userBytes}&hostBytes=${hostBytes}${suffix}`
-			);
+			const moved = await this.postStoredCompletion(session.episode_id, userBytes, hostBytes);
+			if (!moved) return;
+			this.goProcessing(session.episode_id, userBytes, hostBytes);
 		})();
 		await this.ending;
+	}
+
+	/** Retry the stored draft move after a loud refusal. The stored stems survive it, so a retry reposts the link and never uploads twice. */
+	async retryCompletion(): Promise<void> {
+		if (this.pendingCompletion === null) return;
+		const pending = this.pendingCompletion;
+		await this.ensureCompletionDriver().retry();
+		if (this.completion?.status === 'failed') return;
+		this.pendingCompletion = null;
+		this.goProcessing(pending.episode, pending.userBytes, pending.hostBytes);
+	}
+
+	// postStoredCompletion posts the finished stem pair for one episode. It
+	// returns true when the draft move lands. A refusal keeps the pending
+	// pair for the retry and returns false, so the take never navigates
+	// away silent. Missing ids or a missing rate fail the same loud way.
+	private async postStoredCompletion(
+		episode: string,
+		userBytes: number,
+		hostBytes: number
+	): Promise<boolean> {
+		const pair = completionPair(
+			this.userUpload?.id ?? '',
+			this.hostUpload?.id ?? '',
+			Math.round(this.context?.sampleRate ?? 0)
+		);
+		this.pendingCompletion = { episode, pair, userBytes, hostBytes };
+		await this.ensureCompletionDriver().run(episode, pair);
+		if (this.completion?.status === 'failed') return false;
+		this.pendingCompletion = null;
+		return true;
+	}
+
+	// ensureCompletionDriver builds the draft move driver around the take
+	// notice. Every outcome lands in words on the page, so a failure reads
+	// as a refusal with a retry instead of a silent stall.
+	private ensureCompletionDriver(): CompletionDriver {
+		if (this.completionDriver === null) {
+			this.completionDriver = createCompletionDriver((view) => {
+				this.completion = view;
+				this.notice = view.text;
+				this.emit();
+			});
+		}
+		return this.completionDriver;
+	}
+
+	// goProcessing hands the finished take to the processing screen. The
+	// handoff names the episode and the durable totals, plus the mock flag
+	// under the harness so the doubles stay in charge there.
+	private goProcessing(episode: string, userBytes: number, hostBytes: number): void {
+		const suffix = this.mockMode ? '&mock=1' : '';
+		window.location.assign(
+			`/processing?episode=${encodeURIComponent(episode)}&uploads=done&userBytes=${userBytes}&hostBytes=${hostBytes}${suffix}`
+		);
 	}
 
 	harness(): MockVoiceHarness | null {
@@ -361,6 +429,9 @@ export class RecordController {
 			}),
 			finishUploads: () => this.finishUploads(),
 			finishTake: () => this.endTake(),
+			retryCompletion: () => this.retryCompletion(),
+			completionState: () => this.completion?.status ?? 'none',
+			completionText: () => this.completion?.text ?? '',
 			capAdvance: (ms: number) => {
 				this.capClock?.advance(ms);
 			},
