@@ -125,7 +125,7 @@ requires:   T3.2, T3.3
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/episode/[id]/edit/, web/src/lib/editor/
-status:     in-progress:implement:t3.3a-impl
+status:     in-progress:review-r1:t3.3a-rev-r1@5e9cc9584c57273b28d667864de6e650e286e2e5
 ```
 Opened from T3.3 round 1's observation. The editor reverts cuts only: no control reverts a cold
 open, title, show notes, or callback proposal. T3.2's handoff assigns the callback revert here:
