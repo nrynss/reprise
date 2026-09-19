@@ -92,7 +92,7 @@ requires:   T3.2, T1.3
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/episode/[id]/edit/, web/src/lib/editor/
-status:     not-started
+status:     in-progress:implement:t3.3-impl
 ```
 **Mockup:** the `editor` view ([`mockup`](mockup), `#/editor`), including the revert affordance
 and the cold-open preview.
@@ -125,7 +125,7 @@ requires:   T3.2
 fixture-ok: yes
 size:       M · mid
 owns:       internal/render/
-status:     not-started
+status:     in-progress:implement:t3.4-impl
 ```
 **Build on:** `keel/edl` for the cut list, the crossfades and the two-pass loudness, `keel/ffmpeg`
 underneath it, and the `render` job kind. This task owns the edit model and the job, not the
@@ -173,7 +173,7 @@ requires:   T3.2, T0.3
 fixture-ok: yes
 size:       S · mid
 owns:       internal/cover/
-status:     not-started
+status:     in-progress:implement:t3.6-impl
 ```
 One square image per episode from the title and show notes. No faces and no text in the image. The
 app sets the title, not the model. If generation fails, a plain generated cover from the episode
