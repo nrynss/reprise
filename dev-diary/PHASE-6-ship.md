@@ -117,7 +117,7 @@ requires:   T6.1, T5.5
 fixture-ok: no
 size:       M · frontier
 owns:       dev-diary/probes/production.md
-status:     in-progress:review-r2:t6.1b-rev-r2@4ca528d4ecc6693970baf0516b7d301d74c8cd09
+status:     done:c8f5ff69cb99a99d3ba5474df901736714e752d3
 ```
 Automated, from a workstation, never from the box. No person needed. First deploy has no
 catalog. This check does not wait on seed files.
@@ -222,9 +222,13 @@ certificate verifies. DNS is a proxied A record. The deploy chain runs end to en
 a button, a successful publish loads the image over SSH and redeploys, and a failed deploy now
 fails the workflow.
 
-The running build is `3ab625a`. `48ac233` and the commits between it change only the deploy
-scripts and these notes, none of which is in the image, so the box is current in substance.
-Publish again when the next code change lands.
+The running build is `5d33a24`. T6.1b round 1 verification is recorded in
+`dev-diary/probes/production.md`: the guest mint and live call pass, and
+six gaps carry to phase P7 (stubbed episode routes, unwired settle,
+uploader owner mismatch, admin stub, no Gemini path, bare media
+refusals). Each mint holds about 2.25 dollars until the settle lands.
+T7.5 re-verifies after P7 deploys. The seeded greeting re-run waits on
+the operator catalog.
 
 No owner items remain on this task. The backup destination was the last one and it is closed as
 deferred, documented in `deploy/README.md` under a heading that says nothing is backing up today.
