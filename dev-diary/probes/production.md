@@ -419,6 +419,22 @@ The job stream route is wired. A GET on
 answers HTTP 200 and holds the stream open. It timed out at 8 seconds
 with zero bytes. That is an idle topic, not a refusal.
 
+Command (read only, no mint, no state change):
+
+```bash
+curl -sS -o /dev/null --max-time 8 -H 'Accept: text/event-stream' -w 'http=%{http_code} bytes=%{size_download} time=%{time_total}s exit=%{exitcode}\n' "https://reprise.nryn.dev/api/jobs/does-not-exist/events"
+```
+
+Output:
+
+```text
+curl: (28) Operation timed out after 8001 milliseconds with 0 bytes received
+http=200 bytes=0 time=8.001395s exit=28
+```
+
+The stream held open for the full 8 seconds and delivered zero
+bytes. I minted nothing and changed nothing.
+
 Result: carried forward. The episode stays in `recording` with zero
 proposals after polling for several minutes, so no accept or revert
 and no render start can run against it. The binary registers the
