@@ -10,11 +10,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,9 +25,27 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nrynss/keel/cost"
+	costsqlitestore "github.com/nrynss/keel/cost/sqlitestore"
+	flagsqlitestore "github.com/nrynss/keel/flag/sqlitestore"
+	"github.com/nrynss/keel/gate"
 	"github.com/nrynss/keel/id"
+	"github.com/nrynss/keel/lease"
+	leasesqlitestore "github.com/nrynss/keel/lease/sqlitestore"
+	"github.com/nrynss/keel/mediastore"
+	mediasqlitestore "github.com/nrynss/keel/mediastore/sqlitestore"
+	"github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/keel/stream"
+	"github.com/nrynss/keel/upload"
 	"github.com/nrynss/keel/wire"
+	"github.com/nrynss/reprise/internal/api"
+	"github.com/nrynss/reprise/internal/assemblyai"
+	"github.com/nrynss/reprise/internal/broker"
+	"github.com/nrynss/reprise/internal/host"
+	"github.com/nrynss/reprise/internal/identity"
+	"github.com/nrynss/reprise/internal/limits"
 	"github.com/nrynss/reprise/internal/settings"
+	reprisestore "github.com/nrynss/reprise/internal/store"
 )
 
 // version names the build the health endpoint reports. The image build sets
@@ -45,6 +65,34 @@ const fallbackDrainSeconds = 1800
 // In flight API calls are short, so a short grace is enough. Sessions set
 // the drain budget, never this grace.
 const httpCloseGrace = 30 * time.Second
+
+// concurrentSessionSlots bounds how many session leases stay open at once
+// across every guest. A mint past the bound refuses with the slots code,
+// so one rush of starts cannot overlap more live sessions than this.
+const concurrentSessionSlots = 8
+
+// nanosPerCent converts the daily spend ceiling from the cents the settings
+// file carries to the nanodollars the budget stores enforce.
+const nanosPerCent = 10_000_000
+
+// mediaContentTypes is the closed set the blob store persists. It carries
+// the image, audio, video and subtitle types the media library accepts by
+// default, plus the MP4 audio the render writes, which the default set
+// leaves out.
+var mediaContentTypes = []string{
+	"image/png",
+	"image/jpeg",
+	"image/webp",
+	"audio/mpeg",
+	"audio/wav",
+	"audio/ogg",
+	"audio/webm",
+	"audio/mp4",
+	"video/mp4",
+	"application/pdf",
+	"text/vtt",
+	"application/x-subrip",
+}
 
 // drainPollInterval spaces the open session checks during a drain. One
 // second is frequent enough to notice an ended session and rare enough to
@@ -97,6 +145,9 @@ func main() {
 	gate := &drainingGate{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", handleHealth)
+	if err := wireAPI(context.Background(), mux, loaded); err != nil {
+		log.Fatalf("wire routes: %v", err)
+	}
 	mux.Handle("/", appHandler(*webDir))
 	gate.handler = mux
 
@@ -196,4 +247,180 @@ func appHandler(webDir string) http.Handler {
 		}
 		root.ServeHTTP(w, r)
 	})
+}
+
+// hostBuilder adapts the host prompt loader to the broker config seam. The
+// broker declares the interface and the host owns the rows, so this type is
+// the one place the two meet.
+type hostBuilder struct {
+	db *sql.DB
+}
+
+// BuildSessionConfig loads the session config for one owner from stored
+// rows. Counts and names in it come from those rows, never from invention.
+func (b hostBuilder) BuildSessionConfig(ctx context.Context, ownerID string) (broker.SessionConfig, error) {
+	cfg, err := host.Load(ctx, b.db, ownerID)
+	if err != nil {
+		return broker.SessionConfig{}, err
+	}
+	return broker.SessionConfig{
+		SystemPrompt: cfg.SystemPrompt,
+		Greeting:     cfg.Greeting,
+		Keyterms:     cfg.Keyterms,
+	}, nil
+}
+
+// spendCeiling converts the daily spend ceiling from the cents the settings
+// file carries to the nanodollars the budget stores enforce. It refuses a
+// negative ceiling and a value that leaves the int64 range, so a broken
+// file stops the process instead of wrapping into a false ceiling.
+func spendCeiling(cents int64) (cost.Price, error) {
+	if cents < 0 {
+		return 0, fmt.Errorf("reprise: daily spend %d cents: ceiling must not be negative", cents)
+	}
+	if cents > math.MaxInt64/nanosPerCent {
+		return 0, fmt.Errorf("reprise: daily spend %d cents: ceiling leaves the int64 range", cents)
+	}
+	return cost.Price(cents) * nanosPerCent, nil
+}
+
+// wireAPI opens the stores every mounted route needs and registers the
+// route table on mux. It changes nothing about boot, drain, health, or the
+// served app shell. A failure stops the process at the call site, the way
+// a missing secret does.
+//
+// One owner may spend up to the whole daily ceiling. The per-owner ceiling
+// still isolates accounting and lets the admin page lower one owner, while
+// the global ceiling caps the day across owners. Both constructors take
+// this one value, and the mount refuses to wire them if they ever disagree.
+func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) error {
+	signingKey, err := loaded.Secrets.SessionSigningKey.Reveal()
+	if err != nil {
+		return fmt.Errorf("reprise: reveal session signing key: %w", err)
+	}
+	apiKey, err := loaded.Secrets.AssemblyAIAPIKey.Reveal()
+	if err != nil {
+		return fmt.Errorf("reprise: reveal provider key: %w", err)
+	}
+	ceiling, err := spendCeiling(loaded.DailySpendCents)
+	if err != nil {
+		return err
+	}
+	db, err := sqlite.Open(ctx, sqlite.Config{Path: filepath.Join(loaded.DataDir, "reprise.db")})
+	if err != nil {
+		return fmt.Errorf("reprise: open database: %w", err)
+	}
+	wired := false
+	defer func() {
+		if !wired {
+			_ = db.Close()
+		}
+	}()
+	if _, err := reprisestore.Open(ctx, db); err != nil {
+		return fmt.Errorf("reprise: migrate diary schema: %w", err)
+	}
+	identitySvc, err := identity.New(ctx, identity.Config{DB: db, SigningKey: signingKey})
+	if err != nil {
+		return fmt.Errorf("reprise: open guest sessions: %w", err)
+	}
+	costStore, err := costsqlitestore.Open(ctx, costsqlitestore.Config{DB: db, Limit: ceiling})
+	if err != nil {
+		return fmt.Errorf("reprise: open spend ledger: %w", err)
+	}
+	keyed := costsqlitestore.NewKeyedBudget(costStore)
+	flagStore, err := flagsqlitestore.Open(ctx, flagsqlitestore.Config{DB: db})
+	if err != nil {
+		return fmt.Errorf("reprise: open runtime switches: %w", err)
+	}
+	quota, err := lease.NewQuota(concurrentSessionSlots)
+	if err != nil {
+		return fmt.Errorf("reprise: size session quota: %w", err)
+	}
+	leaseStore, err := leasesqlitestore.Open(ctx, leasesqlitestore.Config{DB: db})
+	if err != nil {
+		return fmt.Errorf("reprise: open session leases: %w", err)
+	}
+	minter, err := assemblyai.NewClient(assemblyai.TokenBaseURL, apiKey, nil)
+	if err != nil {
+		return fmt.Errorf("reprise: open token client: %w", err)
+	}
+	diary, err := broker.NewSQLiteDiary(db)
+	if err != nil {
+		return fmt.Errorf("reprise: open session diary: %w", err)
+	}
+	sessionBroker, err := broker.New(broker.Config{
+		Flags:             flagStore,
+		Budgets:           keyed,
+		LeaseQuota:        quota,
+		LeaseStore:        leaseStore,
+		Minter:            minter,
+		Sessions:          hostBuilder{db: db.Writer()},
+		Diary:             diary,
+		SessionCapSeconds: loaded.SessionMaxSeconds,
+		GuestMaxSessions:  loaded.GuestMaxSessions,
+		OwnerSessionLimit: ceiling,
+	})
+	if err != nil {
+		return fmt.Errorf("reprise: open session broker: %w", err)
+	}
+	adminSvc, err := limits.New(limits.Config{
+		Flags:             flagStore,
+		Budgets:           keyed,
+		Global:            costStore,
+		Auth:              limits.StubOwnerAuth{},
+		GuestMaxSessions:  loaded.GuestMaxSessions,
+		SessionMaxSeconds: loaded.SessionMaxSeconds,
+		DailySpendCents:   loaded.DailySpendCents,
+		OwnerDefaultLimit: ceiling,
+	})
+	if err != nil {
+		return fmt.Errorf("reprise: open guest limits: %w", err)
+	}
+	mediaIndex, err := mediasqlitestore.Open(ctx, mediasqlitestore.Config{DB: db})
+	if err != nil {
+		return fmt.Errorf("reprise: open media index: %w", err)
+	}
+	mediaStore, err := mediastore.Open(ctx, mediastore.Config{
+		Dir:          loaded.MediaDir,
+		Index:        mediaIndex,
+		ContentTypes: mediaContentTypes,
+		Authorize:    identitySvc.AuthorizeMedia,
+	})
+	if err != nil {
+		return fmt.Errorf("reprise: open media store: %w", err)
+	}
+	uploadHandler, err := upload.New(upload.Config{
+		Dir:      filepath.Join(loaded.MediaDir, "upload-stage"),
+		Store:    mediaStore,
+		BasePath: api.UploadBasePath,
+	})
+	if err != nil {
+		return fmt.Errorf("reprise: open upload handler: %w", err)
+	}
+	spendGate, err := gate.New(gate.Config{})
+	if err != nil {
+		return fmt.Errorf("reprise: open spend gate: %w", err)
+	}
+	rule := gate.Rule{
+		Name:      "api",
+		PerClient: gate.Limit{Burst: 16, Every: time.Minute},
+		Global:    gate.Limit{Burst: 256, Every: time.Minute},
+	}
+	if err := api.Mount(mux, api.Dependencies{
+		Gate:              spendGate,
+		Rule:              rule,
+		Identity:          identitySvc,
+		Sessions:          sessionBroker,
+		Admin:             adminSvc.Handler(),
+		Uploads:           uploadHandler,
+		Media:             mediaStore,
+		Events:            stream.New(stream.Config{}),
+		OwnerSessionLimit: ceiling,
+		OwnerDefaultLimit: ceiling,
+	}); err != nil {
+		return fmt.Errorf("reprise: mount routes: %w", err)
+	}
+	uploadHandler.Start()
+	wired = true
+	return nil
 }

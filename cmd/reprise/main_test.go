@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nrynss/keel/cost"
+	keelsqlite "github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/reprise/internal/host"
 	"github.com/nrynss/reprise/internal/settings"
+	reprisestore "github.com/nrynss/reprise/internal/store"
 )
 
 func TestHealthzNamesBuild(t *testing.T) {
@@ -261,5 +266,50 @@ func TestRunDrainsAndStops(t *testing.T) {
 	}
 	if _, err := http.Get("http://" + addr + "/healthz"); err == nil {
 		t.Fatal("server still answers, want the listener closed after the drain")
+	}
+}
+
+func TestSpendCeilingConvertsCents(t *testing.T) {
+	got, err := spendCeiling(2000)
+	if err != nil {
+		t.Fatalf("spendCeiling(2000) error = %v, want nil", err)
+	}
+	if want := cost.Price(2000) * nanosPerCent; got != want {
+		t.Fatalf("spendCeiling(2000) = %d, want %d", got, want)
+	}
+	if _, err := spendCeiling(0); err != nil {
+		t.Fatalf("spendCeiling(0) error = %v, want nil", err)
+	}
+	if _, err := spendCeiling(-1); err == nil {
+		t.Fatal("spendCeiling(-1) error = nil, want a refusal")
+	}
+	if _, err := spendCeiling(math.MaxInt64); err == nil {
+		t.Fatal("spendCeiling(max) error = nil, want an overflow refusal")
+	}
+}
+
+func TestHostBuilderServesOpenerOnEmptySeason(t *testing.T) {
+	ctx := context.Background()
+	db, err := keelsqlite.Open(ctx, keelsqlite.Config{Path: filepath.Join(t.TempDir(), "test.db")})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	if _, err := reprisestore.Open(ctx, db); err != nil {
+		t.Fatalf("migrate diary schema: %v", err)
+	}
+	got, err := hostBuilder{db: db.Writer()}.BuildSessionConfig(ctx, "owner-1")
+	if err != nil {
+		t.Fatalf("BuildSessionConfig error = %v, want nil", err)
+	}
+	want := host.Build(host.Input{})
+	if got.Greeting != want.Greeting {
+		t.Fatalf("greeting = %q, want %q", got.Greeting, want.Greeting)
+	}
+	if got.SystemPrompt != want.SystemPrompt {
+		t.Fatalf("system prompt = %q, want %q", got.SystemPrompt, want.SystemPrompt)
+	}
+	if len(got.Keyterms) != 0 {
+		t.Fatalf("keyterms = %v, want none on an empty season", got.Keyterms)
 	}
 }
