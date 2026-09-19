@@ -1,8 +1,27 @@
 <script lang="ts">
 	import { pageTitle } from '$lib/shell';
 	import { RecordController, emptySnapshot } from '$lib/voice/record-state';
+	import {
+		createCompletionDriver,
+		exposeStemsMock
+	} from './stems-complete';
 
 	let snap = $state(emptySnapshot);
+	let completionVisible = $state(false);
+	let completionText = $state('');
+	let completionFailed = $state(false);
+	let retryReady = $state(false);
+
+	const completionDriver = createCompletionDriver((view) => {
+		completionVisible = true;
+		completionText = view.text;
+		completionFailed = view.status === 'failed';
+		retryReady = view.canRetry;
+	});
+
+	function retryCompletion() {
+		void completionDriver.retry();
+	}
 
 	$effect(() => {
 		const params = Object.fromEntries(new URLSearchParams(window.location.search).entries());
@@ -14,6 +33,9 @@
 			}
 		});
 		controller.mount();
+		if (params['mock'] === '1') {
+			exposeStemsMock(completionDriver, () => controller.harness());
+		}
 		const startButton = document.getElementById('record-start');
 		const onStart = () => {
 			void controller.start();
@@ -29,7 +51,9 @@
 			'click',
 			(event) => {
 				const target = event.target;
-				if (target instanceof Element && target.closest('#record-end-now') !== null) {
+				if (target instanceof Element && target.closest('#stems-retry') !== null) {
+					retryCompletion();
+				} else if (target instanceof Element && target.closest('#record-end-now') !== null) {
 					controller.endControl();
 				} else if (target instanceof Element && target.closest('#record-end') !== null) {
 					controller.endControl();
@@ -111,6 +135,26 @@
 	{#if snap.phase === 'recovering'}
 		<section aria-label="Recovered upload">
 			<h2>Recovered upload</h2>
+		</section>
+	{/if}
+
+	{#if completionVisible}
+		<section aria-label="Draft move">
+			<h2>Draft move</h2>
+			{#if completionFailed}
+				<div role="alert">
+					<p>{completionText}</p>
+					<button
+						id="stems-retry"
+						disabled={!retryReady}
+						aria-label="Retry draft move"
+					>
+						Retry draft move
+					</button>
+				</div>
+			{:else}
+				<p role="status">{completionText}</p>
+			{/if}
 		</section>
 	{/if}
 </main>
