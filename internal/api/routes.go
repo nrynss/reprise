@@ -98,12 +98,14 @@ type GuestSessions interface {
 
 // Dependencies carries the implemented handlers Mount wires. A nil handler
 // leaves its route on the stub, so a process without that store still
-// serves the table. Sessions is the session broker. Admin is the limits
-// handler. Uploads is the chunked upload handler, configured with
-// UploadBasePath. Media is the blob store. Events is the stream broker
-// serving one job topic per request. The two owner ceilings must agree
-// whenever Sessions or Admin is present, because the broker provisions
-// one and the spend view subtracts from the other.
+// serves the table. Sessions is the session broker. Episodes serves the
+// episode list, detail, decisions, and mark done routes. SessionEnd
+// records the provider close the browser already sent. Threads serves the
+// cross episode index. Admin is the limits handler. Uploads is the chunked
+// upload handler, configured with UploadBasePath. Media is the blob store.
+// Events is the stream broker serving one job topic per request. The two
+// owner ceilings must agree whenever Sessions or Admin is present, because
+// the broker provisions one and the spend view subtracts from the other.
 type Dependencies struct {
 	// Gate refuses over-limit callers before any guest row is minted.
 	Gate *gate.Gate
@@ -113,6 +115,12 @@ type Dependencies struct {
 	Identity GuestSessions
 	// Sessions starts live sessions.
 	Sessions http.Handler
+	// Episodes serves the episode list, detail, decisions, and done.
+	Episodes http.Handler
+	// SessionEnd records the provider close on a diary session.
+	SessionEnd http.Handler
+	// Threads serves the cross episode index.
+	Threads http.Handler
 	// Admin answers the caps, the switch, and spend.
 	Admin http.Handler
 	// Uploads receives stem chunks.
@@ -140,7 +148,7 @@ func Mount(mux *http.ServeMux, deps Dependencies) error {
 		}
 	}
 	for _, route := range routeTable {
-		next := deps.handlerFor(route.Pattern)
+		next := deps.handlerFor(route)
 		if next == nil {
 			pattern := route.Pattern
 			if route.Method != "" {
@@ -173,22 +181,32 @@ func Mount(mux *http.ServeMux, deps Dependencies) error {
 	return nil
 }
 
-// handlerFor returns the implemented handler for one table pattern, or nil
-// when the route stays on the stub. The admin handler answers all three
-// admin patterns through its own mux. The upload handler takes the subtree
-// Mount registers under both the base path and its slash form, mirroring
-// the upload package mount.
-func (d Dependencies) handlerFor(pattern string) http.Handler {
-	switch pattern {
-	case "/api/sessions":
+// handlerFor returns the implemented handler for one table entry, or nil
+// when the route stays on the stub. It matches on method and pattern
+// together, so a wired GET never serves its sibling DELETE. The admin
+// handler answers all three admin patterns through its own mux. The upload
+// handler takes the subtree Mount registers under both the base path and
+// its slash form, mirroring the upload package mount.
+func (d Dependencies) handlerFor(route Route) http.Handler {
+	switch route.Method + " " + route.Pattern {
+	case "POST /api/sessions":
 		return d.Sessions
-	case limits.PatternLimits, limits.PatternPause, limits.PatternOwnerLimit:
+	case "POST /api/sessions/{id}/end":
+		return d.SessionEnd
+	case "GET /api/episodes", "GET /api/episodes/{id}",
+		"POST /api/episodes/{id}/decisions", "POST /api/episodes/{id}/done":
+		return d.Episodes
+	case "GET /api/threads":
+		return d.Threads
+	case "GET " + limits.PatternLimits,
+		"POST " + limits.PatternPause,
+		"POST " + limits.PatternOwnerLimit:
 		return d.Admin
-	case UploadBasePath + "/":
+	case " " + UploadBasePath + "/":
 		return d.Uploads
-	case "/media/{id}":
+	case "GET /media/{id}":
 		return d.Media
-	case "/api/jobs/{id}/events":
+	case "GET /api/jobs/{id}/events":
 		return d.jobEvents()
 	default:
 		return nil

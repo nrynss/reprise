@@ -218,6 +218,9 @@ func mountedDeps(t *testing.T, guestCalls, handlerCalls *int) Dependencies {
 		Rule:              rule,
 		Identity:          guestStub{calls: guestCalls},
 		Sessions:          recordingHandler{calls: handlerCalls},
+		Episodes:          recordingHandler{calls: handlerCalls},
+		SessionEnd:        recordingHandler{calls: handlerCalls},
+		Threads:           recordingHandler{calls: handlerCalls},
 		Admin:             recordingHandler{calls: handlerCalls},
 		Uploads:           recordingHandler{calls: handlerCalls},
 		Media:             recordingHandler{calls: handlerCalls},
@@ -281,6 +284,12 @@ func TestMountServesHandlersThroughChain(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPost, "/api/sessions"},
+		{http.MethodPost, "/api/sessions/e01/end"},
+		{http.MethodGet, "/api/episodes"},
+		{http.MethodGet, "/api/episodes/e01"},
+		{http.MethodPost, "/api/episodes/e01/decisions"},
+		{http.MethodPost, "/api/episodes/e01/done"},
+		{http.MethodGet, "/api/threads"},
 		{http.MethodGet, "/api/admin/limits"},
 		{http.MethodPost, "/api/admin/limits/pause"},
 		{http.MethodPost, "/api/admin/limits/owner"},
@@ -343,9 +352,9 @@ func TestMountKeepsStubsForUnmountedRoutes(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/api/sessions/e01/end"},
-		{http.MethodGet, "/api/episodes"},
-		{http.MethodGet, "/api/threads"},
+		{http.MethodPost, "/api/episodes/e01/publish"},
+		{http.MethodDelete, "/api/episodes/e01/publish"},
+		{http.MethodDelete, "/api/episodes/e01"},
 	}
 	for _, tc := range stubs {
 		beforeGuests := guestCalls
