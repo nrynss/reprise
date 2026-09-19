@@ -206,7 +206,7 @@ requires:   T0.1
 fixture-ok: yes
 size:       S · mid
 owns:       .github/workflows/ci.yml, Dockerfile, tools/check.sh
-status:     done:4d2c372a3c12a0dd702e1be93b2e58729af70a70
+status:     in-progress:review-r1:t0.7-rev-r1@4d2c372a3c12a0dd702e1be93b2e58729af70a70
 ```
 T6.1's review recorded the dead install at H severity and out of scope, because
 `.github/workflows/ci.yml` belongs to T0.1, which is done. Nobody owns it, so nobody fixes it. The
