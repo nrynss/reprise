@@ -246,7 +246,7 @@ requires:   T0.5
 fixture-ok: no
 size:       M · frontier
 owns:       testdata/sessions/steady/clips.json, testdata/sessions/pauses/clips.json,
-            testdata/sessions/bargein/clips.json
+            testdata/sessions/bargein/clips.json, dev-diary/adversarial-review/t0.7-gate-evidence.md
 status:     in-progress:implement:t0.8-impl
 ```
 T2.5's driver gates its 40 ms verdict on a playback-start record that does not exist. Detector
@@ -269,6 +269,14 @@ with the reason in words.
 
 **Done when:** T2.5's `TestFixtureSessions` flips from the loud evidence block to the 40 ms
 verdict on all three sessions with no driver change.
+
+**Second deliverable: T0.7's triple-green evidence.** T0.7 round 1 left a non-blocking L:
+its gate change shipped without three fresh-worktree passes. In a fresh worktree of this
+task's HEAD, run `npm ci` in `web/` then `./tools/check.sh` three times in a row and record
+all three exit codes in `dev-diary/adversarial-review/t0.7-gate-evidence.md` (absolute path,
+outside the worktree) with the HEAD hash and the ffmpeg version the runs measured with. All
+three must be 0. (The round 1 L on the notes hunk is already resolved: T0.7's owns line now
+covers `deploy/README.md`, so no code change owes there.)
 
 ---
 
