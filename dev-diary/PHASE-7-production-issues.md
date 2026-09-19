@@ -317,6 +317,28 @@ flows reach the T7.6 schedule. This task wires the caller.
 and sees the draft move with one transcript job scheduled. A repeat
 post reports the standing outcome. No wall-clock threshold.
 
+### T7.12: Controller posts stem completion
+```yaml
+requires:   T7.11, T2.4
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/lib/voice/
+status:     not-started
+```
+Round 1 scoped the gap: nothing in a real take calls the completion
+driver. The controller finishes both uploads in `endTake` and
+navigates away without posting.
+
+* Wire the controller to post the stored pair after both uploads
+  finish and before the processing navigation, reusing the driver
+  and its loud retry from T7.11.
+* Extend the mock proof so the automatic path fires without a hand
+  driven handle.
+
+**Done when:** Playwright ends a mock take and the draft move fires
+with no manual handle. A failed post refuses loudly with a working
+retry.
+
 ---
 
 ## Exit criteria
