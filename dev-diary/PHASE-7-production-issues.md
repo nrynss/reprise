@@ -537,7 +537,7 @@ requires:   T7.14
 fixture-ok: yes
 size:       XS · light
 owns:       internal/retention/, internal/privacy/
-status:     not-started
+status:     in-progress:implement:t7.21-impl
 ```
 CI caught a data race T7.14 missed: `retention.Service.run()` reads
 a field at `sweep.go:157` while the test writes it through
