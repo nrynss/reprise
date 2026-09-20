@@ -409,6 +409,34 @@ proposals. Appends a round 5 note without touching earlier rounds.
 command and output, or names the defect that still blocks it with
 owning paths.
 
+### T7.16: Gallery reads the live season
+```yaml
+requires:   T7.1, T4.3
+fixture-ok: yes
+size:       M · mid
+owns:       web/src/routes/+page.svelte, web/src/routes/episode/[id]/+page.svelte,
+            web/src/routes/threads/
+status:     not-started
+```
+The gallery, episode, and threads views still render the scripted
+season T4.3 built against. The live handlers exist since T7.1, but
+no view calls them, so the landing page shows stubs on production.
+
+* Gallery lists the owner's real episodes newest first with cover,
+  title, state, and duration, falling back to the empty season copy
+  when the owner has none. Running jobs still draw live progress on
+  their cards through `JobStream`.
+* Episode view plays the render with chapters, notes, and a
+  following transcript from the wired detail route. Threads link to
+  the spoken moment.
+* No sentiment gauges or charts. Quotes and links only, as T4.3
+  pinned.
+
+**Done when:** Playwright against a stubbed season API shows real
+rows newest first with progress on a running card, and opening a
+thread item starts playback at its quote. The scripted fixture set
+stays for offline runs but no longer renders by default.
+
 ---
 
 ## Exit criteria
