@@ -416,7 +416,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/episode/[id]/+page.svelte,
             web/src/routes/threads/
-status:     in-progress:implement:t7.16-impl
+status:     in-progress:review-r1:t7.16-rev-r1@8026d0ec5a94b07dd4b2964134ce4f4df35df200
 ```
 The gallery, episode, and threads views still render the scripted
 season T4.3 built against. The live handlers exist since T7.1, but
