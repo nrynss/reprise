@@ -553,6 +553,69 @@ job still runs when the test rebinds. A race is a C.
 **Done when:** The exact CI race report no longer reproduces and
 both resume tests pass twenty consecutive race runs.
 
+### T7.22: Session end accepts the empty close
+```yaml
+requires:   T7.1, T7.12
+fixture-ok: yes
+size:       XS · light
+owns:       internal/api/, web/src/lib/voice/
+status:     not-started
+```
+Measured on two real takes: the browser posts `POST
+/api/sessions/{id}/end` with an empty body and the server answers
+400, so no take ever records its close. The page names the failure
+and retries, and the retry fails the same way.
+
+* Accept the empty close on the server, or send the close record
+  from the browser. One side moves, not both. The recorded close
+  still carries what the reconciler needs.
+* Pin both shapes: empty posts 200 and records, malformed posts
+  refuse loudly.
+
+**Done when:** An empty end post records the close and a repeat
+reports it, pinned by test.
+
+### T7.23: Chunk 429s on real takes
+```yaml
+requires:   T7.19
+fixture-ok: yes
+size:       S · mid
+owns:       cmd/reprise/main.go
+status:     not-started
+```
+Measured on two real takes: sparse chunk PUTs answer 429 (indices
+0, 2, 5, 11 across takes), stalling the draft move. T7.19 budgets
+are live on the edge, so either the app gate still trips real
+cadence or Cloudflare answers 429 itself. Unattributed: the
+response bodies were never captured.
+
+* Capture a 429 body first. JSON `rate_limited` means the app gate
+  and the fix lands here. HTML means Cloudflare rate limiting and
+  the fix is a dashboard rule, not code.
+* Whichever side answers, one honest take passes with zero 429s
+  and the proof pins it.
+
+**Done when:** The blamed side is named with its body on record,
+and the fixed side pins an honest take with zero 429s.
+
+### T7.24: Record page navigates back
+```yaml
+requires:   T7.12
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/record/
+status:     not-started
+```
+Measured live: the ending page strands the guest with no way back
+to the gallery or a fresh take. A stuck page must always offer an
+exit.
+
+* Add a plain link back to the gallery on every record phase,
+  including the failure states. No gesture needed.
+
+**Done when:** Playwright reaches gallery from each record phase by
+link.
+
 ---
 
 ## Exit criteria
@@ -643,6 +706,18 @@ Nothing yet.
 
 ### Notes for the next developer
 
+Real-take findings, 2026-09-20, all measured on the live edge with
+the owner present. First take died silently on Cloudflare challenge
+pages (no audio, no transcript, no close persisted; owner
+8a5ed00dc57318ede6b8372ad07e1072 episodes 1 to 3 all `recording`).
+Owner deployed Configuration Rules (Browser Integrity Check and
+Under Attack off for `/api/*` and `/media/*`). Second takes then
+failed loudly: sparse chunk 429s (unattributed, needs a response
+body) and session end 400 on the empty post. The container was
+recreated mid-take at 10:10 UTC with no crash and no OOM; cause
+unknown. Ceiling is open (zero held reservations). T6.4b holds one
+partial Chrome run; browser fields beyond the user agent string are
+still missing.
 T7.4 is deferred, not merely waiting: owner login plus the live
 switch exercise ships as its own phase after dogfooding, not as a
 leftover row here.
