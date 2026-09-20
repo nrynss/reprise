@@ -461,6 +461,30 @@ empty host stem.
 and the recorded bytes match the provider channel on the next live
 run.
 
+### T7.18: Loud API failure on the record path
+```yaml
+requires:   T7.12, T2.4
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/record/
+status:     not-started
+```
+A real take died silently when Cloudflare answered API calls with a
+challenge page: uploads, transcript rows, and session end all failed
+while the voice socket worked, and the page showed nothing until the
+draft retry. A machine client that cannot parse its answer must say
+so at once.
+
+* Every API call on the take path validates its content type before
+  trusting the body. A non-JSON answer surfaces a loud banner naming
+  the failed call, with retry where retry is safe.
+* The take clock stops when the take cannot proceed. No silent retry
+  loop burns minutes against a challenge page.
+
+**Done when:** Playwright serves HTML on an API route and the page
+shows the named failure instead of stalling. The normal path is
+unchanged.
+
 ---
 
 ## Exit criteria
