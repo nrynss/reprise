@@ -448,6 +448,23 @@ func spendCeiling(cents int64) (cost.Price, error) {
 	return cost.Price(cents) * nanosPerCent, nil
 }
 
+// Take path bursts size one honest take with two stems. Chunk uploads
+// dominate the honest count, so uploads carry the widest burst while
+// mint and completion stay narrow enough to trip a hammer. The binary
+// test replays these numbers, so a wrong burst fails there instead of
+// stalling a take at the edge.
+const (
+	takeSessionsBurst   = 6
+	takeSessionEndBurst = 6
+	takeEpisodesBurst   = 48
+	takeThreadsBurst    = 32
+	takeAdminBurst      = 16
+	takeUploadsBurst    = 48
+	takeMediaBurst      = 48
+	takeStemsBurst      = 8
+	outerAPIBurst       = 256
+)
+
 // takeRule returns the spend budget for one take path route. Every take
 // request also draws from the shared outer budget, so this shapes the
 // route share while the outer budget caps the take as a whole. One
@@ -463,9 +480,10 @@ func takeRule(name string, burst int) gate.Rule {
 }
 
 // protectTake wraps one take path handler in its own budget. A refusal
-// answers 429 through the shared envelope with the gate wait, and it
-// spends nothing from any other route, so a hammered upload never
-// blocks a session mint.
+// answers 429 through the shared envelope with the gate wait. A burst
+// on one route leaves the other routes alone, until the shared outer
+// budget runs out. A hammer that spends the whole take still crowds out
+// every route, including a session mint.
 func protectTake(spendGate *gate.Gate, name string, burst int, next http.Handler) (http.Handler, error) {
 	return spendGate.Protect(takeRule(name, burst), next)
 }
@@ -609,34 +627,34 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 	}
 	outer := gate.Rule{
 		Name:      "api",
-		PerClient: gate.Limit{Burst: 256, Every: time.Minute},
-		Global:    gate.Limit{Burst: 4096, Every: time.Minute},
+		PerClient: gate.Limit{Burst: outerAPIBurst, Every: time.Minute},
+		Global:    gate.Limit{Burst: 16 * outerAPIBurst, Every: time.Minute},
 	}
-	sessions, err := protectTake(spendGate, "take-sessions", 6, sessionBroker)
+	sessions, err := protectTake(spendGate, "take-sessions", takeSessionsBurst, sessionBroker)
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect session mint: %w", err)
 	}
-	sessionEnd, err := protectTake(spendGate, "take-session-end", 6, jobs.settleEnd(api.NewSessionEnd(episodeSvc)))
+	sessionEnd, err := protectTake(spendGate, "take-session-end", takeSessionEndBurst, jobs.settleEnd(api.NewSessionEnd(episodeSvc)))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect session end: %w", err)
 	}
-	episodes, err := protectTake(spendGate, "take-episodes", 48, api.NewEpisodes(episodeSvc))
+	episodes, err := protectTake(spendGate, "take-episodes", takeEpisodesBurst, api.NewEpisodes(episodeSvc))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect episode reads: %w", err)
 	}
-	threads, err := protectTake(spendGate, "take-threads", 32, api.NewThreads(db))
+	threads, err := protectTake(spendGate, "take-threads", takeThreadsBurst, api.NewThreads(db))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect thread reads: %w", err)
 	}
-	admin, err := protectTake(spendGate, "take-admin", 16, adminSvc.Handler())
+	admin, err := protectTake(spendGate, "take-admin", takeAdminBurst, adminSvc.Handler())
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect admin: %w", err)
 	}
-	uploads, err := protectTake(spendGate, "take-uploads", 48, withUploadOwner(uploadHandler))
+	uploads, err := protectTake(spendGate, "take-uploads", takeUploadsBurst, withUploadOwner(uploadHandler))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect uploads: %w", err)
 	}
-	media, err := protectTake(spendGate, "take-media", 48, withMediaRefusalHeader(mediaStore))
+	media, err := protectTake(spendGate, "take-media", takeMediaBurst, withMediaRefusalHeader(mediaStore))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect media: %w", err)
 	}
@@ -657,7 +675,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 	}); err != nil {
 		return nil, fmt.Errorf("reprise: mount routes: %w", err)
 	}
-	stemsInner, err := protectTake(spendGate, "take-stems", 8, identitySvc.Middleware(newStemsComplete(episodeSvc, jobs, db)))
+	stemsInner, err := protectTake(spendGate, "take-stems", takeStemsBurst, identitySvc.Middleware(newStemsComplete(episodeSvc, jobs, db)))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect stem completion: %w", err)
 	}

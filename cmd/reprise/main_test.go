@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,6 +24,7 @@ import (
 	"github.com/nrynss/keel/cost"
 	costsqlitestore "github.com/nrynss/keel/cost/sqlitestore"
 	flagsqlitestore "github.com/nrynss/keel/flag/sqlitestore"
+	"github.com/nrynss/keel/gate"
 	keelid "github.com/nrynss/keel/id"
 	"github.com/nrynss/keel/job"
 	jobsqlitestore "github.com/nrynss/keel/job/sqlitestore"
@@ -1084,5 +1086,263 @@ func TestPipelineCoverAndMemoryRunOffline(t *testing.T) {
 	}
 	if got := wireSpent(t, fx, owner); got <= 0 {
 		t.Fatalf("spent = %s, want both passes booked", got)
+	}
+}
+
+// takeGateRoute pairs one take route name with the burst the binary wires.
+type takeGateRoute struct {
+	name  string
+	burst int
+}
+
+// takeGateRoutes lists every take route with its wired burst, so the pins
+// below run the production numbers instead of copies.
+func takeGateRoutes() []takeGateRoute {
+	return []takeGateRoute{
+		{"take-sessions", takeSessionsBurst},
+		{"take-session-end", takeSessionEndBurst},
+		{"take-episodes", takeEpisodesBurst},
+		{"take-threads", takeThreadsBurst},
+		{"take-admin", takeAdminBurst},
+		{"take-uploads", takeUploadsBurst},
+		{"take-media", takeMediaBurst},
+		{"take-stems", takeStemsBurst},
+	}
+}
+
+// takeGateHandlers wraps one stub per take route in the wired budgets on
+// one shared gate, the way the binary wires them.
+func takeGateHandlers(t *testing.T) map[string]http.Handler {
+	t.Helper()
+	spendGate, err := gate.New(gate.Config{})
+	if err != nil {
+		t.Fatalf("open spend gate: %v", err)
+	}
+	handlers := map[string]http.Handler{}
+	for _, route := range takeGateRoutes() {
+		protected, err := protectTake(spendGate, route.name, route.burst, stubHandler())
+		if err != nil {
+			t.Fatalf("protect %s: %v", route.name, err)
+		}
+		handlers[route.name] = protected
+	}
+	return handlers
+}
+
+// takeGateHit sends one take request from one client and returns the answer.
+func takeGateHit(handler http.Handler) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/take", nil)
+	req.RemoteAddr = "198.51.100.7:4321"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
+}
+
+// requireRateLimitHints requires an honest refusal: a 429 with the shared
+// code, a positive wait in the header, and the same wait in the body.
+func requireRateLimitHints(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("refusal status = %d, want 429: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "rate_limited") {
+		t.Fatalf("refusal body = %s, want the rate code", rec.Body.String())
+	}
+	header, err := strconv.Atoi(rec.Header().Get("Retry-After"))
+	if err != nil || header < 1 {
+		t.Fatalf("Retry-After = %q, want a positive wait", rec.Header().Get("Retry-After"))
+	}
+	var body struct {
+		Error struct {
+			Detail struct {
+				RetryAfterSeconds int `json:"retry_after_seconds"`
+			} `json:"detail"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode refusal: %v", err)
+	}
+	if body.Error.Detail.RetryAfterSeconds != header {
+		t.Fatalf("body wait = %d, header wait = %d, want them to agree",
+			body.Error.Detail.RetryAfterSeconds, header)
+	}
+}
+
+// TestTakeGateHonestTakePasses replays one honest take with two stems at
+// real cadence through the wired budgets and requires zero refusals.
+func TestTakeGateHonestTakePasses(t *testing.T) {
+	handlers := takeGateHandlers(t)
+	cadence := map[string]int{
+		"take-sessions":    1,
+		"take-uploads":     30,
+		"take-stems":       2,
+		"take-session-end": 1,
+		"take-episodes":    6,
+		"take-media":       4,
+		"take-threads":     2,
+		"take-admin":       1,
+	}
+	for _, route := range takeGateRoutes() {
+		for i := range cadence[route.name] {
+			if rec := takeGateHit(handlers[route.name]); rec.Code != http.StatusOK {
+				t.Fatalf("%s hit %d status = %d, want 200: %s", route.name, i, rec.Code, rec.Body.String())
+			}
+		}
+	}
+}
+
+// TestTakeGateDoubleCadenceTrips replays the honest take twice as fast
+// and requires the hammered upload route to trip with honest hints.
+func TestTakeGateDoubleCadenceTrips(t *testing.T) {
+	handlers := takeGateHandlers(t)
+	cadence := map[string]int{
+		"take-sessions":    2,
+		"take-uploads":     60,
+		"take-stems":       4,
+		"take-session-end": 2,
+		"take-episodes":    12,
+		"take-media":       8,
+		"take-threads":     4,
+		"take-admin":       2,
+	}
+	refused := map[string]int{}
+	for _, route := range takeGateRoutes() {
+		for i := range cadence[route.name] {
+			rec := takeGateHit(handlers[route.name])
+			switch rec.Code {
+			case http.StatusOK:
+			case http.StatusTooManyRequests:
+				refused[route.name]++
+				requireRateLimitHints(t, rec)
+			default:
+				t.Fatalf("%s hit %d status = %d, want 200 or 429: %s", route.name, i, rec.Code, rec.Body.String())
+			}
+		}
+	}
+	if refused["take-uploads"] != 12 {
+		t.Fatalf("upload refusals = %d, want 12 past the 48 burst", refused["take-uploads"])
+	}
+	for _, route := range takeGateRoutes() {
+		if route.name == "take-uploads" {
+			continue
+		}
+		if refused[route.name] != 0 {
+			t.Fatalf("%s refusals = %d, want 0 at double cadence", route.name, refused[route.name])
+		}
+	}
+}
+
+// TestTakeGateRouteBurstsTripAtWiredEdge pins the exact burst each take
+// route wires: the burst passes and the next request trips with hints.
+func TestTakeGateRouteBurstsTripAtWiredEdge(t *testing.T) {
+	edges := map[string]int{
+		"take-uploads":  48,
+		"take-stems":    8,
+		"take-sessions": 6,
+	}
+	for _, route := range takeGateRoutes() {
+		edge, ok := edges[route.name]
+		if !ok {
+			continue
+		}
+		spendGate, err := gate.New(gate.Config{})
+		if err != nil {
+			t.Fatalf("open spend gate: %v", err)
+		}
+		protected, err := protectTake(spendGate, route.name, route.burst, stubHandler())
+		if err != nil {
+			t.Fatalf("protect %s: %v", route.name, err)
+		}
+		for i := range edge {
+			if rec := takeGateHit(protected); rec.Code != http.StatusOK {
+				t.Fatalf("%s hit %d status = %d, want 200: %s", route.name, i, rec.Code, rec.Body.String())
+			}
+		}
+		requireRateLimitHints(t, takeGateHit(protected))
+	}
+}
+
+// TestTakeGateUploadHammerLeavesMint hammers uploads past its burst from
+// one client and requires a session mint to still pass.
+func TestTakeGateUploadHammerLeavesMint(t *testing.T) {
+	handlers := takeGateHandlers(t)
+	for range 60 {
+		takeGateHit(handlers["take-uploads"])
+	}
+	if rec := takeGateHit(handlers["take-sessions"]); rec.Code != http.StatusOK {
+		t.Fatalf("mint after upload hammer status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRetriedCompletionGarbageIDsRecoverToDraft posts unknown blob ids
+// for an episode whose first attempt already linked its pair. The retry
+// recovers to draft with a scheduled pass instead of stalling.
+func TestRetriedCompletionGarbageIDsRecoverToDraft(t *testing.T) {
+	fx := openWireFixture(t)
+	handler, _, cookie, episodeID, _, _, _ := completionFixture(t, fx)
+	code, answer := postCompletion(t, handler, cookie, episodeID, "garbage-user-orphan", "garbage-host-orphan")
+	if code != http.StatusOK {
+		t.Fatalf("retry status = %d, want 200", code)
+	}
+	if answer.State != string(episode.StateDraft) {
+		t.Fatalf("retry state = %q, want draft", answer.State)
+	}
+	if !answer.Scheduled || answer.JobID == "" {
+		t.Fatalf("retry = %+v, want a scheduled pass", answer)
+	}
+}
+
+// TestCompletionUnknownIDsNameMissing posts unknown blob ids for an
+// episode with nothing linked and requires a 404 naming both ids.
+func TestCompletionUnknownIDsNameMissing(t *testing.T) {
+	fx := openWireFixture(t)
+	sessionBroker := openWireBroker(t, fx)
+	identitySvc, err := identity.New(t.Context(), identity.Config{DB: fx.db, SigningKey: "wire-test-signing-key"})
+	if err != nil {
+		t.Fatalf("open identity: %v", err)
+	}
+	session, cookie := mintWireSession(t, fx, sessionBroker)
+	if cookie == nil {
+		t.Fatal("mint set no guest cookie")
+	}
+	var owner string
+	if err := fx.db.Reader().QueryRowContext(t.Context(),
+		`SELECT owner_id FROM sessions WHERE id = ?`, session.SessionID).Scan(&owner); err != nil {
+		t.Fatalf("read session owner: %v", err)
+	}
+	diary, err := broker.NewSQLiteDiary(fx.db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	episodeID, _, err := diary.CreateEpisodeAndSession(t.Context(), owner, 1800)
+	if err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+	episodeSvc, err := episode.NewService(episode.Config{DB: fx.db, TranscriptKind: kindEditTranscript})
+	if err != nil {
+		t.Fatalf("new episode service: %v", err)
+	}
+	drafts := openDraftJobs(t, fx)
+	handler := identitySvc.Middleware(newStemsComplete(episodeSvc, drafts, fx.db))
+	unknownUser, unknownHost := "missing-user-orphan", "missing-host-orphan"
+	body, err := json.Marshal(stemsCompleteRequest{
+		UserMediaID: unknownUser, HostMediaID: unknownHost,
+		UserSampleRate: 48000, HostSampleRate: 48000,
+	})
+	if err != nil {
+		t.Fatalf("encode completion: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/episodes/"+episodeID+"/stems/complete", bytes.NewReader(body))
+	req.AddCookie(cookie)
+	req.SetPathValue("id", episodeID)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"stems_not_found", "missing_media_ids", unknownUser, unknownHost} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("body = %s, want %q", rec.Body.String(), want)
+		}
 	}
 }
