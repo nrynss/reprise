@@ -392,6 +392,23 @@ quarantine candidate.
 shapes, and the gate passes three consecutive full runs in a fresh
 worktree.
 
+### T7.15: Full-pipe live proof
+```yaml
+requires:   T7.13
+fixture-ok: no
+size:       S · frontier
+owns:       dev-diary/probes/production.md
+status:     not-started
+```
+Runs once, against the build carrying the batch model fix. A
+scripted guest records from generated speech, posts stem completion,
+and follows the episode through draft, transcript words, and
+proposals. Appends a round 5 note without touching earlier rounds.
+
+**Done when:** Round 5 records an episode reaching proposals with
+command and output, or names the defect that still blocks it with
+owning paths.
+
 ---
 
 ## Exit criteria
