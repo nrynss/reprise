@@ -448,6 +448,28 @@ func spendCeiling(cents int64) (cost.Price, error) {
 	return cost.Price(cents) * nanosPerCent, nil
 }
 
+// takeRule returns the spend budget for one take path route. Every take
+// request also draws from the shared outer budget, so this shapes the
+// route share while the outer budget caps the take as a whole. One
+// honest take with two stems fits every burst below, while a double
+// cadence burst trips the route it hammers. The gate answers refusals
+// itself, so the header and the body agree on the wait.
+func takeRule(name string, burst int) gate.Rule {
+	return gate.Rule{
+		Name:      name,
+		PerClient: gate.Limit{Burst: burst, Every: time.Minute},
+		Global:    gate.Limit{Burst: 16 * burst, Every: time.Minute},
+	}
+}
+
+// protectTake wraps one take path handler in its own budget. A refusal
+// answers 429 through the shared envelope with the gate wait, and it
+// spends nothing from any other route, so a hammered upload never
+// blocks a session mint.
+func protectTake(spendGate *gate.Gate, name string, burst int, next http.Handler) (http.Handler, error) {
+	return spendGate.Protect(takeRule(name, burst), next)
+}
+
 // wireAPI opens the stores every mounted route needs and registers the
 // route table on mux. It changes nothing about boot, drain, health, or the
 // served app shell. A failure stops the process at the call site, the way
@@ -585,31 +607,63 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open episode service: %w", err)
 	}
-	rule := gate.Rule{
+	outer := gate.Rule{
 		Name:      "api",
-		PerClient: gate.Limit{Burst: 16, Every: time.Minute},
-		Global:    gate.Limit{Burst: 256, Every: time.Minute},
+		PerClient: gate.Limit{Burst: 256, Every: time.Minute},
+		Global:    gate.Limit{Burst: 4096, Every: time.Minute},
+	}
+	sessions, err := protectTake(spendGate, "take-sessions", 6, sessionBroker)
+	if err != nil {
+		return nil, fmt.Errorf("reprise: protect session mint: %w", err)
+	}
+	sessionEnd, err := protectTake(spendGate, "take-session-end", 6, jobs.settleEnd(api.NewSessionEnd(episodeSvc)))
+	if err != nil {
+		return nil, fmt.Errorf("reprise: protect session end: %w", err)
+	}
+	episodes, err := protectTake(spendGate, "take-episodes", 48, api.NewEpisodes(episodeSvc))
+	if err != nil {
+		return nil, fmt.Errorf("reprise: protect episode reads: %w", err)
+	}
+	threads, err := protectTake(spendGate, "take-threads", 32, api.NewThreads(db))
+	if err != nil {
+		return nil, fmt.Errorf("reprise: protect thread reads: %w", err)
+	}
+	admin, err := protectTake(spendGate, "take-admin", 16, adminSvc.Handler())
+	if err != nil {
+		return nil, fmt.Errorf("reprise: protect admin: %w", err)
+	}
+	uploads, err := protectTake(spendGate, "take-uploads", 48, withUploadOwner(uploadHandler))
+	if err != nil {
+		return nil, fmt.Errorf("reprise: protect uploads: %w", err)
+	}
+	media, err := protectTake(spendGate, "take-media", 48, withMediaRefusalHeader(mediaStore))
+	if err != nil {
+		return nil, fmt.Errorf("reprise: protect media: %w", err)
 	}
 	if err := api.Mount(mux, api.Dependencies{
 		Gate:              spendGate,
-		Rule:              rule,
+		Rule:              outer,
 		Identity:          identitySvc,
-		Sessions:          sessionBroker,
-		Episodes:          api.NewEpisodes(episodeSvc),
-		SessionEnd:        jobs.settleEnd(api.NewSessionEnd(episodeSvc)),
-		Threads:           api.NewThreads(db),
-		Admin:             adminSvc.Handler(),
-		Uploads:           withUploadOwner(uploadHandler),
-		Media:             withMediaRefusalHeader(mediaStore),
+		Sessions:          sessions,
+		Episodes:          episodes,
+		SessionEnd:        sessionEnd,
+		Threads:           threads,
+		Admin:             admin,
+		Uploads:           uploads,
+		Media:             media,
 		Events:            events,
 		OwnerSessionLimit: ceiling,
 		OwnerDefaultLimit: ceiling,
 	}); err != nil {
 		return nil, fmt.Errorf("reprise: mount routes: %w", err)
 	}
-	stemsProtected, err := spendGate.Protect(rule, identitySvc.Middleware(newStemsComplete(episodeSvc, jobs, db)))
+	stemsInner, err := protectTake(spendGate, "take-stems", 8, identitySvc.Middleware(newStemsComplete(episodeSvc, jobs, db)))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect stem completion: %w", err)
+	}
+	stemsProtected, err := spendGate.Protect(outer, stemsInner)
+	if err != nil {
+		return nil, fmt.Errorf("reprise: share stem completion budget: %w", err)
 	}
 	mux.Handle("POST /api/episodes/{id}/stems/complete", stemsProtected)
 	uploadHandler.Start()
@@ -1529,6 +1583,14 @@ type transcriptOutcomeJSON struct {
 	Error string `json:"error,omitempty"`
 }
 
+// stemsMissingDetail names the stem blobs a completion could not link.
+// It travels on the not found refusal, so a retry reports exactly what
+// is missing instead of a bare code.
+type stemsMissingDetail struct {
+	// MissingMediaIDs lists the posted blob ids the owner holds nothing under.
+	MissingMediaIDs []string `json:"missing_media_ids"`
+}
+
 // stemsComplete links two uploaded blobs as an episode stems and schedules
 // its draft jobs. Create it with newStemsComplete, because the zero value
 // holds no store. The route mounts it behind the spend gate and the guest
@@ -1566,23 +1628,17 @@ func (h *stemsComplete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	episodeID := r.PathValue("id")
-	for _, blobID := range []string{body.UserMediaID, body.HostMediaID} {
-		held, err := blobOwner(r.Context(), h.db, blobID)
-		if errors.Is(err, errStemsNotFound) {
-			_ = wire.WriteError(w, http.StatusNotFound, codeStemsNotFound, "both stems name stored audio the owner holds", nil)
-			return
-		}
-		if err != nil {
-			_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the stems could not be read", nil)
-			return
-		}
-		if held != owner.ID {
-			_ = wire.WriteError(w, http.StatusNotFound, codeStemsNotFound, "both stems name stored audio the owner holds", nil)
-			return
-		}
+	userID, hostID, missing, err := h.resolveStems(r.Context(), owner.ID, episodeID, body.UserMediaID, body.HostMediaID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the stems could not be read", nil)
+		return
+	}
+	if len(missing) > 0 {
+		_ = wire.WriteError(w, http.StatusNotFound, codeStemsNotFound, "both stems name stored audio the owner holds", stemsMissingDetail{MissingMediaIDs: missing})
+		return
 	}
 	moved, err := h.episodes.CompleteStems(r.Context(), owner.ID, episodeID,
-		body.UserMediaID, body.HostMediaID, body.UserSampleRate, body.HostSampleRate)
+		userID, hostID, body.UserSampleRate, body.HostSampleRate)
 	if errors.Is(err, episode.ErrNotFound) {
 		_ = wire.WriteError(w, http.StatusNotFound, api.CodeEpisodeNotFound, "no episode lives at this id", nil)
 		return
@@ -1660,6 +1716,73 @@ func blobOwner(ctx context.Context, db *sqlite.DB, blobID string) (string, error
 		return "", fmt.Errorf("reprise: read blob owner: %w", err)
 	}
 	return owner, nil
+}
+
+// resolveStems returns the blob pair one completion links. It prefers the
+// posted pair when the owner holds both. When a posted blob is unknown
+// or belongs to someone else, it falls back to the pair a first attempt
+// already linked, so a retried completion recovers instead of stalling.
+// When nothing can link, it returns the posted ids the owner does not
+// hold, so the refusal names exactly what is missing.
+func (h *stemsComplete) resolveStems(ctx context.Context, ownerID, episodeID, userID, hostID string) (string, string, []string, error) {
+	var missing []string
+	for _, blobID := range []string{userID, hostID} {
+		held, err := blobOwner(ctx, h.db, blobID)
+		if err != nil && !errors.Is(err, errStemsNotFound) {
+			return "", "", nil, err
+		}
+		if errors.Is(err, errStemsNotFound) || held != ownerID {
+			missing = append(missing, blobID)
+		}
+	}
+	if len(missing) == 0 {
+		return userID, hostID, nil, nil
+	}
+	linkedUser, linkedHost, err := linkedStemBlobs(ctx, h.db, ownerID, episodeID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if linkedUser == "" || linkedHost == "" {
+		return "", "", missing, nil
+	}
+	for _, blobID := range []string{linkedUser, linkedHost} {
+		held, err := blobOwner(ctx, h.db, blobID)
+		if err != nil || held != ownerID {
+			if err != nil && !errors.Is(err, errStemsNotFound) {
+				return "", "", nil, err
+			}
+			return "", "", missing, nil
+		}
+	}
+	return linkedUser, linkedHost, nil, nil
+}
+
+// linkedStemBlobs returns the blob pair one completion already linked for
+// one owner episode. The oldest row wins per role, matching the stem
+// reader, so a repeat that stored a second pair never swaps the audio a
+// running job reads. Empty ids report that nothing linked yet.
+func linkedStemBlobs(ctx context.Context, db *sqlite.DB, ownerID, episodeID string) (string, string, error) {
+	rows, err := db.Reader().QueryContext(ctx,
+		`SELECT media_id, role FROM stems WHERE owner_id = ? AND episode_id = ? ORDER BY rowid ASC`,
+		ownerID, episodeID)
+	if err != nil {
+		return "", "", fmt.Errorf("reprise: read linked stems: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]string{}
+	for rows.Next() {
+		var mediaID, role string
+		if err := rows.Scan(&mediaID, &role); err != nil {
+			return "", "", fmt.Errorf("reprise: read linked stems: %w", err)
+		}
+		if _, seen := found[role]; !seen {
+			found[role] = mediaID
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", fmt.Errorf("reprise: read linked stems: %w", err)
+	}
+	return found[transcript.RoleUser], found[transcript.RoleHost], nil
 }
 
 // hasEditWords reports whether the transcript pass already landed the word
