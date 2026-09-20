@@ -537,7 +537,7 @@ requires:   T7.14
 fixture-ok: yes
 size:       XS · light
 owns:       internal/retention/, internal/privacy/
-status:     in-progress:review-r1:t7.21-rev-r1@bd9d4c8b042b65012e22fe13046bc8433f6b6d00
+status:     done:8d9ff10d67dbd1b534a8535979c8b30a91027d5c
 ```
 CI caught a data race T7.14 missed: `retention.Service.run()` reads
 a field at `sweep.go:157` while the test writes it through
@@ -568,6 +568,9 @@ both resume tests pass twenty consecutive race runs.
 
 ### What exists now
 
+T7.21 landed after round 1 APPROVE with zero in-scope findings. The
+bound runner sits behind a lock on all paths, ruled by an explicit
+happens-before chain. The gate stops racing.
 T7.20 landed after round 1 APPROVE with zero findings. Take calls
 fail loudly by name with no double mint, and the clock freezes with
 the take.
