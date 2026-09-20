@@ -467,7 +467,7 @@ requires:   T7.12, T2.4
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/record/
-status:     in-progress:remediate-r1:t7.18-rem-r1
+status:     in-progress:review-r2:t7.18-rev-r2@aa52124e3f7b85ab29232d032bf68670dc10622b
 ```
 A real take died silently when Cloudflare answered API calls with a
 challenge page: uploads, transcript rows, and session end all failed
