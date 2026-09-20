@@ -1314,7 +1314,26 @@ The socket reported 14.63991 seconds. The Sessions API reports
 15.032889 seconds. The two agree within 0.4 seconds, and the close
 reason is `client_end`, which matches the explicit `session.end`.
 A fresh honest mint after the end answered 201, which proves the
-ceiling is not leaking held reservations.
+ceiling is not leaking held reservations. The mint ran from the
+workstation and never opened the socket, so it bills nothing.
+
+Command (mint only, no socket, no state change beyond the mint):
+
+```bash
+curl -sS -c jar.txt -b jar.txt -X POST https://reprise.nryn.dev/api/sessions \
+  -H 'Content-Type: application/json' -d '{}' -o mint.json -w 'HTTP %{http_code}\n'
+```
+
+Output (token redacted):
+
+```text
+HTTP 201
+```
+
+The body carries `session_id`, `episode_id`, a single use provider
+token, `expires_in_seconds` 60, and `max_session_duration_seconds`
+1800. The socket never opened, so no provider session exists and no
+connected second bills.
 
 Result: pass.
 
