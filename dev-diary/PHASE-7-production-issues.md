@@ -285,7 +285,7 @@ requires:   T7.9
 fixture-ok: no
 size:       XS · light
 owns:       dev-diary/probes/production.md
-status:     in-progress:review-r2:t7.10-rev-r2@65763ea97c2c6d5dce90cab5c91c9d8e38517fd8
+status:     done:80b480212498fedc75dcbaebc6bd45f19fb24e0c
 ```
 Runs once, after T7.9 deploys. Repeats the round 3 flow live and
 appends a round 4 note without touching earlier rounds. Closes the
@@ -339,6 +339,30 @@ navigates away without posting.
 **Done when:** Playwright ends a mock take and the draft move fires
 with no manual handle. A failed post refuses loudly with a working
 retry.
+
+### T7.13: Batch transcript model id
+```yaml
+requires:   T3.1, T7.10
+fixture-ok: yes
+size:       XS · light
+owns:       internal/assemblyai/, internal/settings/
+status:     not-started
+```
+Round 4 carried one defect: the batch transcript request sends a
+`speech_models` value the provider rejects with 400, naming only
+`universal-3-pro`, `universal-2`, and `universal-3-5-pro`. No episode
+reaches proposals while that value stands.
+
+* Send a model id the provider accepts on the edit and analysis
+  batch paths, with the setting as the single source of the value.
+  The T0.4 probe measured Universal-3.5 Pro within 150 ms per word,
+  so that id is the default unless a live remeasure says otherwise.
+* Pin the accepted set against a recorded provider error shape, so
+  the next rename fails in tests instead of on the box.
+
+**Done when:** A fixture transcript request carries the accepted id
+from settings, and a test rejects a renamed id against the recorded
+400 shape.
 
 ---
 
