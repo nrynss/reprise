@@ -491,7 +491,7 @@ requires:   T2.1, T7.6
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     in-progress:review-r2:t7.19-rev-r2@b81bc02894952eba9abcbc6956b2f7169e41f1cd
+status:     done:ddb47aef4de1a8f5fdf7855b5e311c515a1be60d
 ```
 A real take fires chunk uploads, polls, and the completion post
 faster than the route limits allow. The edge answers 429 on the
@@ -546,6 +546,9 @@ with the take.
 
 ### What exists now
 
+T7.19 landed after round 2 APPROVE with zero residue. Take budgets
+fit machine traffic with honest hints, and retried completions heal
+against linked pairs.
 T7.18 landed after round 2 APPROVE with zero residue. Challenge
 answers surface by name with a working retry. The voice-layer guard
 and clock carry to T7.20.
