@@ -131,7 +131,7 @@ requires:   T5.3, T1.4
 fixture-ok: yes
 size:       S · mid
 owns:       internal/limits/, web/src/routes/admin/
-status:     blocked:owner login, which lands after dogfooding
+status:     blocked:deferred, owner login ships as its own phase after dogfooding
 ```
 The probe measured pause and limits answering 403 `owner_required`
 behind `StubOwnerAuth`, so the kill switch path is covered by broker
@@ -516,7 +516,7 @@ requires:   T7.18, T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/
-status:     not-started
+status:     in-progress:implement:t7.20-impl
 ```
 Round 1 scoped two gaps outside T7.18: the mint, chunk upload, and
 session end calls run through the unchecked client, and the elapsed
@@ -612,6 +612,9 @@ Nothing yet.
 
 ### Notes for the next developer
 
+T7.4 is deferred, not merely waiting: owner login plus the live
+switch exercise ships as its own phase after dogfooding, not as a
+leftover row here.
 Owner login lands after dogfooding, so T7.4 waits past the
 re-verification. T7.5 records that sequencing and skips the switch
 flip until the login exists.
