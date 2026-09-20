@@ -1,6 +1,7 @@
 package privacy_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/nrynss/keel/erase"
@@ -10,9 +11,11 @@ import (
 
 // TestEraseRestartResumesAndFinishes pins the crash half. The provider
 // delete holds mid-erase while a fresh runner opens on the same job
-// ledger, the way a restarted process reopens it. The new runner
-// interrupts the stalled attempt and resumes from its ledger, so only
-// the unconfirmed targets delete again and the erasure finishes.
+// ledger, the way a restarted process reopens it. The test then stops
+// the superseded attempt before releasing the provider, the way the
+// crashed process stays dead. The new runner resumes from its ledger,
+// so only the unconfirmed targets delete again and the erasure
+// finishes exactly once.
 func TestEraseRestartResumesAndFinishes(t *testing.T) {
 	fx := openFixture(t)
 	fx.as("owner-a")
@@ -28,6 +31,7 @@ func TestEraseRestartResumesAndFinishes(t *testing.T) {
 	}
 	fx.waitErased(t, gone.episode)
 
+	old := fx.runner
 	runner, err := job.Open(t.Context(), job.Config{
 		Broker: stream.New(stream.Config{}),
 		Store:  fx.jobStore,
@@ -39,6 +43,10 @@ func TestEraseRestartResumesAndFinishes(t *testing.T) {
 	if err := fx.svc.BindRunner(runner); err != nil {
 		t.Fatalf("bind reopened runner: %v", err)
 	}
+	if err := old.Cancel(jobID); err != nil && !errors.Is(err, job.ErrUnknownJob) {
+		t.Fatalf("stop superseded attempt: %v", err)
+	}
+	fx.waitFirstTerminal(t, jobID)
 	close(release)
 
 	fx.waitJobDone(t, jobID)

@@ -1,6 +1,7 @@
 package retention_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -10,9 +11,11 @@ import (
 
 // TestSweepRestartResumesAndFinishes pins the crash half. The provider
 // delete holds mid-sweep while a fresh runner opens on the same job
-// ledger, the way a restarted process reopens it. The new runner
-// interrupts the stalled attempt and resumes from its snapshot, so the
-// sweep finishes with the expired guest gone and the fresh guest intact.
+// ledger, the way a restarted process reopens it. The test then stops
+// the superseded attempt before releasing the provider, the way the
+// crashed process stays dead. The new runner resumes from its snapshot,
+// so the sweep finishes with the expired guest gone and the fresh
+// guest intact.
 func TestSweepRestartResumesAndFinishes(t *testing.T) {
 	fx := openFixture(t)
 	idle := testNow.Add(-testWindow).Add(-time.Hour)
@@ -28,6 +31,7 @@ func TestSweepRestartResumesAndFinishes(t *testing.T) {
 	}
 	fx.waitGuestEpisodesBelow(t, "guest-gone", 2)
 
+	old := fx.runner
 	runner, err := job.Open(t.Context(), job.Config{
 		Broker: stream.New(stream.Config{}),
 		Store:  fx.jobStore,
@@ -40,6 +44,10 @@ func TestSweepRestartResumesAndFinishes(t *testing.T) {
 		t.Fatalf("bind reopened runner: %v", err)
 	}
 	fx.runner = runner
+	if err := old.Cancel(jobID); err != nil && !errors.Is(err, job.ErrUnknownJob) {
+		t.Fatalf("stop superseded attempt: %v", err)
+	}
+	fx.waitFirstTerminal(t, jobID)
 	close(release)
 
 	fx.waitSweepDone(t, jobID)

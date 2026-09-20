@@ -448,9 +448,10 @@ func (fx *fixture) waitErased(t *testing.T, episodeID string) {
 	}
 }
 
-// waitJobDone polls the job chain until one attempt reads done. It
-// fails past the deadline, so a stuck job fails loudly instead of
-// hanging the suite.
+// waitJobDone polls the job chain until the latest attempt lands. Older
+// attempts may read interrupted or cancelled after a restart, so only
+// the latest attempt decides. It fails past the deadline, so a stuck job
+// fails loudly instead of hanging the suite.
 func (fx *fixture) waitJobDone(t *testing.T, jobID string) {
 	t.Helper()
 	deadline := waitDeadline()
@@ -459,15 +460,36 @@ func (fx *fixture) waitJobDone(t *testing.T, jobID string) {
 		if err != nil {
 			t.Fatalf("list attempts: %v", err)
 		}
-		for _, rec := range attempts {
-			if rec.Status == job.StatusDone {
+		if len(attempts) > 0 {
+			switch last := attempts[len(attempts)-1]; last.Status {
+			case job.StatusDone:
 				return
-			}
-			if rec.Status == job.StatusError {
-				t.Fatalf("job failed: %v", rec.Err)
+			case job.StatusError, job.StatusCancelled, job.StatusInterrupted:
+				t.Fatalf("job failed: %v", last.Err)
 			}
 		}
 		pastDeadline(t, deadline, "job never finished")
+	}
+}
+
+// waitFirstTerminal polls the first attempt of the chain until it lands.
+// The restart test stops the superseded attempt before it releases the
+// provider double, so only the resumed attempt drives work after that.
+func (fx *fixture) waitFirstTerminal(t *testing.T, jobID string) {
+	t.Helper()
+	deadline := waitDeadline()
+	for {
+		attempts, err := fx.jobStore.Attempts(t.Context(), jobID)
+		if err != nil {
+			t.Fatalf("list attempts: %v", err)
+		}
+		if len(attempts) > 0 {
+			switch first := attempts[0]; first.Status {
+			case job.StatusDone, job.StatusError, job.StatusCancelled, job.StatusInterrupted:
+				return
+			}
+		}
+		pastDeadline(t, deadline, "superseded attempt never landed")
 	}
 }
 

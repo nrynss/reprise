@@ -473,9 +473,11 @@ func (fx *fixture) sessionRows(t *testing.T, user string) int {
 	return total
 }
 
-// waitSweepDone polls the sweep job until one attempt reads done. A failed
-// attempt fails the test with the recorded error, so a stuck sweep fails
-// loudly instead of hanging the suite.
+// waitSweepDone polls the sweep job until the latest attempt lands. Older
+// attempts may read interrupted or cancelled after a restart, so only
+// the latest attempt decides. A failed latest attempt fails the test
+// with the recorded error, so a stuck sweep fails loudly instead of
+// hanging the suite.
 func (fx *fixture) waitSweepDone(t *testing.T, jobID string) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
@@ -484,16 +486,40 @@ func (fx *fixture) waitSweepDone(t *testing.T, jobID string) {
 		if err != nil {
 			t.Fatalf("list attempts: %v", err)
 		}
-		for _, rec := range attempts {
-			if rec.Status == job.StatusDone {
+		if len(attempts) > 0 {
+			switch last := attempts[len(attempts)-1]; last.Status {
+			case job.StatusDone:
 				return
-			}
-			if rec.Status == job.StatusError {
-				t.Fatalf("sweep failed: %v", rec.Err)
+			case job.StatusError, job.StatusCancelled, job.StatusInterrupted:
+				t.Fatalf("sweep failed: %v", last.Err)
 			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("sweep %s never finished", jobID)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// waitFirstTerminal polls the first attempt of the chain until it lands.
+// The restart test stops the superseded attempt before it releases the
+// provider double, so only the resumed attempt drives work after that.
+func (fx *fixture) waitFirstTerminal(t *testing.T, jobID string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		attempts, err := fx.jobStore.Attempts(t.Context(), jobID)
+		if err != nil {
+			t.Fatalf("list attempts: %v", err)
+		}
+		if len(attempts) > 0 {
+			switch first := attempts[0]; first.Status {
+			case job.StatusDone, job.StatusError, job.StatusCancelled, job.StatusInterrupted:
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("superseded attempt of %s never landed", jobID)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
