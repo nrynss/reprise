@@ -4,7 +4,7 @@
 // Quotes always name an episode and an offset, and playback seeks to
 // that offset when a thread link opens.
 import { AudioPlayer } from '@nrynss/chaaya/audio';
-import { JobStream, type JobSnapshot } from '@nrynss/chaaya/job';
+import { isTerminalStatus, JobStream, type JobSnapshot, type JobStatus } from '@nrynss/chaaya/job';
 import { activeWordAt } from '@nrynss/chaaya/transcript';
 
 export type EpisodeState = 'ready' | 'rendering' | 'draft';
@@ -752,17 +752,76 @@ export interface GalleryCardProgress {
 	running: boolean;
 }
 
+// One gallery row in either mode. Fixture rows carry a duration and a
+// cover badge from the scripted season. Live rows carry what the list
+// handler answers: id, number, title, state, and visibility. Duration
+// stays null until the detail exposes it, and the card omits the line.
+export interface SeasonRow {
+	id: string;
+	number: number;
+	title: string;
+	state: string;
+	visibility: string;
+	meta: string;
+	duration: number | null;
+	jobId: string;
+	fixture: boolean;
+}
+
+// A fixture episode as a gallery row. Ready rows open the episode,
+// drafts open the editor, and rendering rows open the processing
+// screen that reads the same job stream as the card.
+export function fixtureRow(episode: EpisodeFixture): SeasonRow {
+	return {
+		id: episode.id,
+		number: episode.number,
+		title: episode.title,
+		state: episode.state,
+		visibility: episode.published ? 'public' : 'private',
+		meta: `${episode.date} · ${formatClock(episode.duration)}`,
+		duration: episode.duration,
+		jobId: episode.jobId,
+		fixture: true
+	};
+}
+
+// A listed episode as a gallery row. The detail fills the job id later
+// for rows that still run, so every card links to its episode view.
+export function liveRow(episode: LiveEpisode, jobId: string): SeasonRow {
+	return {
+		id: episode.id,
+		number: episode.number,
+		title: episode.title,
+		state: episode.state,
+		visibility: episode.visibility,
+		meta: episode.visibility === 'public' ? 'Public' : 'Private',
+		duration: null,
+		jobId,
+		fixture: false
+	};
+}
+
 // Everything the gallery renders.
 export interface GallerySnapshot {
 	ready: boolean;
 	notice: string;
-	season: EpisodeFixture[];
+	failed: boolean;
+	live: boolean;
+	rows: SeasonRow[];
 	progress: Record<string, GalleryCardProgress>;
 	gateResult: string;
 }
 
 export function emptyGallery(): GallerySnapshot {
-	return { ready: false, notice: 'Loading the season.', season: [], progress: {}, gateResult: '' };
+	return {
+		ready: false,
+		notice: 'Loading the season.',
+		failed: false,
+		live: true,
+		rows: [],
+		progress: {},
+		gateResult: ''
+	};
 }
 
 // The gallery snapshot before any job stream opens. Pure, so the
@@ -776,24 +835,29 @@ export function initialGallery(search = ''): GallerySnapshot {
 	return {
 		ready: true,
 		notice: 'Scripted season. No backend needed.',
-		season: listSeason(state),
+		failed: false,
+		live: false,
+		rows: listSeason(state).map((episode) => fixtureRow(episode)),
 		progress: {},
 		gateResult: ''
 	};
 }
 
-// The gallery behind the season screen. It draws the scripted season
-// with the fifth episode in its lab state and follows every rendering
-// job through the same follower the processing screen reads, so the
-// card and that screen never drift into two mechanisms. Progress
-// renders the high-water mark, so a replayed stream never drags the
-// card backwards, across a reload included.
+// The gallery behind the season screen. The fixture flag keeps the
+// scripted season for offline runs. Otherwise the screen lists the
+// owner episodes newest first and follows every unfinished row through
+// the job its detail names, with the same follower the processing
+// screen reads. Progress renders the high-water mark, so a replayed
+// stream never drags the card backwards, across a reload included.
 export class GalleryController {
 	private snap: GallerySnapshot;
 	private readonly onChange: (snap: GallerySnapshot) => void;
 	private streams: Array<{ jobId: string; stream: JobStream }> = [];
+	private cleanups: Array<() => void> = [];
 	private restoreMock: (() => void) | null = null;
 	private timer: number | null = null;
+	private search = '';
+	private statuses: Record<string, JobStatus> = {};
 
 	constructor(onChange: (snap: GallerySnapshot) => void) {
 		this.onChange = onChange;
@@ -801,15 +865,125 @@ export class GalleryController {
 	}
 
 	mount(search: string): void {
+		this.search = search;
+		this.teardown();
+		this.snap = emptyGallery();
+		if (queryValue(search, 'fixture') === '1') {
+			this.mountFixture(search);
+		} else {
+			this.snap = { ...this.snap, ready: false, notice: 'Loading the live season.' };
+			this.emit();
+			void this.mountLive();
+		}
+		this.watchGates(search);
+	}
+
+	retry(): void {
+		this.mount(this.search);
+	}
+
+	destroy(): void {
+		this.teardown();
+	}
+
+	// The progress one card shows, or the idle card before the first
+	// stream reading lands.
+	cardFor(jobId: string): GalleryCardProgress {
+		const held = this.snap.progress[jobId];
+		if (held) return held;
+		return { jobId, percent: 0, detail: 'Waiting for the job.', running: true };
+	}
+
+	private mountFixture(search: string): void {
 		const snapshot = initialGallery(search);
 		this.restoreMock = installMockJob(RENDER_JOB_ID);
-		this.snap = { ...this.snap, season: snapshot.season, ready: true, notice: snapshot.notice };
-		for (const episode of this.snap.season) {
-			if (episode.state === 'rendering' && episode.jobId) this.followJob(episode.jobId);
+		this.snap = {
+			...this.snap,
+			rows: snapshot.rows,
+			ready: true,
+			live: false,
+			notice: snapshot.notice
+		};
+		for (const row of this.snap.rows) {
+			if (row.jobId) {
+				this.statuses[row.jobId] = 'running';
+				this.followJob(row.jobId);
+			}
 		}
 		this.emit();
-		this.refresh();
 		this.timer = window.setInterval(() => this.refresh(), 500);
+		this.expose();
+	}
+
+	private async mountLive(): Promise<void> {
+		let listed: LiveEpisode[];
+		try {
+			listed = await fetchSeason(window.fetch);
+		} catch {
+			this.snap = {
+				...this.snap,
+				ready: true,
+				failed: true,
+				notice: 'The season endpoint refused, so no rows render. Retry the load.'
+			};
+			this.emit();
+			return;
+		}
+		if (listed.length === 0) {
+			this.snap = {
+				...this.snap,
+				ready: true,
+				notice: 'No episodes yet. Record the first one and it lands here.'
+			};
+			this.emit();
+			return;
+		}
+		this.snap = {
+			...this.snap,
+			rows: listed.map((episode) => liveRow(episode, '')),
+			ready: true,
+			notice: 'Live season, newest first.'
+		};
+		this.emit();
+		await this.followUnfinished(listed);
+		this.timer = window.setInterval(() => this.refresh(), 500);
+		this.expose();
+	}
+
+	// Detail answers per unfinished row carry the latest pass job, so
+	// the card follows a real id. A refused detail leaves the row on
+	// its state text instead of failing the whole season.
+	private async followUnfinished(listed: LiveEpisode[]): Promise<void> {
+		let changed = false;
+		for (const episode of listed) {
+			if (episode.state === 'ready') continue;
+			const found = await this.jobOf(episode);
+			if (!found) continue;
+			this.statuses[found.jobId] = outcomeJobStatus(found.status);
+			this.followJob(found.jobId);
+			const row = this.snap.rows.find((candidate) => candidate.id === episode.id);
+			if (row && row.jobId !== found.jobId) {
+				row.jobId = found.jobId;
+				changed = true;
+			}
+		}
+		if (changed) this.emit();
+	}
+
+	// The latest pass job behind one unfinished episode, or null when
+	// the detail refuses or names none.
+	private async jobOf(episode: LiveEpisode): Promise<{ jobId: string; status: string } | null> {
+		try {
+			const detail = await fetchEpisodeDetail(window.fetch, episode.id);
+			const jobId = detail.outcome?.jobId ?? '';
+			if (!jobId) return null;
+			return { jobId, status: detail.outcome?.status ?? '' };
+		} catch {
+			return null;
+		}
+	}
+
+	private expose(): void {
 		const target = window as unknown as Record<string, unknown>;
 		target['__gallery'] = {
 			progress: () => {
@@ -817,38 +991,41 @@ export class GalleryController {
 				return cards.length > 0 ? (cards[0]?.percent ?? 0) : 0;
 			}
 		};
-		if (queryValue(search, 'gate') === '1') {
-			const main = document.querySelector('main');
-			if (main) {
-				void runSeasonGates(main).then((result) => {
-					this.snap = { ...this.snap, gateResult: result };
-					this.emit();
-				});
-			}
+	}
+
+	private watchGates(search: string): void {
+		if (queryValue(search, 'gate') !== '1') return;
+		const main = document.querySelector('main');
+		if (main) {
+			void runSeasonGates(main).then((result) => {
+				this.snap = { ...this.snap, gateResult: result };
+				this.emit();
+			});
 		}
 	}
 
-	destroy(): void {
+	private teardown(): void {
 		if (this.timer !== null) {
 			window.clearInterval(this.timer);
 			this.timer = null;
 		}
+		for (const cleanup of this.cleanups) {
+			try {
+				cleanup();
+			} catch {
+				// A spent cleanup never blocks the rest.
+			}
+		}
+		this.cleanups = [];
 		for (const entry of this.streams) entry.stream.close();
 		this.streams = [];
 		this.restoreMock?.();
 		this.restoreMock = null;
-	}
-
-	// The progress one rendering card shows, or the idle card before
-	// the first stream reading lands.
-	cardFor(jobId: string): GalleryCardProgress {
-		const held = this.snap.progress[jobId];
-		if (held) return held;
-		return { jobId, percent: 0, detail: 'Waiting for the render.', running: true };
+		this.statuses = {};
 	}
 
 	private emit(): void {
-		this.onChange({ ...this.snap, season: [...this.snap.season], progress: { ...this.snap.progress } });
+		this.onChange({ ...this.snap, rows: [...this.snap.rows], progress: { ...this.snap.progress } });
 	}
 
 	private followJob(jobId: string): void {
@@ -860,21 +1037,30 @@ export class GalleryController {
 				[jobId]: {
 					jobId,
 					percent: seed,
-					detail: seed > 0 ? `Rendering · ${seed}% · kept across reload` : 'Rendering · starting.',
+					detail: seed > 0 ? `Working · ${seed}% · kept across reload` : 'Working · starting.',
 					running: true
 				}
 			}
 		};
+		const statuses = this.statuses;
 		const stream = new JobStream({
 			url: `/api/jobs/${encodeURIComponent(jobId)}/events`,
 			fetchState: async (): Promise<JobSnapshot> => {
-				const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
-				if (!response.ok) throw new Error(`job ${response.status}`);
-				return (await response.json()) as JobSnapshot;
+				try {
+					const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+					if (response.ok) return (await response.json()) as JobSnapshot;
+				} catch {
+					// The state endpoint stays unwired, so the seed stands.
+				}
+				return { jobId, status: statuses[jobId] ?? 'running' };
 			}
 		});
 		this.streams.push({ jobId, stream });
-		stream.attach();
+		// Explicit cleanup because the stream may attach after an
+		// await, outside the effect context the default runner needs.
+		stream.attach((task) => {
+			this.cleanups.push(task());
+		});
 	}
 
 	private refresh(): void {
@@ -884,13 +1070,14 @@ export class GalleryController {
 			const live = progressPercent(entry.stream.current ?? 0, entry.stream.total ?? 4);
 			const held = next[entry.jobId]?.percent ?? 0;
 			const percent = writeHighWater(browserStore(), entry.jobId, Math.max(live, held));
-			const running = entry.stream.status === 'queued' || entry.stream.status === 'running';
+			const running = !isTerminalStatus(entry.stream.status);
+			const stage = entry.stream.stage ? `${entry.stream.stage} · ` : '';
 			const detail =
 				entry.stream.status === 'done'
-					? 'Render ready.'
+					? 'Ready. Open the episode.'
 					: entry.stream.connection === 'failed'
 						? 'The job stream failed. The mark above is kept.'
-						: `Rendering · ${percent}% · progress survives a reload`;
+						: `Working · ${stage}${percent}% · progress survives a reload`;
 			if (!next[entry.jobId] || next[entry.jobId]?.percent !== percent || next[entry.jobId]?.detail !== detail) {
 				next[entry.jobId] = { jobId: entry.jobId, percent, detail, running };
 				changed = true;
@@ -903,12 +1090,33 @@ export class GalleryController {
 	}
 }
 
-// Everything the episode view renders.
-export interface EpisodeSnapshot {
+// Everything the episode view renders. Fixture rows carry generated
+// audio, chapters, notes, and timed words. Live rows carry what the
+// detail answers: metadata, proposals, and the latest pass outcome,
+// plus quoted moments from the thread index. Audio stays empty until
+// the detail exposes a stream address, and the view says so.
+export interface EpisodeScreen {
 	ready: boolean;
 	notice: string;
-	episode: EpisodeFixture | null;
+	failed: boolean;
+	missing: boolean;
+	live: boolean;
+	id: string;
+	number: number;
+	title: string;
+	state: string;
+	visibility: string;
+	audioUrl: string;
+	duration: number | null;
+	chapters: Chapter[];
+	notes: string;
 	words: Word[];
+	proposals: LiveProposal[];
+	outcome: LiveOutcome | null;
+	moments: LiveThreadHit[];
+	momentWord: number | null;
+	momentQuote: string | null;
+	coveringId: string | null;
 	position: number;
 	playing: boolean;
 	published: boolean;
@@ -918,12 +1126,29 @@ export interface EpisodeSnapshot {
 	gateResult: string;
 }
 
-export function emptyEpisode(): EpisodeSnapshot {
+export function emptyScreen(id: string): EpisodeScreen {
 	return {
 		ready: false,
 		notice: 'Loading the episode.',
-		episode: null,
+		failed: false,
+		missing: false,
+		live: true,
+		id,
+		number: 0,
+		title: '',
+		state: '',
+		visibility: '',
+		audioUrl: '',
+		duration: null,
+		chapters: [],
+		notes: '',
 		words: [],
+		proposals: [],
+		outcome: null,
+		moments: [],
+		momentWord: null,
+		momentQuote: null,
+		coveringId: null,
 		position: 0,
 		playing: false,
 		published: false,
@@ -934,65 +1159,32 @@ export function emptyEpisode(): EpisodeSnapshot {
 	};
 }
 
-// The episode behind its view. Fixture words carry the timings, the
-// player carries playback, and every seek parks the readout first, so
-// a refused play still leaves the playhead where the quote starts.
-// Publish, erase, and export render their states here. Their actions
-// live elsewhere, so each control degrades to a notice in the fixture.
+// The episode behind its view. The fixture flag keeps the scripted
+// episode with generated audio. Otherwise the view reads the wired
+// detail: proposals with their word ranges and decisions, the latest
+// pass outcome, and quoted moments from the thread index. A moment
+// word parks on its covering proposal and names its quote.
 export class EpisodeController {
 	readonly episodeId: string;
-	private snap: EpisodeSnapshot;
-	private readonly onChange: (snap: EpisodeSnapshot) => void;
+	private snap: EpisodeScreen;
+	private readonly onChange: (snap: EpisodeScreen) => void;
 	private player: AudioPlayer | null = null;
 	private ticker: number | null = null;
+	private search = '';
 
-	constructor(episodeId: string, onChange: (snap: EpisodeSnapshot) => void) {
+	constructor(episodeId: string, onChange: (snap: EpisodeScreen) => void) {
 		this.episodeId = episodeId;
 		this.onChange = onChange;
-		this.snap = emptyEpisode();
+		this.snap = emptyScreen(episodeId);
 	}
 
 	mount(search: string): void {
-		const found = episodeById(this.episodeId);
-		if (!found) {
-			this.snap = { ...this.snap, ready: true, notice: 'No scripted episode carries that id.' };
-			this.emit();
-			return;
+		this.search = search;
+		if (queryValue(search, 'fixture') === '1') {
+			this.mountFixture(search);
+		} else {
+			void this.mountLive(search);
 		}
-		const episode = { ...found };
-		const words = buildWords(episode.turns);
-		this.player?.pause();
-		this.player = new AudioPlayer();
-		const url = episodeAudioUrl(episode);
-		if (url) this.player.load(url);
-		this.snap = {
-			...this.snap,
-			ready: true,
-			notice: 'Scripted episode. No backend needed.',
-			episode,
-			words,
-			published: queryValue(search, 'published') === '1'
-		};
-		const at = Number(queryValue(search, 't') ?? '');
-		if (Number.isFinite(at) && at > 0) {
-			this.seekTo(Math.min(at, episode.duration));
-			this.snap = {
-				...this.snap,
-				notice:
-					queryValue(search, 'play') === '1'
-						? `Playhead at the quoted moment, ${formatClock(this.snap.position)}. Press play to hear it from there.`
-						: `Playhead at the quoted moment, ${formatClock(this.snap.position)}.`
-			};
-		}
-		this.emit();
-		const target = window as unknown as Record<string, unknown>;
-		target['__episode'] = {
-			position: () => this.snap.position,
-			playing: () => this.snap.playing,
-			quote: () => (Number.isFinite(at) && at > 0 ? at : null),
-			failure: () => this.player?.error ?? null,
-			source: () => this.player?.source ?? null
-		};
 		if (queryValue(search, 'gate') === '1') {
 			const main = document.querySelector('main');
 			if (main) {
@@ -1002,6 +1194,10 @@ export class EpisodeController {
 				});
 			}
 		}
+	}
+
+	retry(): void {
+		this.mount(this.search);
 	}
 
 	destroy(): void {
@@ -1014,8 +1210,8 @@ export class EpisodeController {
 	}
 
 	seekTo(seconds: number): void {
-		if (!this.snap.episode) return;
-		const clamped = Math.max(0, Math.min(this.snap.episode.duration, seconds));
+		if (!this.snap.audioUrl || this.snap.duration === null) return;
+		const clamped = Math.max(0, Math.min(this.snap.duration, seconds));
 		this.player?.seek(clamped);
 		this.snap = { ...this.snap, position: clamped };
 		this.follow();
@@ -1036,7 +1232,11 @@ export class EpisodeController {
 	}
 
 	async togglePlay(): Promise<void> {
-		if (!this.player || !this.snap.episode) return;
+		if (!this.player || !this.snap.audioUrl) {
+			this.snap = { ...this.snap, notice: 'No audio stream on this episode yet.' };
+			this.emit();
+			return;
+		}
 		if (this.player.playing) {
 			this.player.pause();
 			this.snap = { ...this.snap, playing: false, position: this.player.currentTime || this.snap.position };
@@ -1078,12 +1278,8 @@ export class EpisodeController {
 			return;
 		}
 		this.snap = { ...this.snap, eraseArmed: false };
-		if (!this.snap.episode) {
-			this.emit();
-			return;
-		}
 		try {
-			const response = await fetch(`/api/episodes/${encodeURIComponent(this.snap.episode.id)}`, {
+			const response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`, {
 				method: 'DELETE'
 			});
 			this.snap = {
@@ -1103,6 +1299,130 @@ export class EpisodeController {
 		this.emit();
 	}
 
+	private mountFixture(search: string): void {
+		const found = episodeById(this.episodeId);
+		if (!found) {
+			this.snap = { ...this.snap, ready: true, missing: true, live: false, notice: 'No scripted episode carries that id.' };
+			this.emit();
+			return;
+		}
+		const episode = { ...found };
+		const words = buildWords(episode.turns);
+		this.player?.pause();
+		this.player = new AudioPlayer();
+		const url = episodeAudioUrl(episode);
+		if (url) this.player.load(url);
+		this.snap = {
+			...emptyScreen(this.episodeId),
+			ready: true,
+			live: false,
+			notice: 'Scripted episode. No backend needed.',
+			id: episode.id,
+			number: episode.number,
+			title: episode.title,
+			state: episode.state,
+			visibility: 'private',
+			audioUrl: url,
+			duration: episode.duration,
+			chapters: episode.chapters,
+			notes: episode.notes,
+			words,
+			published: queryValue(search, 'published') === '1'
+		};
+		const at = Number(queryValue(search, 't') ?? '');
+		if (Number.isFinite(at) && at > 0) {
+			const clamped = Math.min(at, episode.duration);
+			this.player?.seek(clamped);
+			this.snap = {
+				...this.snap,
+				position: clamped,
+				notice:
+					queryValue(search, 'play') === '1'
+						? `Playhead at the quoted moment, ${formatClock(clamped)}. Press play to hear it from there.`
+						: `Playhead at the quoted moment, ${formatClock(clamped)}.`
+			};
+			this.follow();
+		}
+		this.emit();
+		this.expose(Number.isFinite(at) && at > 0 ? at : null);
+	}
+
+	private async mountLive(search: string): Promise<void> {
+		let detail: LiveDetail;
+		try {
+			detail = await fetchEpisodeDetail(window.fetch, this.episodeId);
+		} catch (error) {
+			const missing = error instanceof Error && error.message.startsWith('missing');
+			this.snap = {
+				...emptyScreen(this.episodeId),
+				ready: true,
+				missing,
+				failed: !missing,
+				notice: missing
+					? 'No episode lives at this id.'
+					: 'The episode endpoint refused, so nothing renders. Retry the load.'
+			};
+			this.emit();
+			this.expose(null);
+			return;
+		}
+		const word = Number(queryValue(search, 'w') ?? '');
+		const momentWord = Number.isFinite(word) && word >= 0 ? Math.floor(word) : null;
+		let moments: LiveThreadHit[] = [];
+		try {
+			const index = await fetchThreadsIndex(window.fetch);
+			moments = [...index.names, ...index.topics]
+				.flatMap((thread) => thread.episodes)
+				.filter((hit) => hit.episodeId === this.episodeId);
+		} catch {
+			// Moments stay empty while the thread index refuses.
+		}
+		const momentQuote = momentWord === null ? null : (moments.find((hit) => hit.offset === momentWord)?.quote ?? null);
+		const coveringId =
+			momentWord === null
+				? null
+				: (detail.proposals.find((proposal) => proposal.startWord <= momentWord && momentWord <= proposal.endWord)?.id ?? null);
+		const notice =
+			momentWord === null
+				? 'Live episode from the wired detail.'
+				: momentQuote === null
+					? `Quoted moment at word ${momentWord}. No stored quote names it.`
+					: `Quoted moment at word ${momentWord}. “${momentQuote}”`;
+		this.snap = {
+			...emptyScreen(this.episodeId),
+			ready: true,
+			live: true,
+			notice,
+			id: detail.episode.id,
+			number: detail.episode.number,
+			title: detail.episode.title,
+			state: detail.episode.state,
+			visibility: detail.episode.visibility,
+			audioUrl: '',
+			duration: null,
+			proposals: detail.proposals,
+			outcome: detail.outcome,
+			moments,
+			momentWord,
+			momentQuote,
+			coveringId,
+			published: detail.episode.visibility === 'public'
+		};
+		this.emit();
+		this.expose(momentWord);
+	}
+
+	private expose(quote: number | null): void {
+		const target = window as unknown as Record<string, unknown>;
+		target['__episode'] = {
+			position: () => this.snap.position,
+			playing: () => this.snap.playing,
+			quote: () => quote,
+			failure: () => this.player?.error ?? null,
+			source: () => this.player?.source ?? null
+		};
+	}
+
 	private follow(): void {
 		this.snap = {
 			...this.snap,
@@ -1112,9 +1432,8 @@ export class EpisodeController {
 	}
 
 	private chapterAt(position: number): number {
-		if (!this.snap.episode) return 0;
 		let current = 0;
-		this.snap.episode.chapters.forEach((chapter, index) => {
+		this.snap.chapters.forEach((chapter, index) => {
 			if (position >= chapter.start) current = index;
 		});
 		return current;
@@ -1141,4 +1460,303 @@ export class EpisodeController {
 	private emit(): void {
 		this.onChange({ ...this.snap });
 	}
+}
+
+// Live wire shapes mirror the episode and thread handlers field for
+// field. Parsers below reject anything else, so a renamed backend
+// field fails here instead of rendering a half row.
+
+// One listed episode as the list handler answers it.
+export interface LiveEpisode {
+	id: string;
+	number: number;
+	title: string;
+	state: string;
+	visibility: string;
+}
+
+// One stored proposal with its latest decision, as detail answers it.
+export interface LiveProposal {
+	id: string;
+	kind: string;
+	startWord: number;
+	endWord: number;
+	reason: string;
+	decision: string;
+}
+
+// The latest transcript pass outcome, as detail answers it.
+export interface LiveOutcome {
+	jobId: string;
+	status: string;
+	error: string;
+}
+
+// One episode with its proposals and pass outcome.
+export interface LiveDetail {
+	episode: LiveEpisode;
+	proposals: LiveProposal[];
+	outcome: LiveOutcome | null;
+}
+
+// One appearance of a thread in one episode. Offset counts rendered
+// words, so the episode view parks on the covering proposal.
+export interface LiveThreadHit {
+	episodeId: string;
+	number: number;
+	quote: string;
+	offset: number;
+}
+
+// One recurring name with every stored appearance behind it.
+export interface LiveNameThread {
+	key: string;
+	display: string;
+	kind: string;
+	episodes: LiveThreadHit[];
+	mentionCount: number;
+	episodeCount: number;
+}
+
+// One circling phrase with every stored appearance behind it.
+export interface LiveTopic {
+	key: string;
+	display: string;
+	episodes: LiveThreadHit[];
+	mentionCount: number;
+	episodeCount: number;
+}
+
+// The thread index across the owner episodes.
+export interface LiveThreads {
+	names: LiveNameThread[];
+	topics: LiveTopic[];
+}
+
+// The fetch seam behind the live loaders. Logic checks inject a stub
+// and the page injects the browser fetch.
+export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+
+// True for a plain record, the only shape parsers accept.
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+// One required string field, or empty when the shape drifts.
+function textField(body: Record<string, unknown>, name: string): string {
+	const value = body[name];
+	return typeof value === 'string' ? value : '';
+}
+
+// One required numeric field, or zero when the shape drifts.
+function numberField(body: Record<string, unknown>, name: string): number {
+	const value = body[name];
+	return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+// One listed episode, or null when the row drifts.
+function parseLiveEpisode(value: unknown): LiveEpisode | null {
+	if (!isRecord(value)) return null;
+	const id = textField(value, 'id');
+	const title = textField(value, 'title');
+	if (!id || !title) return null;
+	return {
+		id,
+		number: numberField(value, 'number'),
+		title,
+		state: textField(value, 'state'),
+		visibility: textField(value, 'visibility')
+	};
+}
+
+// The season list newest first. The handler answers oldest first, so
+// the parser reverses by episode number here.
+export function parseSeasonList(raw: string): LiveEpisode[] {
+	let decoded: unknown;
+	try {
+		decoded = JSON.parse(raw);
+	} catch {
+		throw new Error('season is not JSON');
+	}
+	if (!isRecord(decoded) || !Array.isArray(decoded['episodes'])) {
+		throw new Error('season holds no episodes');
+	}
+	const rows: LiveEpisode[] = [];
+	for (const value of decoded['episodes'] as unknown[]) {
+		const episode = parseLiveEpisode(value);
+		if (episode) rows.push(episode);
+	}
+	rows.sort((first, second) => second.number - first.number);
+	return rows;
+}
+
+// One proposal row, or null when the row drifts.
+function parseLiveProposal(value: unknown): LiveProposal | null {
+	if (!isRecord(value)) return null;
+	const id = textField(value, 'id');
+	if (!id) return null;
+	return {
+		id,
+		kind: textField(value, 'kind'),
+		startWord: numberField(value, 'start_word'),
+		endWord: numberField(value, 'end_word'),
+		reason: textField(value, 'reason'),
+		decision: textField(value, 'decision')
+	};
+}
+
+// The pass outcome, or null when no pass ever started.
+function parseLiveOutcome(value: unknown): LiveOutcome | null {
+	if (value === null || value === undefined) return null;
+	if (!isRecord(value)) return null;
+	const jobId = textField(value, 'job_id');
+	if (!jobId) return null;
+	return { jobId, status: textField(value, 'status'), error: textField(value, 'error') };
+}
+
+// One episode detail with its proposals and pass outcome.
+export function parseEpisodeDetail(raw: string): LiveDetail {
+	let decoded: unknown;
+	try {
+		decoded = JSON.parse(raw);
+	} catch {
+		throw new Error('detail is not JSON');
+	}
+	if (!isRecord(decoded)) throw new Error('detail holds no episode');
+	const episode = parseLiveEpisode(decoded['episode']);
+	if (!episode) throw new Error('detail holds no episode');
+	const rawProposals = Array.isArray(decoded['proposals']) ? (decoded['proposals'] as unknown[]) : [];
+	const proposals: LiveProposal[] = [];
+	for (const value of rawProposals) {
+		const proposal = parseLiveProposal(value);
+		if (proposal) proposals.push(proposal);
+	}
+	return { episode, proposals, outcome: parseLiveOutcome(decoded['transcript_outcome']) };
+}
+
+// One thread appearance, or null when the hit drifts.
+function parseLiveHit(value: unknown): LiveThreadHit | null {
+	if (!isRecord(value)) return null;
+	const episodeId = textField(value, 'episode_id');
+	const quote = textField(value, 'quote');
+	if (!episodeId || !quote) return null;
+	return { episodeId, number: numberField(value, 'number'), quote, offset: numberField(value, 'offset') };
+}
+
+// One name thread with every stored appearance behind it.
+function parseNameThread(value: unknown): LiveNameThread | null {
+	if (!isRecord(value)) return null;
+	const key = textField(value, 'key');
+	if (!key) return null;
+	const rawHits = Array.isArray(value['episodes']) ? (value['episodes'] as unknown[]) : [];
+	const episodes: LiveThreadHit[] = [];
+	for (const hit of rawHits) {
+		const parsed = parseLiveHit(hit);
+		if (parsed) episodes.push(parsed);
+	}
+	return {
+		key,
+		display: textField(value, 'display') || key,
+		kind: textField(value, 'kind'),
+		episodes,
+		mentionCount: numberField(value, 'mention_count'),
+		episodeCount: numberField(value, 'episode_count')
+	};
+}
+
+// One circled topic with every stored appearance behind it.
+function parseLiveTopic(value: unknown): LiveTopic | null {
+	if (!isRecord(value)) return null;
+	const key = textField(value, 'key');
+	if (!key) return null;
+	const rawHits = Array.isArray(value['episodes']) ? (value['episodes'] as unknown[]) : [];
+	const episodes: LiveThreadHit[] = [];
+	for (const hit of rawHits) {
+		const parsed = parseLiveHit(hit);
+		if (parsed) episodes.push(parsed);
+	}
+	return {
+		key,
+		display: textField(value, 'display') || key,
+		episodes,
+		mentionCount: numberField(value, 'mention_count'),
+		episodeCount: numberField(value, 'episode_count')
+	};
+}
+
+// The thread index with recurring names and circled topics.
+export function parseThreadsIndex(raw: string): LiveThreads {
+	let decoded: unknown;
+	try {
+		decoded = JSON.parse(raw);
+	} catch {
+		throw new Error('threads are not JSON');
+	}
+	if (!isRecord(decoded)) throw new Error('threads hold no index');
+	const rawNames = Array.isArray(decoded['name_threads']) ? (decoded['name_threads'] as unknown[]) : [];
+	const rawTopics = Array.isArray(decoded['circled_topics']) ? (decoded['circled_topics'] as unknown[]) : [];
+	const names: LiveNameThread[] = [];
+	for (const value of rawNames) {
+		const thread = parseNameThread(value);
+		if (thread) names.push(thread);
+	}
+	const topics: LiveTopic[] = [];
+	for (const value of rawTopics) {
+		const topic = parseLiveTopic(value);
+		if (topic) topics.push(topic);
+	}
+	return { names, topics };
+}
+
+// An empty thread index, the shape the thread panel renders before
+// the first load lands.
+export function emptyLiveThreads(): LiveThreads {
+	return { names: [], topics: [] };
+}
+// Read one JSON body. A missing episode throws a missing error the
+// view renders as its empty state. Any other refusal throws its
+// status, and the view renders its retry.
+async function readJSON(fetchFn: FetchFn, url: string): Promise<string> {
+	const response = await fetchFn(url);
+	if (response.status === 404) throw new Error(`missing ${url}`);
+	if (!response.ok) throw new Error(`request ${response.status} for ${url}`);
+	return response.text();
+}
+
+// List the owner episodes newest first.
+export async function fetchSeason(fetchFn: FetchFn): Promise<LiveEpisode[]> {
+	return parseSeasonList(await readJSON(fetchFn, '/api/episodes'));
+}
+
+// Read one episode detail with its proposals and pass outcome.
+export async function fetchEpisodeDetail(fetchFn: FetchFn, id: string): Promise<LiveDetail> {
+	return parseEpisodeDetail(await readJSON(fetchFn, `/api/episodes/${encodeURIComponent(id)}`));
+}
+
+// Read the thread index across the owner episodes.
+export async function fetchThreadsIndex(fetchFn: FetchFn): Promise<LiveThreads> {
+	return parseThreadsIndex(await readJSON(fetchFn, '/api/threads'));
+}
+
+// The deep link a live thread quote opens: the episode with the word
+// offset parked as its quoted moment.
+export function liveQuoteHref(episodeId: string, offset: number): `/episode/${string}?${string}` {
+	return `/episode/${episodeId}?w=${offset}`;
+}
+
+// Map a stored job status onto the follower states. Unknown values
+// read as running, because a named job the stream never closed is
+// still work the card follows.
+export function outcomeJobStatus(status: string): JobStatus {
+	if (
+		status === 'queued' ||
+		status === 'running' ||
+		status === 'done' ||
+		status === 'error' ||
+		status === 'cancelled' ||
+		status === 'interrupted'
+	) {
+		return status;
+	}
+	return 'running';
 }

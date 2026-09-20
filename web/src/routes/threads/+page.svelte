@@ -4,10 +4,13 @@
 	import { page } from '$app/state';
 	import { pageTitle } from '$lib/shell';
 	import {
+		emptyLiveThreads,
 		episodeNumber,
+		fetchThreadsIndex,
 		formatClock,
 		formatEpisodeNumber,
 		listThreads,
+		liveQuoteHref,
 		queryValue,
 		quoteHref,
 		runSeasonGates
@@ -15,32 +18,61 @@
 
 	let ready = $state(false);
 	let notice = $state('Loading the threads.');
+	let failed = $state(false);
+	let live = $state(true);
 	const blank = listThreads(false);
+	const emptyIndex = emptyLiveThreads();
 	let commitments = $state(blank.commitments);
 	let people = $state(blank.people);
 	let topics = $state(blank.topics);
+	let liveNames = $state(emptyIndex.names);
+	let liveTopics = $state(emptyIndex.topics);
 	let gateResult = $state('');
+	let search = $state('');
 
-	$effect(() => {
-		if (!browser) return;
-		const search = page.url.search;
-		const fifthReady = queryValue(search, 'after5') === '1';
-		const threads = listThreads(fifthReady);
-		commitments = threads.commitments;
-		people = threads.people;
-		topics = threads.topics;
-		ready = true;
-		notice = fifthReady
-			? 'Scripted threads with episode five folded in. No backend needed.'
-			: 'Scripted threads. No backend needed.';
+	async function load() {
+		ready = false;
+		failed = false;
+		if (queryValue(search, 'fixture') === '1') {
+			live = false;
+			const fifthReady = queryValue(search, 'after5') === '1';
+			const threads = listThreads(fifthReady);
+			commitments = threads.commitments;
+			people = threads.people;
+			topics = threads.topics;
+			ready = true;
+			notice = fifthReady
+				? 'Scripted threads with episode five folded in. No backend needed.'
+				: 'Scripted threads. No backend needed.';
+		} else {
+			live = true;
+			try {
+				const index = await fetchThreadsIndex(window.fetch);
+				liveNames = index.names;
+				liveTopics = index.topics;
+				ready = true;
+				notice =
+					index.names.length === 0 && index.topics.length === 0
+						? 'Nothing threads yet. Two episodes must name someone before a row forms.'
+						: 'Live threads from stored mentions. Quotes and links, nothing else.';
+			} catch {
+				ready = true;
+				failed = true;
+				notice = 'The thread index refused, so nothing renders. Retry the load.';
+			}
+		}
 		if (queryValue(search, 'gate') === '1') {
 			const main = document.querySelector('main');
 			if (main) {
-				void runSeasonGates(main).then((result) => {
-					gateResult = result;
-				});
+				gateResult = await runSeasonGates(main);
 			}
 		}
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		search = page.url.search;
+		void load();
 	});
 </script>
 
@@ -60,91 +92,143 @@
 		said. No scores, no gauges. Quotes and links, nothing else.
 	</p>
 	<p role="status">{notice}</p>
+	{#if failed}
+		<button onclick={() => void load()}>Retry the threads</button>
+	{/if}
 	<nav aria-label="Season">
-		<a href={resolve('/?fixture=1')}>Gallery</a>
-		<a href={resolve('/threads?fixture=1')} aria-current="page">Threads</a>
+		{#if live}
+			<a href={resolve('/')}>Gallery</a>
+			<a href={resolve('/threads')} aria-current="page">Threads</a>
+		{:else}
+			<a href={resolve('/?fixture=1')}>Gallery</a>
+			<a href={resolve('/threads?fixture=1')} aria-current="page">Threads</a>
+		{/if}
 	</nav>
 
-	{#if ready}
-		<section aria-label="Open commitments">
-			<h2>Open commitments</h2>
-			{#each commitments as item (item.id)}
-				<article aria-label={item.name}>
-					<h3>{item.name}</h3>
-					{#if item.who}<p class="who">{item.who}</p>{/if}
-					<p class="facts">{item.count}{item.opened ? ` · since ${item.opened}` : ''}</p>
-					{#if item.status}
-						<p class="status">{item.status === 'open' ? 'Open' : 'Resolved'}</p>
-					{/if}
-					<ul>
-						{#each item.quotes as quote (`${quote.episode}-${quote.offset}`)}
-							<li>
-								<a href={resolve(quoteHref(quote.episode, quote.offset))}>
-									<span
-										>{formatEpisodeNumber(episodeNumber(quote.episode))} · {formatClock(
-											quote.offset
-										)}</span
-									>
-									<span>“{quote.text}”</span>
-									<span class="listen">Play from this quote</span>
-								</a>
-							</li>
-						{/each}
-					</ul>
-				</article>
-			{/each}
-		</section>
+	{#if ready && !failed}
+		{#if !live}
+			<section aria-label="Open commitments">
+				<h2>Open commitments</h2>
+				{#each commitments as item (item.id)}
+					<article aria-label={item.name}>
+						<h3>{item.name}</h3>
+						{#if item.who}<p class="who">{item.who}</p>{/if}
+						<p class="facts">{item.count}{item.opened ? ` · since ${item.opened}` : ''}</p>
+						{#if item.status}
+							<p class="status">{item.status === 'open' ? 'Open' : 'Resolved'}</p>
+						{/if}
+						<ul>
+							{#each item.quotes as quote (`${quote.episode}-${quote.offset}`)}
+								<li>
+									<a href={resolve(quoteHref(quote.episode, quote.offset))}>
+										<span
+											>{formatEpisodeNumber(episodeNumber(quote.episode))} · {formatClock(
+												quote.offset
+											)}</span
+										>
+										<span>“{quote.text}”</span>
+										<span class="listen">Play from this quote</span>
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</article>
+				{/each}
+			</section>
 
-		<section aria-label="People who recur">
-			<h2>People who recur</h2>
-			{#each people as item (item.id)}
-				<article aria-label={item.name}>
-					<h3>{item.name}</h3>
-					{#if item.who}<p class="who">{item.who}</p>{/if}
-					<p class="facts">{item.count}</p>
-					<ul>
-						{#each item.quotes as quote (`${quote.episode}-${quote.offset}`)}
-							<li>
-								<a href={resolve(quoteHref(quote.episode, quote.offset))}>
-									<span
-										>{formatEpisodeNumber(episodeNumber(quote.episode))} · {formatClock(
-											quote.offset
-										)}</span
-									>
-									<span>“{quote.text}”</span>
-									<span class="listen">Play from this quote</span>
-								</a>
-							</li>
-						{/each}
-					</ul>
-				</article>
-			{/each}
-		</section>
+			<section aria-label="People who recur">
+				<h2>People who recur</h2>
+				{#each people as item (item.id)}
+					<article aria-label={item.name}>
+						<h3>{item.name}</h3>
+						{#if item.who}<p class="who">{item.who}</p>{/if}
+						<p class="facts">{item.count}</p>
+						<ul>
+							{#each item.quotes as quote (`${quote.episode}-${quote.offset}`)}
+								<li>
+									<a href={resolve(quoteHref(quote.episode, quote.offset))}>
+										<span
+											>{formatEpisodeNumber(episodeNumber(quote.episode))} · {formatClock(
+												quote.offset
+											)}</span
+										>
+										<span>“{quote.text}”</span>
+										<span class="listen">Play from this quote</span>
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</article>
+				{/each}
+			</section>
 
-		<section aria-label="Circled topics">
-			<h2>Circled topics</h2>
-			{#each topics as item (item.id)}
-				<article aria-label={item.name}>
-					<h3>{item.name}</h3>
-					<p class="facts">{item.count}</p>
-					<ul>
-						{#each item.quotes as quote (`${quote.episode}-${quote.offset}`)}
-							<li>
-								<a href={resolve(quoteHref(quote.episode, quote.offset))}>
-									<span
-										>{formatEpisodeNumber(episodeNumber(quote.episode))} · {formatClock(
-											quote.offset
-										)}</span
-									>
-									<span>“{quote.text}”</span>
-									<span class="listen">Play from this quote</span>
-								</a>
-							</li>
-						{/each}
-					</ul>
-				</article>
-			{/each}
-		</section>
+			<section aria-label="Circled topics">
+				<h2>Circled topics</h2>
+				{#each topics as item (item.id)}
+					<article aria-label={item.name}>
+						<h3>{item.name}</h3>
+						<p class="facts">{item.count}</p>
+						<ul>
+							{#each item.quotes as quote (`${quote.episode}-${quote.offset}`)}
+								<li>
+									<a href={resolve(quoteHref(quote.episode, quote.offset))}>
+										<span
+											>{formatEpisodeNumber(episodeNumber(quote.episode))} · {formatClock(
+												quote.offset
+											)}</span
+										>
+										<span>“{quote.text}”</span>
+										<span class="listen">Play from this quote</span>
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</article>
+				{/each}
+			</section>
+		{:else}
+			<section aria-label="People who recur">
+				<h2>People who recur</h2>
+				{#each liveNames as item (item.key)}
+					<article aria-label={item.display}>
+						<h3>{item.display}</h3>
+						<p class="facts">{item.mentionCount} mentions · {item.episodeCount} episodes</p>
+						<ul>
+							{#each item.episodes as hit (`${hit.episodeId}-${hit.offset}`)}
+								<li>
+									<a href={resolve(liveQuoteHref(hit.episodeId, hit.offset))}>
+										<span>{formatEpisodeNumber(hit.number)} · word {hit.offset}</span>
+										<span>“{hit.quote}”</span>
+										<span class="listen">Open at this quote</span>
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</article>
+				{/each}
+			</section>
+
+			<section aria-label="Circled topics">
+				<h2>Circled topics</h2>
+				{#each liveTopics as item (item.key)}
+					<article aria-label={item.display}>
+						<h3>{item.display}</h3>
+						<p class="facts">{item.mentionCount} mentions · {item.episodeCount} episodes</p>
+						<ul>
+							{#each item.episodes as hit (`${hit.episodeId}-${hit.offset}`)}
+								<li>
+									<a href={resolve(liveQuoteHref(hit.episodeId, hit.offset))}>
+										<span>{formatEpisodeNumber(hit.number)} · word {hit.offset}</span>
+										<span>“{hit.quote}”</span>
+										<span class="listen">Open at this quote</span>
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</article>
+				{/each}
+			</section>
+		{/if}
 	{/if}
 
 	{#if gateResult}
@@ -186,6 +270,15 @@
 	.sub {
 		color: var(--muted);
 		line-height: 1.6;
+	}
+	button {
+		background: var(--accent);
+		color: var(--on-accent);
+		border: none;
+		border-radius: 100px;
+		padding: 0.55rem 1.1rem;
+		font-weight: 600;
+		margin-bottom: 1rem;
 	}
 	nav {
 		display: flex;

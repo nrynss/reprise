@@ -190,3 +190,100 @@ describe('fixture audio', () => {
 		expect(typeof installMockJob).toBe('function');
 	});
 });
+
+describe('live season', () => {
+	it('lists episodes newest first and drops drifting rows', async () => {
+		const { parseSeasonList } = await import('./threads');
+		const season = parseSeasonList(
+			JSON.stringify({
+				episodes: [
+					{ id: 'a', number: 1, title: 'First', state: 'ready', visibility: 'private' },
+					{ id: 'b', number: 3, title: 'Third', state: 'rendering', visibility: 'private' },
+					{ id: 'c', number: 2, title: 'Second', state: 'draft', visibility: 'private' },
+					{ id: '', number: 9, title: '', state: 'ready', visibility: 'private' }
+				]
+			})
+		);
+		expect(season.map((episode) => episode.number)).toEqual([3, 2, 1]);
+		expect(season[0]?.title).toBe('Third');
+	});
+
+	it('rejects a body with no episode list', async () => {
+		const { parseSeasonList } = await import('./threads');
+		expect(() => parseSeasonList('{}')).toThrow();
+		expect(() => parseSeasonList('nope')).toThrow();
+	});
+
+	it('decodes detail with proposals and a nullable outcome', async () => {
+		const { parseEpisodeDetail } = await import('./threads');
+		const withOutcome = parseEpisodeDetail(
+			JSON.stringify({
+				episode: { id: 'e1', number: 1, title: 'First', state: 'draft', visibility: 'private' },
+				proposals: [
+					{ id: 'p1', kind: 'cut', start_word: 0, end_word: 4, reason: 'Trim.', decision: '' }
+				],
+				transcript_outcome: { job_id: 'job-7', status: 'running', error: '' }
+			})
+		);
+		expect(withOutcome.episode.title).toBe('First');
+		expect(withOutcome.proposals).toHaveLength(1);
+		expect(withOutcome.outcome?.jobId).toBe('job-7');
+		const withoutOutcome = parseEpisodeDetail(
+			JSON.stringify({
+				episode: { id: 'e1', number: 1, title: 'First', state: 'ready', visibility: 'private' },
+				proposals: []
+			})
+		);
+		expect(withoutOutcome.outcome).toBeNull();
+		expect(() => parseEpisodeDetail(JSON.stringify({ proposals: [] }))).toThrow();
+	});
+
+	it('decodes the thread index with counts from stored rows', async () => {
+		const { parseThreadsIndex } = await import('./threads');
+		const index = parseThreadsIndex(
+			JSON.stringify({
+				name_threads: [
+					{
+						key: 'june',
+						display: 'June',
+						kind: 'person',
+						episodes: [{ episode_id: 'e1', number: 1, quote: 'I keep the garden.', offset: 5 }],
+						mention_count: 2,
+						episode_count: 1
+					}
+				],
+				circled_topics: [
+					{
+						key: 'harvest',
+						display: 'The harvest',
+						episodes: [{ episode_id: 'e2', number: 2, quote: 'Down for the harvest.', offset: 9 }],
+						mention_count: 3,
+						episode_count: 2
+					}
+				]
+			})
+		);
+		expect(index.names).toHaveLength(1);
+		expect(index.names[0]?.mentionCount).toBe(2);
+		expect(index.topics[0]?.episodes[0]?.quote).toBe('Down for the harvest.');
+	});
+
+	it('links live quotes to the episode at their word offset', async () => {
+		const { liveQuoteHref, outcomeJobStatus } = await import('./threads');
+		expect(liveQuoteHref('e1', 5)).toBe('/episode/e1?w=5');
+		expect(outcomeJobStatus('running')).toBe('running');
+		expect(outcomeJobStatus('interrupted')).toBe('interrupted');
+		expect(outcomeJobStatus('mystery')).toBe('running');
+	});
+
+	it('fetches the season through the injected fetch', async () => {
+		const { fetchSeason } = await import('./threads');
+		const season = await fetchSeason(async () =>
+			Response.json({
+				episodes: [{ id: 'a', number: 2, title: 'B', state: 'ready', visibility: 'private' }]
+			})
+		);
+		expect(season).toHaveLength(1);
+		await expect(fetchSeason(async () => new Response('no', { status: 500 }))).rejects.toThrow();
+	});
+});

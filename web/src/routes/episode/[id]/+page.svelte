@@ -3,9 +3,9 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { pageTitle } from '$lib/shell';
-	import { emptyEpisode, EpisodeController, formatClock, formatEpisodeNumber } from '../../threads/threads';
+	import { emptyScreen, EpisodeController, formatClock, formatEpisodeNumber } from '../../threads/threads';
 
-	let snap = $state(emptyEpisode());
+	let snap = $state(emptyScreen('missing'));
 	let controller = $state<EpisodeController | null>(null);
 
 	$effect(() => {
@@ -23,108 +23,183 @@
 </script>
 
 <svelte:head>
-	<title>{snap.episode ? pageTitle(snap.episode.title) : pageTitle('Episode')}</title>
+	<title>{snap.title ? pageTitle(snap.title) : pageTitle('Episode')}</title>
 	<meta
 		name="description"
-		content="A finished episode: player, chapters, show notes, and a transcript that follows playback."
+		content="One episode: player, chapters, show notes, and a transcript that follows playback."
 	/>
 </svelte:head>
 
 <main>
 	{#if !snap.ready}
 		<p role="status">Loading the episode.</p>
-	{:else if !snap.episode}
+	{:else if snap.missing}
 		<h1>Missing episode</h1>
 		<p role="status">{snap.notice}</p>
-		<a href={resolve('/?fixture=1')}>Back to the gallery</a>
+		<a href={resolve('/')}>Back to the gallery</a>
+	{:else if snap.failed}
+		<h1>Episode refused</h1>
+		<p role="status">{snap.notice}</p>
+		<button onclick={() => controller?.retry()}>Retry the episode</button>
+		<a href={resolve('/')}>Back to the gallery</a>
 	{:else}
-		<p class="eyebrow">{formatEpisodeNumber(snap.episode.number)} · {snap.episode.date}</p>
-		<h1>{snap.episode.title}</h1>
+		<p class="eyebrow">{formatEpisodeNumber(snap.number)} · {snap.state} · {snap.visibility}</p>
+		<h1>{snap.title}</h1>
 		<p class="state">{snap.published ? 'Public' : 'Private'}</p>
 		<p role="status">{snap.notice}</p>
 		<nav aria-label="Season">
-			<a href={resolve('/?fixture=1')}>Gallery</a>
-			<a href={resolve('/threads?fixture=1')}>Threads</a>
+			{#if snap.live}
+				<a href={resolve('/')}>Gallery</a>
+				<a href={resolve('/threads')}>Threads</a>
+			{:else}
+				<a href={resolve('/?fixture=1')}>Gallery</a>
+				<a href={resolve('/threads?fixture=1')}>Threads</a>
+			{/if}
 		</nav>
 
-		<section aria-label="Episode playback">
-			<button
-				onclick={() => void controller?.togglePlay()}
-				aria-label={snap.playing ? 'Pause episode' : `Play ${snap.episode.title}`}
-			>
-				{snap.playing ? 'Pause' : 'Play'}
-			</button>
-			<button onclick={() => controller?.backFifteen()} aria-label="Back fifteen seconds">
-				Back 15
-			</button>
-			<input
-				type="range"
-				min={0}
-				max={snap.episode.duration}
-				step={1}
-				value={Math.round(snap.position)}
-				oninput={(event) => controller?.seekTo(Number(event.currentTarget.value))}
-				aria-label="Seek through the episode"
-			/>
-			<p role="status" aria-label="Playback position">
-				{formatClock(snap.position)} of {formatClock(snap.episode.duration)}
-			</p>
-		</section>
-
-		<section aria-label="Episode controls">
-			<h2>Release</h2>
-			{#if snap.published}
-				<p>Fixture link: https://reprise.nryn.dev/e/{snap.episode.id}-fixture</p>
-				<button onclick={() => controller?.publishState()}>Revoke link</button>
-			{:else}
-				<button onclick={() => controller?.publishState()}>Publish…</button>
-			{/if}
-			<button onclick={() => controller?.exportNotes()}>Export for YouTube</button>
-			<button
-				onclick={() => void controller?.erase()}
-				aria-label={snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
-			>
-				{snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
-			</button>
-		</section>
-
-		<section aria-label="Chapters">
-			<h2>Chapters</h2>
-			<ol>
-				{#each snap.episode.chapters as chapter, index (chapter.start)}
-					<li>
-						<button
-							onclick={() => {
-								controller?.seekTo(chapter.start);
-								void controller?.togglePlayIfPaused();
-							}}
-							aria-label={`Play chapter ${chapter.title} from ${formatClock(chapter.start)}`}
-							aria-current={index === snap.activeChapter ? 'true' : undefined}
-						>
-							<span>{formatClock(chapter.start)}</span>
-							<span>{chapter.title}</span>
-						</button>
-					</li>
-				{/each}
-			</ol>
-		</section>
-
-		<section aria-label="Show notes">
-			<h2>Show notes</h2>
-			<p>{snap.episode.notes}</p>
-		</section>
-
-		<section aria-label="Transcript, follows playback">
-			<h2>Transcript</h2>
-			{#each snap.words as word, index (index)}
+		{#if snap.audioUrl && snap.duration !== null}
+			<section aria-label="Episode playback">
 				<button
-					class:active={index === snap.activeWord}
-					aria-current={index === snap.activeWord ? 'true' : undefined}
-					aria-label={`${word.text} Activate to seek.`}
-					onclick={() => controller?.seekWord(index)}
-				>{word.text}</button>
-			{/each}
-		</section>
+					onclick={() => void controller?.togglePlay()}
+					aria-label={snap.playing ? 'Pause episode' : `Play ${snap.title}`}
+				>
+					{snap.playing ? 'Pause' : 'Play'}
+				</button>
+				<button onclick={() => controller?.backFifteen()} aria-label="Back fifteen seconds">
+					Back 15
+				</button>
+				<input
+					type="range"
+					min={0}
+					max={snap.duration}
+					step={1}
+					value={Math.round(snap.position)}
+					oninput={(event) => controller?.seekTo(Number(event.currentTarget.value))}
+					aria-label="Seek through the episode"
+				/>
+				<p role="status" aria-label="Playback position">
+					{formatClock(snap.position)} of {formatClock(snap.duration)}
+				</p>
+			</section>
+		{:else if snap.live}
+			<section aria-label="Episode playback">
+				<h2>Playback</h2>
+				<p>
+					The detail carries no audio stream address yet, so playback waits
+					here. The proposals and the quoted moment below still read.
+				</p>
+			</section>
+		{/if}
+
+		{#if snap.outcome}
+			<section aria-label="Latest transcript pass">
+				<h2>Transcript pass</h2>
+				<p>State: {snap.outcome.status}</p>
+				{#if snap.outcome.error}
+					<p>Error: {snap.outcome.error}</p>
+				{/if}
+				<p class="dim">Job {snap.outcome.jobId}</p>
+			</section>
+		{/if}
+
+		{#if !snap.live}
+			<section aria-label="Episode controls">
+				<h2>Release</h2>
+				{#if snap.published}
+					<p>Fixture link: https://reprise.nryn.dev/e/{snap.id}-fixture</p>
+					<button onclick={() => controller?.publishState()}>Revoke link</button>
+				{:else}
+					<button onclick={() => controller?.publishState()}>Publish…</button>
+				{/if}
+				<button onclick={() => controller?.exportNotes()}>Export for YouTube</button>
+				<button
+					onclick={() => void controller?.erase()}
+					aria-label={snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
+				>
+					{snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
+				</button>
+			</section>
+		{/if}
+
+		{#if snap.chapters.length > 0}
+			<section aria-label="Chapters">
+				<h2>Chapters</h2>
+				<ol>
+					{#each snap.chapters as chapter, index (chapter.start)}
+						<li>
+							<button
+								onclick={() => {
+									controller?.seekTo(chapter.start);
+									void controller?.togglePlayIfPaused();
+								}}
+								aria-label={`Play chapter ${chapter.title} from ${formatClock(chapter.start)}`}
+								aria-current={index === snap.activeChapter ? 'true' : undefined}
+							>
+								<span>{formatClock(chapter.start)}</span>
+								<span>{chapter.title}</span>
+							</button>
+						</li>
+					{/each}
+				</ol>
+			</section>
+		{/if}
+
+		{#if snap.notes}
+			<section aria-label="Show notes">
+				<h2>Show notes</h2>
+				<p>{snap.notes}</p>
+			</section>
+		{/if}
+
+		{#if snap.proposals.length > 0}
+			<section aria-label="Editorial notes">
+				<h2>Editorial notes</h2>
+				<ol>
+					{#each snap.proposals as proposal (proposal.id)}
+						<li class:covering={proposal.id === snap.coveringId}>
+							<p><strong>{proposal.kind}</strong> · words {proposal.startWord} to {proposal.endWord}</p>
+							{#if proposal.reason}
+								<p>{proposal.reason}</p>
+							{/if}
+							<p class="dim">{proposal.decision ? `Decision: ${proposal.decision}` : 'Untouched'}</p>
+						</li>
+					{/each}
+				</ol>
+			</section>
+		{/if}
+
+		{#if snap.moments.length > 0}
+			<section aria-label="Quoted moments">
+				<h2>Quoted moments</h2>
+				<ul>
+					{#each snap.moments as moment (`${moment.episodeId}-${moment.offset}`)}
+						<li>
+							<a
+								href={resolve(`/episode/${moment.episodeId}?w=${moment.offset}`)}
+								aria-current={moment.offset === snap.momentWord ? 'true' : undefined}
+							>
+								<span>Word {moment.offset}</span>
+								<span>“{moment.quote}”</span>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
+		{#if snap.words.length > 0}
+			<section aria-label="Transcript, follows playback">
+				<h2>Transcript</h2>
+				{#each snap.words as word, index (index)}
+					<button
+						class:active={index === snap.activeWord}
+						aria-current={index === snap.activeWord ? 'true' : undefined}
+						aria-label={`${word.text} Activate to seek.`}
+						onclick={() => controller?.seekWord(index)}
+					>{word.text}</button>
+				{/each}
+			</section>
+		{/if}
 	{/if}
 
 	{#if snap.gateResult}
@@ -158,16 +233,16 @@
 		color: var(--accent);
 		margin: 0 0 0.5rem;
 	}
-	h1 {
-		font-size: 2rem;
-		margin: 0 0 0.5rem;
-		color: var(--ink);
-	}
 	.state {
 		font-size: 0.75rem;
 		letter-spacing: 0.1em;
 		text-transform: uppercase;
 		color: var(--accent);
+	}
+	h1 {
+		font-size: 2rem;
+		margin: 0 0 0.5rem;
+		color: var(--ink);
 	}
 	nav {
 		display: flex;
@@ -228,6 +303,45 @@
 	section[aria-label='Chapters'] button span:first-child {
 		color: var(--accent);
 	}
+	section[aria-label='Quoted moments'] ul {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+	}
+	section[aria-label='Quoted moments'] li a {
+		display: block;
+		border: 1px solid var(--line);
+		border-radius: 0.6rem;
+		padding: 0.7rem 0.9rem;
+		margin-top: 0.5rem;
+		color: var(--muted);
+		text-decoration: none;
+		line-height: 1.55;
+	}
+	section[aria-label='Quoted moments'] li a:hover {
+		border-color: var(--accent);
+	}
+	section[aria-label='Quoted moments'] li a span:first-child {
+		display: block;
+		font-size: 0.75rem;
+		letter-spacing: 0.08em;
+		color: var(--accent);
+		margin-bottom: 0.25rem;
+	}
+	section[aria-label='Editorial notes'] ol {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+	}
+	section[aria-label='Editorial notes'] li {
+		border: 1px solid var(--line);
+		border-radius: 0.6rem;
+		padding: 0.7rem 0.9rem;
+		margin-top: 0.5rem;
+	}
+	section[aria-label='Editorial notes'] li.covering {
+		border-color: var(--accent);
+	}
 	ol {
 		list-style: none;
 		padding: 0;
@@ -239,6 +353,10 @@
 	li:last-child {
 		border-bottom: none;
 	}
+	section[aria-label='Editorial notes'] li,
+	section[aria-label='Editorial notes'] li:last-child {
+		border-bottom: 1px solid var(--line);
+	}
 	input[type='range'] {
 		width: 100%;
 		margin: 0.75rem 0;
@@ -247,5 +365,8 @@
 	p {
 		color: var(--muted);
 		line-height: 1.65;
+	}
+	.dim {
+		font-size: 0.8rem;
 	}
 </style>

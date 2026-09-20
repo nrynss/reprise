@@ -3,9 +3,9 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { pageTitle } from '$lib/shell';
-	import { formatClock, formatEpisodeNumber, GalleryController, initialGallery } from './threads/threads';
+	import { emptyGallery, formatEpisodeNumber, GalleryController } from './threads/threads';
 
-	let snap = $state(initialGallery());
+	let snap = $state(emptyGallery());
 	let controller = $state<GalleryController | null>(null);
 
 	$effect(() => {
@@ -38,64 +38,81 @@
 		right on the card, through the same job stream the processing screen reads.
 	</p>
 	<p role="status">{snap.notice}</p>
+	{#if snap.failed}
+		<button onclick={() => controller?.retry()}>Retry the season</button>
+	{/if}
 	<nav aria-label="Season">
 		<a href={resolve('/record')}>Record a new episode</a>
-		<a href={resolve('/threads?fixture=1')}>Threads</a>
+		<a href={resolve('/threads')}>Threads</a>
 	</nav>
 
-	{#if snap.ready}
+	{#if snap.ready && snap.rows.length === 0 && !snap.failed}
+		<section aria-label="Empty season">
+			<h2>No episodes yet</h2>
+			<p>Record the first one and it lands here, newest first.</p>
+			<a href={resolve('/record')}>Record the first episode</a>
+		</section>
+	{/if}
+
+	{#if snap.ready && snap.rows.length > 0}
 		<ol aria-label="Episodes, newest first">
-			{#each snap.season as episode (episode.id)}
+			{#each snap.rows as row (row.id)}
 				<li>
-					{#if episode.state === 'rendering'}
-						<article aria-label={`${episode.title}, rendering`}>
-							<div class="cover" role="img" aria-label={`Cover of episode ${episode.number}`}>
-								<span>{formatEpisodeNumber(episode.number)}</span>
+					{#if row.jobId}
+						<article aria-label={`${row.title}, ${row.state}`}>
+							<div class="cover" role="img" aria-label={`Cover of episode ${row.number}`}>
+								<span>{formatEpisodeNumber(row.number)}</span>
 							</div>
-							<p class="state">Rendering</p>
-							<h2>{episode.title}</h2>
-							<p class="dur">{episode.date} · {formatClock(episode.duration)}</p>
+							<p class="state">{row.state}</p>
+							<h2>{row.title}</h2>
+							<p class="dur">{row.meta}</p>
 							<div
 								role="progressbar"
-								aria-label={`Render progress for ${episode.title}`}
+								aria-label={`Job progress for ${row.title}`}
 								aria-valuemin={0}
 								aria-valuemax={100}
-								aria-valuenow={controller ? controller.cardFor(episode.jobId).percent : 0}
+								aria-valuenow={controller ? controller.cardFor(row.jobId).percent : 0}
 							>
 								<div
 									class="bar"
-									style={`width: ${controller ? controller.cardFor(episode.jobId).percent : 0}%`}
+									style={`width: ${controller ? controller.cardFor(row.jobId).percent : 0}%`}
 								></div>
 							</div>
-							<p class="job">{controller ? controller.cardFor(episode.jobId).detail : ''}</p>
-							<a href={resolve(`/processing?episode=${episode.id}`)}>Open the processing screen</a>
+							<p class="job">{controller ? controller.cardFor(row.jobId).detail : ''}</p>
+							{#if row.fixture && row.state === 'rendering'}
+								<a href={resolve(`/processing?episode=${row.id}`)}>Open the processing screen</a>
+							{:else if row.fixture}
+								<a href={resolve(`/episode/${row.id}?fixture=1`)}>Open the episode</a>
+							{:else}
+								<a href={resolve(`/episode/${row.id}`)}>Open the episode</a>
+							{/if}
 						</article>
-					{:else if episode.state === 'draft'}
+					{:else if row.fixture && row.state === 'draft'}
 						<a
 							class="card"
-							href={resolve(`/episode/${episode.id}/edit?fixture=1`)}
-							aria-label={`${episode.title}, draft. Open in the editor.`}
+							href={resolve(`/episode/${row.id}/edit?fixture=1`)}
+							aria-label={`${row.title}, draft. Open in the editor.`}
 						>
-							<div class="cover" role="img" aria-label={`Cover of episode ${episode.number}`}>
-								<span>{formatEpisodeNumber(episode.number)}</span>
+							<div class="cover" role="img" aria-label={`Cover of episode ${row.number}`}>
+								<span>{formatEpisodeNumber(row.number)}</span>
 							</div>
 							<p class="state">Draft</p>
-							<h2>{episode.title}</h2>
-							<p class="dur">{episode.date} · {formatClock(episode.duration)}</p>
+							<h2>{row.title}</h2>
+							<p class="dur">{row.meta}</p>
 							<p class="job">In the editor · proposals waiting</p>
 						</a>
 					{:else}
 						<a
 							class="card"
-							href={resolve(`/episode/${episode.id}?fixture=1`)}
-							aria-label={`${episode.title}, ready. Open the episode.`}
+							href={row.fixture ? resolve(`/episode/${row.id}?fixture=1`) : resolve(`/episode/${row.id}`)}
+							aria-label={`${row.title}, ${row.state}. Open the episode.`}
 						>
-							<div class="cover" role="img" aria-label={`Cover of episode ${episode.number}`}>
-								<span>{formatEpisodeNumber(episode.number)}</span>
+							<div class="cover" role="img" aria-label={`Cover of episode ${row.number}`}>
+								<span>{formatEpisodeNumber(row.number)}</span>
 							</div>
-							<p class="state">{episode.published ? 'Public' : 'Private'}</p>
-							<h2>{episode.title}</h2>
-							<p class="dur">{episode.date} · {formatClock(episode.duration)}</p>
+							<p class="state">{row.state}</p>
+							<h2>{row.title}</h2>
+							<p class="dur">{row.meta}</p>
 						</a>
 					{/if}
 				</li>
@@ -161,6 +178,25 @@
 		background: transparent;
 		color: var(--accent);
 		border: 1px solid var(--line);
+	}
+	section[aria-label='Empty season'] {
+		background: var(--raised);
+		border: 1px solid var(--line);
+		border-radius: 0.75rem;
+		padding: 1.5rem;
+		margin-bottom: 1.25rem;
+	}
+	section[aria-label='Empty season'] a {
+		color: var(--accent);
+	}
+	button {
+		background: var(--accent);
+		color: var(--on-accent);
+		border: none;
+		border-radius: 100px;
+		padding: 0.55rem 1.1rem;
+		font-weight: 600;
+		margin-bottom: 1rem;
 	}
 	ol {
 		list-style: none;
