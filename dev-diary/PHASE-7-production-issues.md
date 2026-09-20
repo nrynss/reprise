@@ -485,6 +485,31 @@ so at once.
 shows the named failure instead of stalling. The normal path is
 unchanged.
 
+### T7.19: Take-path rate limits fit machine traffic
+```yaml
+requires:   T2.1, T7.6
+fixture-ok: yes
+size:       S · mid
+owns:       cmd/reprise/main.go
+status:     not-started
+```
+A real take fires chunk uploads, polls, and the completion post
+faster than the route limits allow. The edge answers 429 on the
+draft move and the take stalls with stored stems. The limits were
+tuned for clicks, not takes.
+
+* Shape per-route budgets for the take path (session mint, upload
+  open and chunks and complete, job events, session end, stem
+  completion) so one honest take with two stems never trips them,
+  while a burst abuser still does. Retry hints stay honest.
+* If a new settings key is needed, raise a contract change instead
+  of editing the TOML files. Prefer the existing limits with
+  per-route shaping.
+
+**Done when:** A fixture take at real cadence (chunk per block,
+polls running, completion at end) passes the wired gate with zero
+429s, and a burst test twice as fast still trips. Both pinned.
+
 ---
 
 ## Exit criteria
