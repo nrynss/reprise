@@ -398,7 +398,7 @@ requires:   T7.13
 fixture-ok: no
 size:       S · frontier
 owns:       dev-diary/probes/production.md
-status:     in-progress:review-r2:t7.15-rev-r2@3c18617da22033fac66367ee6b31d5561d1b73e4
+status:     done:562d62b3ae69e786a9320134da00cdb9ba73a225
 ```
 Runs once, against the build carrying the batch model fix. A
 scripted guest records from generated speech, posts stem completion,
@@ -476,6 +476,9 @@ run.
 
 ### What exists now
 
+T7.15 landed after round 2 APPROVE with zero residue. Round 5 proves
+the full pipe live with proposals on detail. Every verification
+carry is closed.
 T7.16 landed after round 1 APPROVE with zero in-scope findings.
 Views read the live season with fixtures behind `?fixture=1`. The
 prerender opt-out widened owns by decision. Detail enrichment
