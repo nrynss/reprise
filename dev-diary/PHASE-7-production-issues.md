@@ -443,7 +443,7 @@ requires:   T2.4, T7.15
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/
-status:     in-progress:review-r2:t7.17-rev-r2@e14c484d8c1d39489edae1d5eacf701e2421c62c
+status:     done:8da37dba3ff2560659627d54911d5a515b5c45ed
 ```
 Round 5 proved the pipe with a script reading `data` directly,
 because the live socket carries host audio under a `data` key on
@@ -476,6 +476,9 @@ run.
 
 ### What exists now
 
+T7.17 landed after round 2 APPROVE with zero residue. The browser
+reads the live host audio key and the float path round trips every
+int16 code exactly.
 T7.15 landed after round 2 APPROVE with zero residue. Round 5 proves
 the full pipe live with proposals on detail. Every verification
 carry is closed.
