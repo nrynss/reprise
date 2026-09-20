@@ -467,7 +467,7 @@ requires:   T7.12, T2.4
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/record/
-status:     in-progress:review-r2:t7.18-rev-r2@aa52124e3f7b85ab29232d032bf68670dc10622b
+status:     done:9ed933b0a5728eda58cb0ebce0c43cb7d84c118d
 ```
 A real take died silently when Cloudflare answered API calls with a
 challenge page: uploads, transcript rows, and session end all failed
@@ -546,6 +546,9 @@ with the take.
 
 ### What exists now
 
+T7.18 landed after round 2 APPROVE with zero residue. Challenge
+answers surface by name with a working retry. The voice-layer guard
+and clock carry to T7.20.
 T7.17 landed after round 2 APPROVE with zero residue. The browser
 reads the live host audio key and the float path round trips every
 int16 code exactly.
