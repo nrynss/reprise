@@ -443,7 +443,7 @@ requires:   T2.4, T7.15
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/
-status:     in-progress:review-r1:t7.17-rev-r1@29c3d29e983570570a0332e174d13067b02484fa
+status:     in-progress:remediate-r1:t7.17-rem-r1
 ```
 Round 5 proved the pipe with a script reading `data` directly,
 because the live socket carries host audio under a `data` key on
