@@ -364,6 +364,34 @@ reaches proposals while that value stands.
 from settings, and a test rejects a renamed id against the recorded
 400 shape.
 
+### T7.14: Deterministic restart resume tests
+```yaml
+requires:   T4.4, T5.4
+fixture-ok: yes
+size:       S · mid
+owns:       internal/privacy/, internal/retention/
+status:     not-started
+```
+CI failed twice on restart resume tests that pass in isolation:
+`TestEraseRestartResumesAndFinishes` (privacy) and
+`TestSweepRestartResumesAndFinishes` (retention). Both race the
+runner recovery against job progress writes, and load decides the
+winner. A flaky gate blocks every ship, so this is a defect, not a
+quarantine candidate.
+
+* Reproduce under repetition first (`-race -count=20` or tighter
+  timing). Name the losing interleaving with a failing pin before
+  changing anything.
+* Fix the synchronization, not the timeout. No sleeps added, no
+  wall-clock threshold widened. Quarantine with `test.fixme` only if
+  the defect sits in a library, with the reason stating the defect.
+* Both packages keep their done criteria: a restart mid-erase and
+  mid-sweep resumes and finishes exactly once.
+
+**Done when:** Both tests pass twenty consecutive race runs on CI
+shapes, and the gate passes three consecutive full runs in a fresh
+worktree.
+
 ---
 
 ## Exit criteria
