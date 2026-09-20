@@ -274,3 +274,51 @@ describe('createCompletionDriver', () => {
 		expect(seen.length).toBe(0);
 	});
 });
+
+describe('challenge page answers', () => {
+	function htmlResponse(status: number): Response {
+		return new Response('<html><body>challenge</body></html>', {
+			status,
+			headers: { 'content-type': 'text/html; charset=utf-8' }
+		});
+	}
+
+	it('names the failed call instead of reading the page as empty', async () => {
+		stubFetch(() => htmlResponse(200));
+		const failure = await postStemsComplete('ep-1', completionPair('user-1', 'host-1', 48000)).then(
+			() => null,
+			(error: unknown) => error
+		);
+		expect(failure).toBeInstanceOf(Error);
+		expect((failure as Error).message).toContain('draft move');
+		expect((failure as Error).message).toContain('text/html');
+	});
+
+	it('refuses loudly with one request and a working retry', async () => {
+		let posts = 0;
+		stubFetch(() => {
+			posts += 1;
+			if (posts === 1) return htmlResponse(200);
+			return jsonResponse(200, {
+				episode_id: 'ep-1',
+				moved: true,
+				scheduled: true,
+				job_id: 'tj-1',
+				state: 'draft'
+			});
+		});
+		const seen: CompletionView[] = [];
+		const driver = createCompletionDriver((view) => {
+			seen.push(view);
+		});
+		await driver.run('ep-1', completionPair('user-1', 'host-1', 48000));
+		expect(posts).toBe(1);
+		expect(seen[seen.length - 1].status).toBe('failed');
+		expect(seen[seen.length - 1].canRetry).toBe(true);
+		expect(seen[seen.length - 1].text).toContain('draft move');
+		expect(seen[seen.length - 1].text).toContain('retry');
+		await driver.retry();
+		expect(posts).toBe(2);
+		expect(seen[seen.length - 1].status).toBe('ready');
+	});
+});

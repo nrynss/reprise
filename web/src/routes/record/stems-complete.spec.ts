@@ -30,6 +30,7 @@ interface CompletionCall {
 interface CompletionStub {
 	calls(): CompletionCall[];
 	failNext(): void;
+	challengeNext(): void;
 }
 
 async function startMockTake(page: Page): Promise<void> {
@@ -62,12 +63,20 @@ async function installCompletionStub(page: Page): Promise<void> {
 		const calls: CompletionCall[] = [];
 		let moved = false;
 		let failNext = false;
+		let challengeNext = false;
 		const inner = window.fetch.bind(window);
 		window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 			if (url.includes('/stems/complete')) {
 				const body = init?.body === undefined || init?.body === null ? null : JSON.parse(String(init.body));
 				calls.push({ url, body });
+				if (challengeNext) {
+					challengeNext = false;
+					return new Response('<html><body>challenge</body></html>', {
+						status: 200,
+						headers: { 'content-type': 'text/html; charset=utf-8' }
+					});
+				}
 				if (failNext) {
 					failNext = false;
 					return new Response(
@@ -92,6 +101,9 @@ async function installCompletionStub(page: Page): Promise<void> {
 			calls: () => calls,
 			failNext: () => {
 				failNext = true;
+			},
+			challengeNext: () => {
+				challengeNext = true;
 			}
 		};
 	});
@@ -155,5 +167,27 @@ test('a failed move refuses loudly with a retry', async ({ page }) => {
 	await expect(page.getByText('Draft ready. Transcript job tj-1 runs now.')).toBeVisible();
 	await expect(page.getByRole('alert')).toHaveCount(0);
 	const calls = await stubCalls(page);
+	expect(calls.length).toBe(2);
+});
+
+test('a challenge page answer names the failed call instead of stalling', async ({ page }) => {
+	await startMockTake(page);
+	await finishBothUploads(page);
+	await installCompletionStub(page);
+	await page.evaluate(() =>
+		(window as unknown as { __completionStub: CompletionStub }).__completionStub.challengeNext()
+	);
+	await complete(page);
+	await expect(page.getByRole('alert')).toContainText('draft move');
+	await expect(page.getByRole('alert')).toContainText('retry');
+	expect(page.url()).toContain('/record');
+	const retry = page.getByRole('button', { name: 'Retry draft move' });
+	await expect(retry).toBeEnabled();
+	let calls = await stubCalls(page);
+	expect(calls.length).toBe(1);
+	await retry.click();
+	await expect(page.getByText('Draft ready. Transcript job tj-1 runs now.')).toBeVisible();
+	await expect(page.getByRole('alert')).toHaveCount(0);
+	calls = await stubCalls(page);
 	expect(calls.length).toBe(2);
 });

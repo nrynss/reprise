@@ -1,10 +1,13 @@
 // The one call the record route makes after both stem uploads finish. The
 // uploader stays as wired. This module posts the stored media pair with its
-// sample rates and turns the answer into words the page shows. It throws a
-// loud error on failure, so the page never stalls silent.
+// sample rates and turns the answer into words the page shows. It checks the
+// answer content type before trusting the body, so a challenge page throws a
+// loud named error instead of parsing as an empty success. It throws on every
+// failure, so the page never stalls silent.
 
-import { api, ApiError } from '@nrynss/chaaya/api';
+import { ApiError } from '@nrynss/chaaya/api';
 import { SOCKET_RATE } from '$lib/voice/pcm';
+import { readJsonAnswer } from './api-guard';
 
 // StemPair names the two stored blobs one completion links. Both blobs arrive
 // through the chunked upload first, so the completion only links them.
@@ -47,8 +50,9 @@ export function completionPair(
 }
 
 // postStemsComplete posts the media pair for one episode and reads the
-// answer. It throws when the pair is incomplete and when the server refuses,
-// so the page surfaces the throw instead of stalling.
+// answer. It throws when the pair is incomplete, when the server refuses,
+// and when the answer is not JSON, so the page surfaces the throw instead
+// of stalling.
 export async function postStemsComplete(
 	episodeId: string,
 	pair: StemPair
@@ -63,7 +67,7 @@ export async function postStemsComplete(
 	if (!Number.isInteger(pair.hostSampleRate) || pair.hostSampleRate <= 0) {
 		throw new Error('a completion names a positive host sample rate');
 	}
-	const value = await api<unknown>(`/api/episodes/${encodeURIComponent(episodeId)}/stems/complete`, {
+	const value = await readJsonAnswer('draft move', `/api/episodes/${encodeURIComponent(episodeId)}/stems/complete`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({
