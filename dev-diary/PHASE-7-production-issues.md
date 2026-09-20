@@ -346,7 +346,7 @@ requires:   T3.1, T7.10
 fixture-ok: yes
 size:       XS · light
 owns:       internal/assemblyai/, internal/settings/
-status:     in-progress:review-r2:t7.13-rev-r2@6aeda7a9ba0fba6276ee0efb9b2cceff6aa6174e
+status:     done:50aeb490c568dec87d4549d9ca97762d27776a08
 ```
 Round 4 carried one defect: the batch transcript request sends a
 `speech_models` value the provider rejects with 400, naming only
@@ -379,6 +379,9 @@ from settings, and a test rejects a renamed id against the recorded
 
 ### What exists now
 
+T7.13 landed after round 2 APPROVE with zero residue. Both batch
+paths send the accepted dashed id from the dotted setting, pinned
+against the recorded 400 shape.
 T7.12 landed after round 2 APPROVE with zero residue. Takes post
 stem completion automatically with a visible retry on failure, and
 the sibling specs pin the new navigation contract.
