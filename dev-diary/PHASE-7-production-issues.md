@@ -370,7 +370,7 @@ requires:   T4.4, T5.4
 fixture-ok: yes
 size:       S · mid
 owns:       internal/privacy/, internal/retention/
-status:     not-started
+status:     in-progress:implement:t7.14-impl
 ```
 CI failed twice on restart resume tests that pass in isolation:
 `TestEraseRestartResumesAndFinishes` (privacy) and
