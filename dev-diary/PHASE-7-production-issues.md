@@ -516,7 +516,7 @@ requires:   T7.18, T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/
-status:     in-progress:review-r1:t7.20-rev-r1@3a5e2d49ad75ed82832e2ae3856db1160e28eade
+status:     done:250d8adbf4126468ce9bc8ea10145de4e61551e0
 ```
 Round 1 scoped two gaps outside T7.18: the mint, chunk upload, and
 session end calls run through the unchecked client, and the elapsed
@@ -546,6 +546,9 @@ with the take.
 
 ### What exists now
 
+T7.20 landed after round 1 APPROVE with zero findings. Take calls
+fail loudly by name with no double mint, and the clock freezes with
+the take.
 T7.19 landed after round 2 APPROVE with zero residue. Take budgets
 fit machine traffic with honest hints, and retried completions heal
 against linked pairs.
