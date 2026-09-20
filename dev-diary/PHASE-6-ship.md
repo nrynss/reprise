@@ -184,7 +184,7 @@ requires:   T6.1b
 fixture-ok: no
 size:       S · frontier
 owns:       README.md
-status:     in-progress:implement:t6.3-impl
+status:     in-progress:review-r1:t6.3-rev-r1@fe7fac4dfa76274fa4e89d2e34d7f309099ae573
 ```
 The submission needs a public repository that builds. The private remote already exists at
 `nrynss/reprise`. This task flips visibility and writes the README a stranger can follow.
