@@ -370,7 +370,7 @@ requires:   T4.4, T5.4
 fixture-ok: yes
 size:       S · mid
 owns:       internal/privacy/, internal/retention/
-status:     in-progress:review-r1:t7.14-rev-r1@175db437d7ca3b0550c6ae483b8e50d1314d03e1
+status:     done:49ff37d3725c61c4928fd2ed47366a3c297d1cf8
 ```
 CI failed twice on restart resume tests that pass in isolation:
 `TestEraseRestartResumesAndFinishes` (privacy) and
@@ -407,6 +407,10 @@ worktree.
 
 ### What exists now
 
+T7.14 landed after round 1 APPROVE with the lone L stripped under
+the orchestrator exemption. Resume tests cancel the superseded
+attempt before release and judge the latest attempt. The gate stops
+flaking.
 T7.13 landed after round 2 APPROVE with zero residue. Both batch
 paths send the accepted dashed id from the dotted setting, pinned
 against the recorded 400 shape.
