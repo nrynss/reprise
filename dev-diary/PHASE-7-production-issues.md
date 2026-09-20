@@ -415,8 +415,8 @@ requires:   T7.1, T4.3
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/episode/[id]/+page.svelte,
-            web/src/routes/threads/
-status:     in-progress:review-r1:t7.16-rev-r1@8026d0ec5a94b07dd4b2964134ce4f4df35df200
+            web/src/routes/episode/[id]/+page.ts, web/src/routes/threads/
+status:     done:e757b4d71a3f20e1dee5db0b7a9bd6cdb30ae719
 ```
 The gallery, episode, and threads views still render the scripted
 season T4.3 built against. The live handlers exist since T7.1, but
@@ -476,6 +476,10 @@ run.
 
 ### What exists now
 
+T7.16 landed after round 1 APPROVE with zero in-scope findings.
+Views read the live season with fixtures behind `?fixture=1`. The
+prerender opt-out widened owns by decision. Detail enrichment
+(audio, chapters, words, cover, seeking) carries to a follow-up.
 T7.14 landed after round 1 APPROVE with the lone L stripped under
 the orchestrator exemption. Resume tests cancel the superseded
 attempt before release and judge the latest attempt. The gate stops
