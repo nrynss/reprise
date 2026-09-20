@@ -216,6 +216,9 @@ export function describeCompletionFailure(error: unknown): string {
 		return `The draft move failed (${error.code}). Your stems stay stored. Press retry.`;
 	}
 	if (error instanceof Error) {
+		if (error.message.includes('draft move')) {
+			return `${error.message} Your stems stay stored. Press retry.`;
+		}
 		return `The draft move failed. ${error.message} Your stems stay stored. Press retry.`;
 	}
 	return 'The draft move failed. Your stems stay stored. Press retry.';

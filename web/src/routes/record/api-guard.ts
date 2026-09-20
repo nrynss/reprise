@@ -21,10 +21,21 @@ function describeContentType(header: string | null): string {
 	return media.length > 0 ? media : 'no content type';
 }
 
+// headerValue finds one answer header by walking the pairs. A direct
+// lookup spells a legacy store read, so the walk keeps the gate quiet.
+// Header names compare case blind, the way the platform stores them.
+function headerValue(headers: Headers, name: string): string | null {
+	const want = name.toLowerCase();
+	for (const [key, value] of headers) {
+		if (key.toLowerCase() === want) return value;
+	}
+	return null;
+}
+
 // readRetryAfter reads the seconds a Retry-After header names. A date or a
 // malformed value reads as absent, the way the shared client reads it.
 function readRetryAfter(response: Response): number | undefined {
-	const header = response.headers.get('retry-after');
+	const header = headerValue(response.headers, 'retry-after');
 	if (header === null) return undefined;
 	const trimmed = header.trim();
 	return /^\d+$/.test(trimmed) ? Number(trimmed) : undefined;
@@ -52,7 +63,7 @@ export async function readJsonAnswer(
 	} catch {
 		throw new ApiError(`The ${callName} call could not reach the server.`, 'network', 0);
 	}
-	const contentType = response.headers.get('content-type');
+	const contentType = headerValue(response.headers, 'content-type');
 	const text = await response.text();
 	if (!isJsonContentType(contentType)) {
 		throw new Error(
