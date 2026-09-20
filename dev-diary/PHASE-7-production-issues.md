@@ -398,7 +398,7 @@ requires:   T7.13
 fixture-ok: no
 size:       S · frontier
 owns:       dev-diary/probes/production.md
-status:     in-progress:remediate-r1:t7.15-rem-r1
+status:     in-progress:review-r2:t7.15-rev-r2@3c18617da22033fac66367ee6b31d5561d1b73e4
 ```
 Runs once, against the build carrying the batch model fix. A
 scripted guest records from generated speech, posts stem completion,
