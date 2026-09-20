@@ -34,7 +34,9 @@ var ErrSettings = errors.New("settings: cannot load settings")
 // Settings holds the Reprise configuration for one environment. Inline
 // values come from the TOML file. Secrets resolve from references at load.
 type Settings struct {
-	// TranscriptionModel identifies the batch model for the user stem.
+	// TranscriptionModel identifies the batch model for the user stem. The
+	// file may carry the dotted marketing spelling. The batch client sends
+	// the dashed wire id the provider accepts.
 	TranscriptionModel string `toml:"transcription_model"`
 	// EditorialModel identifies the model that proposes cuts and chapters.
 	EditorialModel string `toml:"editorial_model"`

@@ -18,6 +18,41 @@ const BatchBaseURL = "https://api.assemblyai.com"
 // BatchModel names the batch model the edit pass transcribes with.
 const BatchModel = "universal-3-5-pro"
 
+// acceptedBatchModels lists the speech model ids the provider accepts. The
+// set mirrors the ids the provider names in its recorded 400 reply. Update
+// this list when a fresh rejection names a different set.
+var acceptedBatchModels = []string{"universal-3-pro", "universal-2", "universal-3-5-pro"}
+
+// AcceptedBatchModels returns the speech model ids the provider accepts. The
+// caller compares a fresh provider rejection against this list and updates
+// the list when the provider renames a model.
+func AcceptedBatchModels() []string {
+	return append([]string(nil), acceptedBatchModels...)
+}
+
+// ValidBatchModel reports whether the provider accepts the model id. It maps
+// the settings spelling first, so the dotted marketing name counts as valid.
+func ValidBatchModel(model string) bool {
+	want := normalizeBatchModel(model)
+	for _, accepted := range acceptedBatchModels {
+		if want == accepted {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeBatchModel maps the settings spelling to the wire id. The settings
+// file spells the flagship model with a dot. The provider accepts dashes
+// only. Unknown ids pass through unchanged, so the provider reports them
+// with its reason.
+func normalizeBatchModel(model string) string {
+	if model == "universal-3.5-pro" {
+		return BatchModel
+	}
+	return model
+}
+
 // BatchDollarsPerHour prices one audio hour on the batch model.
 const BatchDollarsPerHour = 0.21
 
@@ -101,7 +136,8 @@ type Config struct {
 	BaseURL string
 	// APIKey authorizes every call. It never leaves the server.
 	APIKey string
-	// Model overrides the transcription model. Empty means BatchModel.
+	// Model overrides the transcription model. Empty means BatchModel. The
+	// dotted settings spelling maps to the dashed wire id.
 	Model string
 	// Client overrides the HTTP client. Empty means a 90 second client.
 	Client *http.Client
@@ -126,7 +162,7 @@ func NewBatchClient(cfg Config) (*BatchClient, error) {
 	if base == "" {
 		base = BatchBaseURL
 	}
-	model := cfg.Model
+	model := normalizeBatchModel(cfg.Model)
 	if model == "" {
 		model = BatchModel
 	}
