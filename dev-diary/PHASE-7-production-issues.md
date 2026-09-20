@@ -516,7 +516,7 @@ requires:   T7.18, T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/
-status:     in-progress:implement:t7.20-impl
+status:     in-progress:review-r1:t7.20-rev-r1@3a5e2d49ad75ed82832e2ae3856db1160e28eade
 ```
 Round 1 scoped two gaps outside T7.18: the mint, chunk upload, and
 session end calls run through the unchecked client, and the elapsed
