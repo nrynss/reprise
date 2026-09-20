@@ -5,7 +5,12 @@
 // own. It reports every change through one snapshot callback the page
 // renders.
 
-import { api } from '@nrynss/chaaya/api';
+import {
+	closeSession,
+	describeSessionEndFailure,
+	describeUploadFailure,
+	mintSession
+} from '$lib/voice/session-calls';
 import {
 	AudioRecorder,
 	ChunkUploader,
@@ -29,7 +34,7 @@ import {
 } from '../../routes/record/stems-complete';
 import { drainHostBlock, drainUserBlock, type HostMark } from '$lib/voice/take';
 import { makeTestTone } from '$lib/voice/pcm';
-import { parseSessionStart, socketUrl, type SessionStart } from '$lib/voice/session';
+import { socketUrl, type SessionStart } from '$lib/voice/session';
 import { browserSocket, VoiceSocket, type SocketHandle } from '$lib/voice/socket';
 import { SessionCap, type CapClock } from '$lib/voice/cap';
 
@@ -81,6 +86,9 @@ export interface MockVoiceHarness {
 	capJump(ms: number): void;
 	capWake(): void;
 	capInfo(): { warning: boolean; text: string; remainingSeconds: number };
+	clockRunning(): boolean;
+	challengeUrl(part: string): void;
+	clearChallenges(): void;
 }
 
 export interface MockRecovered {
@@ -211,6 +219,10 @@ export class RecordController {
 	private capText = '';
 	private completionDriver: CompletionDriver | null = null;
 	private completion: CompletionView | null = null;
+	private completionPosted = false;
+	private uploadFailure: string | null = null;
+	private pendingEnd: string | null = null;
+	private mockChallenges: string[] = [];
 	private pendingCompletion: { episode: string; pair: StemPair; userBytes: number; hostBytes: number } | null =
 		null;
 
@@ -262,10 +274,7 @@ export class RecordController {
 			document.removeEventListener('visibilitychange', this.visibleListener);
 			this.visibleListener = null;
 		}
-		if (this.timer !== null) {
-			window.clearInterval(this.timer);
-			this.timer = null;
-		}
+		this.stopClock();
 		this.guard?.destroy();
 		this.stopCap();
 		if (this.phase === 'live') void this.voice?.end();
@@ -276,6 +285,9 @@ export class RecordController {
 		if (this.phase !== 'preflight') return;
 		this.phase = 'starting';
 		this.notice = 'Opening the session.';
+		this.uploadFailure = null;
+		this.pendingEnd = null;
+		this.completionPosted = false;
 		this.emit();
 		try {
 			if (this.mockMode) {
@@ -321,6 +333,7 @@ export class RecordController {
 		}
 		if (this.voice === null || this.session === null) return;
 		this.stopCap();
+		this.stopClock();
 		this.phase = 'ending';
 		this.armed = false;
 		this.notice = 'Ending the session.';
@@ -332,15 +345,36 @@ export class RecordController {
 			await this.recorder?.stop();
 			if (this.userUpload !== null) await this.userUpload.finish();
 			if (this.hostUpload !== null) await this.hostUpload.finish();
-			try {
-				await api<unknown>(`/api/sessions/${session.session_id}/end`, { method: 'POST' });
-			} catch {
-				// The end record lands when its handler exists. The socket
-				// close above already stopped the billing clock.
-			}
-			this.guard?.close();
+			this.uploadFailure = describeUploadFailure(this.userUpload, this.hostUpload);
 			const userBytes = this.userUpload?.receipt?.sizeBytes ?? 0;
 			const hostBytes = this.hostUpload?.receipt?.sizeBytes ?? 0;
+			try {
+				await closeSession(session.session_id);
+			} catch (error) {
+				this.pendingEnd = session.session_id;
+				this.pendingCompletion = {
+					episode: session.episode_id,
+					pair: this.storedPair(),
+					userBytes,
+					hostBytes
+				};
+				this.completionPosted = false;
+				this.failTake(describeSessionEndFailure(error));
+				return;
+			}
+			this.pendingEnd = null;
+			if (this.uploadFailure !== null) {
+				this.pendingCompletion = {
+					episode: session.episode_id,
+					pair: this.storedPair(),
+					userBytes,
+					hostBytes
+				};
+				this.completionPosted = false;
+				this.failTake(`${this.uploadFailure} Your stems stay stored. Press retry.`);
+				return;
+			}
+			this.guard?.close();
 			const moved = await this.postStoredCompletion(session.episode_id, userBytes, hostBytes);
 			if (!moved) return;
 			this.goProcessing(session.episode_id, userBytes, hostBytes);
@@ -348,11 +382,28 @@ export class RecordController {
 		await this.ending;
 	}
 
-	/** Retry the stored draft move after a loud refusal. The stored stems survive it, so a retry reposts the link and never uploads twice. */
+	/** Retry the stored take after a loud refusal. A pending close record goes
+	first, then the stored pair reposts through the driver. Either retry is
+	safe: the close record is idempotent and the server reports the standing
+	outcome instead of scheduling twice. */
 	async retryCompletion(): Promise<void> {
 		if (this.pendingCompletion === null) return;
 		const pending = this.pendingCompletion;
-		await this.ensureCompletionDriver().retry();
+		if (this.pendingEnd !== null) {
+			try {
+				await closeSession(this.pendingEnd);
+			} catch (error) {
+				this.failTake(describeSessionEndFailure(error));
+				return;
+			}
+			this.pendingEnd = null;
+		}
+		if (this.completionPosted) {
+			await this.ensureCompletionDriver().retry();
+		} else {
+			this.completionPosted = true;
+			await this.ensureCompletionDriver().run(pending.episode, pending.pair);
+		}
 		if (this.completion?.status === 'failed') return;
 		this.pendingCompletion = null;
 		this.goProcessing(pending.episode, pending.userBytes, pending.hostBytes);
@@ -367,12 +418,9 @@ export class RecordController {
 		userBytes: number,
 		hostBytes: number
 	): Promise<boolean> {
-		const pair = completionPair(
-			this.userUpload?.id ?? '',
-			this.hostUpload?.id ?? '',
-			Math.round(this.context?.sampleRate ?? 0)
-		);
+		const pair = this.storedPair();
 		this.pendingCompletion = { episode, pair, userBytes, hostBytes };
+		this.completionPosted = true;
 		await this.ensureCompletionDriver().run(episode, pair);
 		if (this.completion?.status === 'failed') return false;
 		this.pendingCompletion = null;
@@ -391,6 +439,44 @@ export class RecordController {
 			});
 		}
 		return this.completionDriver;
+	}
+
+	// storedPair builds the completion pair from the finished uploads. The
+	// host stem plays at the provider rate, so the host rate rides on that
+	// constant the same way on every path that posts.
+	private storedPair(): StemPair {
+		return completionPair(
+			this.userUpload?.id ?? '',
+			this.hostUpload?.id ?? '',
+			Math.round(this.context?.sampleRate ?? 0)
+		);
+	}
+
+	// requireUploadsOpen throws a named error when either stem upload failed
+	// to open. The start catch shows it loudly and the page stays preflight,
+	// so the start control remains the retry and no half take records.
+	private requireUploadsOpen(): void {
+		const failure = describeUploadFailure(this.userUpload, this.hostUpload);
+		if (failure !== null) throw new Error(`${failure} Press start to try again.`);
+	}
+
+	// failTake freezes the take on a loud named failure. The clock stops, the
+	// page stays on the record screen with the retry, and the take never
+	// stalls silent and never ticks against a dead take.
+	private failTake(text: string): void {
+		this.stopClock();
+		this.completion = { status: 'failed', text, canRetry: true };
+		this.notice = text;
+		this.emit();
+	}
+
+	// stopClock freezes the elapsed display. Every take end path calls this,
+	// so the display never ticks against a take that cannot proceed.
+	private stopClock(): void {
+		if (this.timer !== null) {
+			window.clearInterval(this.timer);
+			this.timer = null;
+		}
 	}
 
 	// goProcessing hands the finished take to the processing screen. The
@@ -447,7 +533,14 @@ export class RecordController {
 				warning: this.capWarning,
 				text: this.capText,
 				remainingSeconds: this.cap?.remainingSeconds() ?? 0
-			})
+			}),
+			clockRunning: () => this.timer !== null,
+			challengeUrl: (part: string) => {
+				this.mockChallenges.push(part);
+			},
+			clearChallenges: () => {
+				this.mockChallenges = [];
+			}
 		};
 	}
 
@@ -487,14 +580,14 @@ export class RecordController {
 	}
 
 	private async startRealTake(): Promise<void> {
-		const data = await api<unknown>('/api/sessions', { method: 'POST' });
-		this.session = parseSessionStart(JSON.stringify(data));
+		this.session = await mintSession();
 		this.greeting = this.session.config.greeting;
 		this.owner = this.session.episode_id;
 		this.context = new AudioContext();
 		await this.context.resume();
 		this.player = new PcmStreamPlayer({ context: this.context, streamRate: 24000 });
 		await this.openUploads();
+		this.requireUploadsOpen();
 		this.voice = this.wireVoice(browserSocket(socketUrl(this.session.token)));
 		this.guard = new SessionGuard({ url: `/api/sessions/${this.session.session_id}/end` });
 		this.guard.attach();
@@ -531,6 +624,7 @@ export class RecordController {
 		this.installMockFetch(this.mockServer);
 		this.player = new PcmStreamPlayer({ context: this.context, streamRate: 24000 });
 		await this.openUploads();
+		this.requireUploadsOpen();
 		this.mockHandle = new MockSocketHandle(mockScript());
 		this.voice = this.wireVoice(this.mockHandle);
 		this.guard = new SessionGuard({ url: `/api/sessions/${this.session.session_id}/end` });
@@ -643,6 +737,12 @@ export class RecordController {
 		const realFetch = window.fetch.bind(window);
 		window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+			if (this.mockChallenges.some((part) => url.includes(part))) {
+				return new Response('<html><body>challenge</body></html>', {
+					status: 200,
+					headers: { 'content-type': 'text/html; charset=utf-8' }
+				});
+			}
 			if (url.includes(UPLOAD_BASE)) {
 				return server.handle(url, init);
 			}

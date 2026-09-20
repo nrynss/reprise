@@ -3,9 +3,9 @@
 // screen and the card never drift into two mechanisms. Like the take, it
 // reports through snapshots the page renders.
 
-import { api } from '@nrynss/chaaya/api';
 import { ChunkUploader } from '@nrynss/chaaya/audio';
 import { JobStream, type JobSnapshot } from '@nrynss/chaaya/job';
+import { readJobState } from './session-calls';
 import {
 	MockUploadServer,
 	progressFrame,
@@ -128,7 +128,7 @@ export class ProcessingController {
 	private watchJob(id: string, kind: 'transcript' | 'editorial'): void {
 		const stream = new JobStream({
 			url: `/api/jobs/${id}/events`,
-			fetchState: () => api<JobSnapshot>(`/api/jobs/${id}`)
+			fetchState: () => readJobState<JobSnapshot>(id)
 		});
 		if (kind === 'transcript') {
 			this.transcriptStream = stream;
