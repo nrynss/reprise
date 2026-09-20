@@ -4,13 +4,17 @@
 /** The sample rate the voice provider accepts, in hertz. */
 export const SOCKET_RATE = 24000;
 
-/** Clamp one float frame into 16 bit PCM range and scale it. */
+/** Clamp one float frame into 16 bit PCM range and scale it. Scale by 32768
+ * so the decode divide has an exact inverse. Every int16 value divided by
+ * 32768 stays exact in float32, so rounding the product returns the same
+ * value. Full scale input clamps to the int16 rails. */
 export function floatToPcm16(samples: Float32Array): Int16Array {
 	const out = new Int16Array(samples.length);
 	for (let i = 0; i < samples.length; i += 1) {
 		const sample = samples[i];
 		const clamped = sample > 1 ? 1 : sample < -1 ? -1 : sample;
-		out[i] = Math.round(clamped * 32767);
+		const scaled = Math.round(clamped * 32768);
+		out[i] = scaled > 32767 ? 32767 : scaled < -32768 ? -32768 : scaled;
 	}
 	return out;
 }

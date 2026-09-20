@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VoiceSocket, type SocketHandle } from './socket';
-import { encodeBase64, floatToPcm16, pcm16ToBytes } from './pcm';
+import { bytesToPcm16, encodeBase64, floatToPcm16, pcm16ToBytes, pcm16ToFloat } from './pcm';
 import { drainHostBlock } from './take';
 import type { SessionConfig } from './session';
 
@@ -221,5 +221,32 @@ describe('live provider audio shape', () => {
 		expect(seen.hostAudio.length).toBe(1);
 		const stored = drainHostBlock(seen.hostAudio[0]);
 		expect([...stored]).toEqual([...providerBytes]);
+	});
+
+	it('keeps a loud host stem byte exact from the data key to the drain', () => {
+		const handle = new FakeHandle();
+		const { seen } = wire(handle);
+		handle.open();
+		const provider = new Float32Array(480);
+		for (let i = 0; i < provider.length; i += 1) provider[i] = 0.99 * Math.sin(i / 10);
+		const providerBytes = pcm16ToBytes(floatToPcm16(provider));
+		handle.receive(JSON.stringify({ type: 'reply.audio', data: encodeBase64(providerBytes) }));
+		expect(seen.hostAudio.length).toBe(1);
+		const stored = drainHostBlock(seen.hostAudio[0]);
+		expect([...stored]).toEqual([...providerBytes]);
+	});
+
+	it('round trips every int16 value from the wire to the drain with no loss', () => {
+		const frames = new Int16Array(65536);
+		for (let value = -32768; value <= 32767; value += 1) frames[value + 32768] = value;
+		const stored = drainHostBlock(pcm16ToFloat(bytesToPcm16(pcm16ToBytes(frames))));
+		const back = bytesToPcm16(stored);
+		let mismatches = 0;
+		for (let i = 0; i < back.length; i += 1) {
+			if (back[i] !== frames[i]) mismatches += 1;
+		}
+		expect(mismatches).toBe(0);
+		expect(back[65535]).toBe(32767);
+		expect(back[0]).toBe(-32768);
 	});
 });

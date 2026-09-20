@@ -14,12 +14,12 @@ import {
 describe('floatToPcm16', () => {
 	it('maps silence to zero and full scale to the rails', () => {
 		const frames = floatToPcm16(new Float32Array([0, 1, -1, 0.5, -0.5]));
-		expect([...frames]).toEqual([0, 32767, -32767, 16384, -16383]);
+		expect([...frames]).toEqual([0, 32767, -32768, 16384, -16384]);
 	});
 
 	it('clamps frames outside the range instead of wrapping', () => {
 		const frames = floatToPcm16(new Float32Array([2, -2]));
-		expect([...frames]).toEqual([32767, -32767]);
+		expect([...frames]).toEqual([32767, -32768]);
 	});
 });
 
