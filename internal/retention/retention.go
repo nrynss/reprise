@@ -77,7 +77,10 @@ type Config struct {
 
 // Service sweeps expired guests and keeps episodes for the owner. Create
 // it with New, because the zero value holds no store and no runner. A
-// Service is safe for concurrent use.
+// Service is safe for concurrent use. The runner field changes only
+// through BindRunner under a lock. Each attempt captures the runner
+// once and threads it through, so a bind that lands mid-attempt never
+// moves the running work.
 type Service struct {
 	db     *sqlite.DB
 	media  privacy.BlobStore
@@ -85,6 +88,7 @@ type Service struct {
 	now    func() time.Time
 	trust  *allowlist
 	inner  *privacy.Service
+	mu     sync.RWMutex
 	runner *job.Runner
 }
 
@@ -145,8 +149,19 @@ func (s *Service) BindRunner(r *job.Runner) error {
 	if r == nil {
 		return fmt.Errorf("retention: bind runner: %w: runner must not be nil", ErrInvalid)
 	}
+	s.mu.Lock()
 	s.runner = r
+	s.mu.Unlock()
 	return s.inner.BindRunner(r)
+}
+
+// runnerOf returns the bound runner, or nil when none is bound. Callers
+// capture the result once per attempt and thread it through every step,
+// so a running attempt never re-reads the field a later bind replaces.
+func (s *Service) runnerOf() *job.Runner {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.runner
 }
 
 // Kind returns the job kind that runs sweeps. Register it under SweepName

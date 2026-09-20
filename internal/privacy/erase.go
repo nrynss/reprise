@@ -25,6 +25,7 @@ import (
 	"sort"
 
 	"github.com/nrynss/keel/erase"
+	"github.com/nrynss/keel/job"
 	"github.com/nrynss/keel/mediastore"
 )
 
@@ -182,15 +183,27 @@ func (s *Service) source(ctx context.Context, ref string) ([]erase.Target, error
 // ErrNotFound, and another owner's episode reports ErrNotOwner, so the
 // handler answers 404 for both.
 func (s *Service) Erase(ctx context.Context, episodeID string) (string, error) {
+	r := s.runnerOf()
+	if r == nil {
+		return "", fmt.Errorf("privacy: erase %s: %w: no runner bound", episodeID, ErrInvalid)
+	}
+	return s.EraseOn(ctx, r, episodeID)
+}
+
+// EraseOn starts the erasure of episodeID on runner and returns the job
+// id at once. It carries the same contract as Erase, but the caller
+// supplies the runner, so work that already captured its runner never
+// re-reads the bound field.
+func (s *Service) EraseOn(ctx context.Context, runner *job.Runner, episodeID string) (string, error) {
+	if runner == nil {
+		return "", fmt.Errorf("privacy: erase %s: %w: no runner bound", episodeID, ErrInvalid)
+	}
 	if episodeID == "" {
 		return "", fmt.Errorf("privacy: erase: %w: empty episode", ErrInvalid)
 	}
 	ep, err := s.owned(ctx, episodeID)
 	if err != nil {
 		return "", err
-	}
-	if s.runner == nil {
-		return "", fmt.Errorf("privacy: erase %s: %w: no runner bound", episodeID, ErrInvalid)
 	}
 	ref, err := s.inventory(ctx, ep.owner, ep.id)
 	if err != nil {
@@ -200,7 +213,7 @@ func (s *Service) Erase(ctx context.Context, episodeID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("privacy: erase %s: %w", episodeID, err)
 	}
-	jobID, err := s.eraser.Start(ctx, s.runner, string(raw), s.targets(ref))
+	jobID, err := s.eraser.Start(ctx, runner, string(raw), s.targets(ref))
 	if err != nil {
 		return "", fmt.Errorf("privacy: erase %s: %w", episodeID, err)
 	}
@@ -215,13 +228,25 @@ func (s *Service) Erase(ctx context.Context, episodeID string) (string, error) {
 // checks against that recorded owner, because the rows are gone. A
 // complete erasure reports ErrComplete instead of starting new work.
 func (s *Service) ReErase(ctx context.Context, jobID string) (string, error) {
+	r := s.runnerOf()
+	if r == nil {
+		return "", fmt.Errorf("privacy: re-erase %s: %w: no runner bound", jobID, ErrInvalid)
+	}
+	return s.ReEraseOn(ctx, r, jobID)
+}
+
+// ReEraseOn restarts a stuck erasure on runner from its recorded ref. It
+// carries the same contract as ReErase, but the caller supplies the
+// runner, so work that already captured its runner never re-reads the
+// bound field.
+func (s *Service) ReEraseOn(ctx context.Context, runner *job.Runner, jobID string) (string, error) {
+	if runner == nil {
+		return "", fmt.Errorf("privacy: re-erase %s: %w: no runner bound", jobID, ErrInvalid)
+	}
 	if jobID == "" {
 		return "", fmt.Errorf("privacy: re-erase: %w: empty job", ErrInvalid)
 	}
-	if s.runner == nil {
-		return "", fmt.Errorf("privacy: re-erase %s: %w: no runner bound", jobID, ErrInvalid)
-	}
-	rep, err := s.eraser.Inspect(ctx, s.runner, jobID)
+	rep, err := s.eraser.Inspect(ctx, runner, jobID)
 	if err != nil {
 		return "", fmt.Errorf("privacy: re-erase %s: %w", jobID, err)
 	}
@@ -239,7 +264,7 @@ func (s *Service) ReErase(ctx context.Context, jobID string) (string, error) {
 	if !s.owns.Owns(ctx, decoded.Owner) {
 		return "", fmt.Errorf("privacy: re-erase %s: %w", jobID, ErrNotOwner)
 	}
-	next, err := s.eraser.Start(ctx, s.runner, rep.Ref, targets)
+	next, err := s.eraser.Start(ctx, runner, rep.Ref, targets)
 	if err != nil {
 		return "", fmt.Errorf("privacy: re-erase %s: %w", jobID, err)
 	}

@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/nrynss/keel/erase"
 	"github.com/nrynss/keel/job"
@@ -114,13 +115,16 @@ type Config struct {
 
 // Service publishes, unpublishes, shares and erases episodes. Create it
 // with New, because the zero value holds no store and no eraser. A
-// Service is safe for concurrent use.
+// Service is safe for concurrent use. The runner field changes only
+// through BindRunner under a lock. Each call captures it once, so a
+// bind that lands mid-call never moves the running work.
 type Service struct {
 	db          *sqlite.DB
 	media       BlobStore
 	coverDir    string
 	sessions    SessionClient
 	transcripts TranscriptClient
+	mu          sync.RWMutex
 	runner      *job.Runner
 	owns        OwnerCheck
 	eraser      *erase.Eraser
@@ -174,8 +178,19 @@ func (s *Service) BindRunner(r *job.Runner) error {
 	if r == nil {
 		return fmt.Errorf("privacy: bind runner: %w: runner must not be nil", ErrInvalid)
 	}
+	s.mu.Lock()
 	s.runner = r
+	s.mu.Unlock()
 	return nil
+}
+
+// runnerOf returns the bound runner, or nil when none is bound. Callers
+// capture the result once per call and thread it through, so a bind that
+// lands mid-call never moves the running work.
+func (s *Service) runnerOf() *job.Runner {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.runner
 }
 
 // Eraser returns the erasure runner this service starts jobs on.

@@ -62,11 +62,12 @@ type sweepSnapshot struct {
 // caller follows the job to done. The sweep reads expiry fresh inside the
 // job, so guests who idled past the window since the last run expire now.
 func (s *Service) Sweep(ctx context.Context) (string, error) {
-	if s.runner == nil {
+	r := s.runnerOf()
+	if r == nil {
 		return "", fmt.Errorf("retention: sweep: %w: no runner bound", ErrInvalid)
 	}
-	id, err := s.runner.StartKind(ctx, SweepName, func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
-		return s.run(ctx, progress, sweepSnapshot{})
+	id, err := r.StartKind(ctx, SweepName, func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
+		return s.runOn(ctx, r, progress, sweepSnapshot{})
 	})
 	if err != nil {
 		return "", fmt.Errorf("retention: sweep: %w", err)
@@ -81,18 +82,19 @@ func (s *Service) Sweep(ctx context.Context) (string, error) {
 // with nothing recorded restarts from a fresh inventory, so a retry
 // after a provider outage finishes the same guests.
 func (s *Service) ReSweep(ctx context.Context, jobID string) (string, error) {
-	if s.runner == nil {
+	r := s.runnerOf()
+	if r == nil {
 		return "", fmt.Errorf("retention: re-sweep: %w: no runner bound", ErrInvalid)
 	}
 	if jobID == "" {
 		return "", fmt.Errorf("retention: re-sweep: %w: empty job", ErrInvalid)
 	}
-	prior, err := s.snapshotOf(ctx, jobID)
+	prior, err := s.snapshotOf(ctx, r, jobID)
 	if err != nil {
 		return "", err
 	}
-	id, err := s.runner.StartKind(ctx, SweepName, func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
-		return s.run(ctx, progress, prior)
+	id, err := r.StartKind(ctx, SweepName, func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
+		return s.runOn(ctx, r, progress, prior)
 	})
 	if err != nil {
 		return "", fmt.Errorf("retention: re-sweep: %w", err)
@@ -102,8 +104,8 @@ func (s *Service) ReSweep(ctx context.Context, jobID string) (string, error) {
 
 // snapshotOf reads the latest recorded snapshot of one sweep job. A job
 // with no snapshot yet restarts from a fresh inventory.
-func (s *Service) snapshotOf(ctx context.Context, jobID string) (sweepSnapshot, error) {
-	attempts, err := s.runner.Attempts(ctx, jobID)
+func (s *Service) snapshotOf(ctx context.Context, r *job.Runner, jobID string) (sweepSnapshot, error) {
+	attempts, err := r.Attempts(ctx, jobID)
 	if err != nil {
 		return sweepSnapshot{}, fmt.Errorf("retention: re-sweep %s: %w", jobID, err)
 	}
@@ -144,20 +146,23 @@ func (s *Service) resume(rec job.Record) (job.Func, error) {
 		}
 	}
 	return func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
-		return s.run(ctx, progress, snap)
+		r := s.runnerOf()
+		if r == nil {
+			return nil, fmt.Errorf("retention: sweep: %w: no runner bound", ErrInvalid)
+		}
+		return s.runOn(ctx, r, progress, snap)
 	}, nil
 }
 
-// run drives one sweep attempt. Prior names the guests an interrupted run
-// already recorded. The run reads the cutoff fresh on every attempt,
-// including resume and re-sweep, and unions unconfirmed prior guests with
-// the guests expired under that fresh cutoff, so a guest who idled past
-// the window while the sweep was down still expires.
-func (s *Service) run(ctx context.Context, progress func(job.Progress), prior sweepSnapshot) ([]byte, error) {
-	runner := s.runner
-	if runner == nil {
-		return nil, fmt.Errorf("retention: sweep: %w: no runner bound", ErrInvalid)
-	}
+// runOn drives one sweep attempt on runner. Prior names the guests an
+// interrupted run already recorded. The run reads the cutoff fresh on
+// every attempt, including resume and re-sweep, and unions unconfirmed
+// prior guests with the guests expired under that fresh cutoff, so a
+// guest who idled past the window while the sweep was down still
+// expires. The attempt threads runner through every step and never
+// re-reads the bound field, so a bind that lands mid-attempt cannot
+// move the running work.
+func (s *Service) runOn(ctx context.Context, runner *job.Runner, progress func(job.Progress), prior sweepSnapshot) ([]byte, error) {
 	cutoff := s.now().Add(-s.window).Unix()
 	guests, err := s.plan(ctx, cutoff, prior.Guests)
 	if err != nil {
@@ -348,7 +353,7 @@ func (s *Service) finishRecorded(ctx context.Context, runner *job.Runner, episod
 // for it to read complete.
 func (s *Service) retryRecorded(ctx context.Context, runner *job.Runner, episode *sweptEpisode, id string, report func()) error {
 	for round := 1; round <= episodeRetryRounds; round++ {
-		next, err := s.inner.ReErase(ctx, id)
+		next, err := s.inner.ReEraseOn(ctx, runner, id)
 		if errors.Is(err, privacy.ErrComplete) {
 			episode.Done = true
 			report()
@@ -382,7 +387,7 @@ func (s *Service) retryRecorded(ctx context.Context, runner *job.Runner, episode
 // guest it runs for.
 func (s *Service) startErasure(ctx context.Context, runner *job.Runner, guest string, episode *sweptEpisode) (string, error) {
 	if n := len(episode.Erasures); n > 0 {
-		id, err := s.inner.ReErase(ctx, episode.Erasures[n-1])
+		id, err := s.inner.ReEraseOn(ctx, runner, episode.Erasures[n-1])
 		if err == nil {
 			return id, nil
 		}
@@ -392,7 +397,7 @@ func (s *Service) startErasure(ctx context.Context, runner *job.Runner, guest st
 			return episode.Erasures[n-1], nil
 		}
 	}
-	id, err := s.inner.Erase(ctx, episode.Episode)
+	id, err := s.inner.EraseOn(ctx, runner, episode.Episode)
 	if err != nil {
 		return "", fmt.Errorf("retention: erase %s for %s: %w", episode.Episode, guest, err)
 	}
