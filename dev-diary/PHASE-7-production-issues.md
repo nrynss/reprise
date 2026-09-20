@@ -531,6 +531,28 @@ display keeps ticking after a failed completion.
 and the page names each failure instead of stalling. The clock stops
 with the take.
 
+### T7.21: BindRunner race in resume tests
+```yaml
+requires:   T7.14
+fixture-ok: yes
+size:       XS · light
+owns:       internal/retention/, internal/privacy/
+status:     not-started
+```
+CI caught a data race T7.14 missed: `retention.Service.run()` reads
+a field at `sweep.go:157` while the test writes it through
+`BindRunner` at `retention.go:148`, because the old runner's resumed
+job still runs when the test rebinds. A race is a C.
+
+* Break the sharing: the resumed job must not read service fields
+  the test writes, or the rebind must wait for the old runner to
+  stop. Same pattern in privacy if it shares the shape.
+* Reproduce with the CI report first, then fix. No sleeps, no
+  widened thresholds.
+
+**Done when:** The exact CI race report no longer reproduces and
+both resume tests pass twenty consecutive race runs.
+
 ---
 
 ## Exit criteria
