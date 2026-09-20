@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { VoiceSocket, type SocketHandle } from './socket';
 import { encodeBase64, floatToPcm16, pcm16ToBytes } from './pcm';
+import { drainHostBlock } from './take';
 import type { SessionConfig } from './session';
 
 class FakeHandle implements SocketHandle {
@@ -193,5 +194,32 @@ describe('provider audio encoding', () => {
 		for (let i = 0; i < frames.length; i += 1) frames[i] = Math.sin(i / 10) * 0.4;
 		const bytes = pcm16ToBytes(floatToPcm16(frames));
 		expect(encodeBase64(bytes).length).toBeGreaterThan(0);
+	});
+});
+
+describe('live provider audio shape', () => {
+	it('routes host audio carried under the data key', () => {
+		const handle = new FakeHandle();
+		const { seen } = wire(handle);
+		handle.open();
+		const frames = new Float32Array([0, 0.5, -0.5]);
+		const payload = encodeBase64(pcm16ToBytes(floatToPcm16(frames)));
+		handle.receive(JSON.stringify({ type: 'reply.audio', data: payload }));
+		expect(seen.hostAudio.length).toBe(1);
+		expect(seen.hostAudio[0].length).toBe(3);
+		expect(seen.hostAudio[0][1]).toBeCloseTo(0.5, 3);
+	});
+
+	it('keeps the host stem byte exact from the data key to the drain', () => {
+		const handle = new FakeHandle();
+		const { seen } = wire(handle);
+		handle.open();
+		const provider = new Float32Array(480);
+		for (let i = 0; i < provider.length; i += 1) provider[i] = 0.3 * Math.sin(i / 10);
+		const providerBytes = pcm16ToBytes(floatToPcm16(provider));
+		handle.receive(JSON.stringify({ type: 'reply.audio', data: encodeBase64(providerBytes) }));
+		expect(seen.hostAudio.length).toBe(1);
+		const stored = drainHostBlock(seen.hostAudio[0]);
+		expect([...stored]).toEqual([...providerBytes]);
 	});
 });

@@ -91,7 +91,7 @@ export class MockSocketHandle implements SocketHandle {
 		const step = 960;
 		for (let at = 0; at < audio.length; at += step) {
 			const frames = audio.slice(at, at + step);
-			this.emit({ type: 'reply.audio', audio: encodeBase64(pcm16ToBytes(floatToPcm16(frames))) });
+			this.emit({ type: 'reply.audio', data: encodeBase64(pcm16ToBytes(floatToPcm16(frames))) });
 		}
 		this.emit({ type: 'transcript.agent.delta', text, start_ms: 0, end_ms: 1000 });
 		this.emit({ type: 'reply.done', interrupted });

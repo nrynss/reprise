@@ -143,10 +143,13 @@ export class VoiceSocket {
 		const record = message as Record<string, unknown>;
 		switch (record['type']) {
 			case 'reply.audio': {
-				if (typeof record['audio'] !== 'string') return;
+				// The provider carries host audio under data. Older doubles sent
+				// it under audio, so the loop accepts both keys for now.
+				const raw = typeof record['data'] === 'string' ? record['data'] : record['audio'];
+				if (typeof raw !== 'string') return;
 				let bytes: Uint8Array;
 				try {
-					bytes = decodeBase64(record['audio']);
+					bytes = decodeBase64(raw);
 				} catch {
 					return;
 				}
