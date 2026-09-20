@@ -467,7 +467,7 @@ requires:   T7.12, T2.4
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/record/
-status:     in-progress:review-r1:t7.18-rev-r1@12f97eb1f8c071b7ba48a8f5bbc1d5242ad8c0a4
+status:     in-progress:remediate-r1:t7.18-rem-r1
 ```
 A real take died silently when Cloudflare answered API calls with a
 challenge page: uploads, transcript rows, and session end all failed
@@ -509,6 +509,27 @@ tuned for clicks, not takes.
 **Done when:** A fixture take at real cadence (chunk per block,
 polls running, completion at end) passes the wired gate with zero
 429s, and a burst test twice as fast still trips. Both pinned.
+
+### T7.20: Guard the voice-layer calls and stop the clock
+```yaml
+requires:   T7.18, T7.12
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/lib/voice/
+status:     not-started
+```
+Round 1 scoped two gaps outside T7.18: the mint, chunk upload, and
+session end calls run through the unchecked client, and the elapsed
+display keeps ticking after a failed completion.
+
+* Route mint, chunks, and session end through content type checked
+  calls that name the failed call, with retry where retry is safe.
+* Stop the take clock when the take cannot proceed. No silent
+  ticking against a dead take.
+
+**Done when:** Playwright serves HTML on mint, chunk, and end routes
+and the page names each failure instead of stalling. The clock stops
+with the take.
 
 ---
 
