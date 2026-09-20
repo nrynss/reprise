@@ -1093,3 +1093,264 @@ cents at 4.50 dollars per connected hour. The failed batch pass
 bills nothing, since the provider refused it before transcribing.
 Upload bytes bill nothing. Total live spend for this verification
 is about 6.5 cents.
+
+---
+
+# Round 5: full-pipe live proof after the batch model fix
+
+Live run on 2026-09-20 from a workstation against
+`https://reprise.nryn.dev`. Every check ran from this machine, never
+from the box. No real voice appears anywhere. All speech is
+generated: the guest lines reuse `testdata/sessions/steady/`, and the
+host stem is the provider reply audio from this run, decoded from the
+socket frames. Tokens and keys are redacted below. Cookie jars lived
+in `/tmp` and are deleted. Rounds 1 through 4 above stay untouched.
+
+## Edge identity
+
+Command:
+
+```bash
+curl -sS https://reprise.nryn.dev/healthz
+curl -sS -o /dev/null -w "%{http_code}\n" https://reprise.nryn.dev/
+```
+
+Output:
+
+```text
+ok a41e0ed63478f4d8b39bde3b2dc5ab01 version=80ddeff568120bb9ad9fde331662c0747eff981e
+200
+```
+
+Result: pass. The version matches the required
+`80ddeff568120bb9ad9fde331662c0747eff981e`.
+
+## 1. Scripted guest records an episode
+
+One guest mints a session, streams the two generated lines, hears
+the host reply, and ends the call explicitly.
+
+Command:
+
+```bash
+curl -sS -c jar.txt -b jar.txt -X POST https://reprise.nryn.dev/api/sessions \
+  -H 'Content-Type: application/json' -d '{}' -o mint.json -w 'HTTP %{http_code}\n'
+```
+
+Output (token redacted):
+
+```text
+HTTP 201
+```
+
+The body carries `session_id`
+`3782bbbb4b96f5de78f97026aaaef53f`, `episode_id`
+`dfb7d79686ab0a47bfd6aa8c4ae73714`, a single use provider token,
+`expires_in_seconds` 60, `max_session_duration_seconds` 1800, and the
+first episode greeting with empty keyterms.
+
+The live call streams `steady/user-a.wav` plus `steady/user-b.wav`
+resampled to 24 kHz mono PCM, sends `session.update` with the
+returned config, streams 4800 sample frames every 200 ms, then sends
+`session.end`. The script is `/tmp/opencode/t715/live.py`
+(workstation only, not tracked).
+
+Output:
+
+```text
+stream samples: 130927 = 5.46s
+- transcript.user Garden gate needs paint before winter.
+- transcript.user Should buy brushes on Saturday morning.
+- transcript.agent OK. I've noted that you need to buy brushes on Saturday morning to paint the garden gate before winter.
+- reply.done interrupted=None
+session.ended {"session_duration_seconds": 14.63991, "audio_duration_seconds": null}
+events: 1064
+```
+
+Recognition read back both generated lines with small wording
+shifts. The host answered with one uninterrupted reply. The client
+sent `session.end` explicitly and the socket answered
+`session.ended`. No session was left open. The ready frame names the
+provider session `sess_9a8e6f6410684b5c95fce4374dcef7a8`.
+
+The session end records against the handler:
+
+```bash
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/sessions/<session_id>/end" \
+  -H 'Content-Type: application/json' -d '{"provider_session_id":"sess_9a8e6f6410684b5c95fce4374dcef7a8"}'
+```
+
+Output:
+
+```text
+{"session_id":"3782bbbb4b96f5de78f97026aaaef53f","episode_id":"dfb7d79686ab0a47bfd6aa8c4ae73714","provider_session_id":"sess_9a8e6f6410684b5c95fce4374dcef7a8"}
+
+HTTP 200
+```
+
+The episode lists in the gallery with the owner cookie:
+
+```bash
+curl -sS -b jar.txt https://reprise.nryn.dev/api/episodes
+```
+
+Output:
+
+```text
+{"episodes":[{"id":"dfb7d79686ab0a47bfd6aa8c4ae73714","number":1,"title":"Episode 1","state":"recording","visibility":"private"}]}
+
+HTTP 200
+```
+
+Result: pass. The gallery lists the recorded episode privately
+under its owner.
+
+## 2. Both stems upload, completion moves recording to draft
+
+The user stem concatenates the two generated clips at 48 kHz mono
+(`user-48k.wav`, 523784 bytes, 5.46 seconds). The host stem decodes
+the 1030 provider reply frames to 48 kHz mono (`host-48k.wav`,
+988878 bytes, 10.30 seconds). Both are generated speech.
+
+Each stem uploads through the chunked flow with the browser shape
+(placeholder owner `guest`, private visibility, 64 KB chunks with
+`X-Chunk-SHA256` per chunk, full `sha256` on complete):
+
+```bash
+curl -sS -b jar.txt -X POST https://reprise.nryn.dev/api/uploads \
+  -H 'Content-Type: application/json' \
+  -d '{"owner":"guest","content_type":"audio/wav","visibility":"private"}'
+curl -sS -b jar.txt -X PUT "https://reprise.nryn.dev/api/uploads/<id>/chunks/<n>" \
+  -H 'Content-Type: application/octet-stream' -H "X-Chunk-SHA256: $SHA" \
+  --data-binary @piece.bin
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/uploads/<id>/complete" \
+  -H 'Content-Type: application/json' -d "{\"sha256\":\"$FULL\"}"
+```
+
+Output:
+
+```text
+user complete: size_bytes=523784 sha256=78cfecfd... HTTP 201
+host complete: size_bytes=988878 sha256=89610f9a... HTTP 201
+```
+
+Both completions echo the exact uploaded byte counts. The persisted
+ids are `1a2300d421f6ab096685498c38fe2e31` (user) and
+`47cd03575cbe9be06076c95bfe948e3c` (host). The open resolved both
+owners to the session user.
+
+The completion posts the media pair to the route:
+
+```bash
+curl -sS -b jar.txt -X POST "https://reprise.nryn.dev/api/episodes/<episode_id>/stems/complete" \
+  -H 'Content-Type: application/json' \
+  -d '{"user_media_id":"<user>","host_media_id":"<host>","user_sample_rate":48000,"host_sample_rate":48000}'
+```
+
+Output:
+
+```text
+{"episode_id":"dfb7d79686ab0a47bfd6aa8c4ae73714","moved":true,"scheduled":true,"job_id":"518a2d4b38f5ef9a85d6413fa308c098","state":"draft","transcript_outcome":{"job_id":"518a2d4b38f5ef9a85d6413fa308c098","status":"running"}}
+
+HTTP 200
+```
+
+Result: pass. First completion moves recording to draft and
+schedules one transcript job. The answer carries the same job id
+beside a `running` outcome.
+
+## 3. Draft reaches proposals
+
+The detail route answers the episode with its outcome and its
+proposals:
+
+```bash
+curl -sS -b jar.txt "https://reprise.nryn.dev/api/episodes/<episode_id>"
+```
+
+Output across two polls about one minute apart:
+
+```text
+06:37:30 HTTP 200 state=draft proposals=0 outcome={"job_id": "518a2d4b38f5ef9a85d6413fa308c098", "status": "done"}
+06:38:46 HTTP 200 state=draft proposals=3 outcome={"job_id": "518a2d4b38f5ef9a85d6413fa308c098", "status": "done"}
+```
+
+The final detail reads:
+
+```text
+{"episode":{"id":"dfb7d79686ab0a47bfd6aa8c4ae73714","number":1,"title":"Winter Gate Painting Prep","state":"draft","visibility":"private"},"proposals":[
+{"id":"758f4516182ba9f8be3168ac092a11ab","kind":"title","reason":"Winter Gate Painting Prep"},
+{"id":"8d060839db6e2100448fb546fa98f6ec","kind":"show_notes","reason":"The garden gate needs paint before winter. We should buy brushes on Saturday morning."},
+{"id":"e394e01830047d0e8601f000f9aaf18d","kind":"callback","reason":"The main task of painting the garden gate before winter is still ahead."}]}
+```
+
+Result: pass. The batch transcript landed words, the editorial pass
+titled the episode and proposed three items, and the detail shows
+all three about ten minutes after completion. The round 4 provider
+rejection is gone on the live build.
+
+## 4. Provider cross-check and settle
+
+The Sessions API was read from the workstation with the account key
+(value never stored, never printed):
+
+```bash
+curl -sS 'https://agents.assemblyai.com/v1/sessions/<provider_session_id>' \
+  -H "Authorization: $KEY"
+```
+
+Output (artifact URLs redacted):
+
+```text
+HTTP 200
+id: sess_9a8e6f6410684b5c95fce4374dcef7a8
+status: completed
+public_close_reason: client_end
+duration_seconds: 15.032889
+artifacts: audio, timeline, metadata
+```
+
+The socket reported 14.63991 seconds. The Sessions API reports
+15.032889 seconds. The two agree within 0.4 seconds, and the close
+reason is `client_end`, which matches the explicit `session.end`.
+A fresh honest mint after the end answered 201, which proves the
+ceiling is not leaking held reservations.
+
+Result: pass.
+
+## Verdict: the round 4 carry closes
+
+The batch model fix holds live. The transcript pass lands words,
+the editorial pass proposes, and the episode carries its title with
+three proposals on the detail. No repeat completion ran, so the
+standing outcome path from round 4 stays as written.
+
+## Observation for the owning paths
+
+The live socket carries host audio under a `data` key on all 1030
+`reply.audio` frames. The browser socket reads an `audio` key on
+that type and drops anything else, and the mock emits the `audio`
+shape, so every dev test passes against a shape the provider never
+sends. A real browser take today stores an empty host stem. This
+run read `data` directly, so the server pipe proof above stands.
+The owning paths are `web/src/lib/voice/socket.ts` and
+`web/src/lib/voice/mock.ts`. A follow-up task should align the two
+shapes and pin the provider one.
+
+The edge rate gate shaped this run throughout. Upload chunks met
+repeated 429 answers with retry hints near 60 seconds. Every retry
+waited for the hinted delay and recovered. Poll and upload loops
+must keep waiting for the hinted delay instead of retrying hot.
+
+No admin call ran in this round, so the kill switch section from
+round 2 stands as written. The site was never paused and no
+limit was flipped.
+
+## Spend total
+
+One live voice session of 15.0 connected seconds costs about 1.9
+cents at 4.50 dollars per connected hour. The batch transcript and
+editorial passes over 15.8 seconds of audio cost fractions of a
+cent. Upload bytes bill nothing. Two further mints never connected,
+so they bill nothing. Total live spend for this verification is
+about 2 cents.
