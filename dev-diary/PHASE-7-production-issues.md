@@ -346,7 +346,7 @@ requires:   T3.1, T7.10
 fixture-ok: yes
 size:       XS · light
 owns:       internal/assemblyai/, internal/settings/
-status:     not-started
+status:     in-progress:implement:t7.13-impl
 ```
 Round 4 carried one defect: the batch transcript request sends a
 `speech_models` value the provider rejects with 400, naming only
