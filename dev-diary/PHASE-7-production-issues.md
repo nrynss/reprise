@@ -491,7 +491,7 @@ requires:   T2.1, T7.6
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     in-progress:remediate-r1:t7.19-rem-r1
+status:     in-progress:review-r2:t7.19-rev-r2@b81bc02894952eba9abcbc6956b2f7169e41f1cd
 ```
 A real take fires chunk uploads, polls, and the completion post
 faster than the route limits allow. The edge answers 429 on the
