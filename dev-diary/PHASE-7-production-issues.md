@@ -285,7 +285,7 @@ requires:   T7.9
 fixture-ok: no
 size:       XS · light
 owns:       dev-diary/probes/production.md
-status:     in-progress:remediate-r1:t7.10-rem-r1
+status:     in-progress:review-r2:t7.10-rev-r2@65763ea97c2c6d5dce90cab5c91c9d8e38517fd8
 ```
 Runs once, after T7.9 deploys. Repeats the round 3 flow live and
 appends a round 4 note without touching earlier rounds. Closes the
