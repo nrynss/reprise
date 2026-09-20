@@ -143,7 +143,7 @@ requires:   T6.1b
 fixture-ok: no
 size:       M · frontier
 owns:       dev-diary/probes/live-sessions.md
-status:     not-started
+status:     in-progress:implement:t6.4b-impl
 ```
 The only task that needs a person. It runs once, after everything else lands, and nothing earlier
 waits on it.
