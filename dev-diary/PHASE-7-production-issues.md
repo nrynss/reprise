@@ -437,6 +437,30 @@ rows newest first with progress on a running card, and opening a
 thread item starts playback at its quote. The scripted fixture set
 stays for offline runs but no longer renders by default.
 
+### T7.17: Browser reads the live host audio key
+```yaml
+requires:   T2.4, T7.15
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/lib/voice/
+status:     not-started
+```
+Round 5 proved the pipe with a script reading `data` directly,
+because the live socket carries host audio under a `data` key on
+`reply.audio` while the browser reads `audio`. The mock emits the
+`audio` shape, so every test passes and every real take stores an
+empty host stem.
+
+* Read the key the provider sends, with the mock emitting the live
+  shape. Both shapes may be accepted during transition, but the
+  live shape must be pinned by a test that fails today.
+* The host stem lands byte exact against the provider channel, or
+  the fix is not proven.
+
+**Done when:** A mock emitting the live shape fills the host stem,
+and the recorded bytes match the provider channel on the next live
+run.
+
 ---
 
 ## Exit criteria
