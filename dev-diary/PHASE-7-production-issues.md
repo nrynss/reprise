@@ -559,7 +559,7 @@ requires:   T7.1, T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       internal/api/, web/src/lib/voice/
-status:     not-started
+status:     in-progress:implement:t7.22-impl
 ```
 Measured on two real takes: the browser posts `POST
 /api/sessions/{id}/end` with an empty body and the server answers
@@ -581,7 +581,7 @@ requires:   T7.19
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     not-started
+status:     in-progress:implement:t7.23-impl
 ```
 Measured on two real takes: sparse chunk PUTs answer 429 (indices
 0, 2, 5, 11 across takes), stalling the draft move. T7.19 budgets
@@ -604,7 +604,7 @@ requires:   T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/record/
-status:     not-started
+status:     in-progress:implement:t7.24-impl
 ```
 Measured live: the ending page strands the guest with no way back
 to the gallery or a fresh take. A stuck page must always offer an
