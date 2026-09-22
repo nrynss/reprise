@@ -622,7 +622,7 @@ requires:   T7.22, T7.24
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/
-status:     in-progress:land:t7.25-rem-r2@390d46e0c97c9b8cd5d4678e1527070db2493da2
+status:     done:feecda1aa83b7223aadd0853bab2a767e63ef8cf
 ```
 T7.24 round 1 recorded one out of scope M. The gallery link does
 reach `/` during an in-flight draft move. `endTake` keeps running.
@@ -652,6 +652,10 @@ while the guest is still on the record page still reaches processing.
 
 ### What exists now
 
+T7.25 landed at feecda1 after round 3 APPROVE with zero residue.
+A draft move that finishes after the guest leaves the record page
+does not open processing. A move that finishes while they are still
+there still does.
 T7.23 landed at 6d606b1 after round 1 APPROVE with zero findings.
 Chunk 429s on the edge were the app gate. Uploads and the outer
 rule now refill one token every 200ms. One two-stem take clears
