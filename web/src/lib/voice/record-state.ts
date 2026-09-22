@@ -512,22 +512,13 @@ export class RecordController {
 	// handoff names the episode and the durable totals, plus the mock flag
 	// under the harness so the doubles stay in charge there. End and retry
 	// both come through here. A page that has already gone does not assign,
-	// so a late success cannot pull the guest off the gallery. Cleanup can
-	// lag the path, so a gallery path skips the assign on its own.
+	// so a late success cannot pull the guest off the gallery.
 	private goProcessing(episode: string, userBytes: number, hostBytes: number): void {
 		if (this.destroyed) return;
-		if (!this.onRecordPage()) return;
 		const suffix = this.mockMode ? '&mock=1' : '';
 		window.location.assign(
 			`/processing?episode=${encodeURIComponent(episode)}&uploads=done&userBytes=${userBytes}&hostBytes=${hostBytes}${suffix}`
 		);
-	}
-
-	// onRecordPage reads the browser path. A trailing slash still counts as
-	// the record route. Any other path means the guest left.
-	private onRecordPage(): boolean {
-		const path = window.location.pathname.replace(/\/+$/, '') || '/';
-		return path === '/record';
 	}
 
 	harness(): MockVoiceHarness | null {
