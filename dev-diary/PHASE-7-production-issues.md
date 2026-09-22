@@ -604,7 +604,7 @@ requires:   T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/record/
-status:     in-progress:land:t7.24-impl@476fa9cf3253eb5697d8db77902d01ddbceca843
+status:     done:e118730f41c474c9dc1d58256ef73b24b36c7323
 ```
 Measured live: the ending page strands the guest with no way back
 to the gallery or a fresh take. A stuck page must always offer an
@@ -615,6 +615,27 @@ exit.
 
 **Done when:** Playwright reaches gallery from each record phase by
 link.
+
+### T7.25: A finished draft move stays on the gallery
+```yaml
+requires:   T7.22, T7.24
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/lib/voice/
+status:     not-started
+```
+T7.24 round 1 recorded one out of scope M. The gallery link does
+reach `/` during an in-flight draft move. `endTake` keeps running.
+When the move succeeds, `goProcessing` assigns `/processing`.
+That page has no way back.
+
+* If the guest has already left the record page, do not assign
+  `/processing` afterwards.
+* Pin it the way the review probe did. Hold the draft move, click
+  the gallery link, then fulfill the move. The URL stays `/`.
+
+**Done when:** That probe stays on `/`, and a move that finishes
+while the guest is still on the record page still reaches processing.
 
 ---
 
@@ -631,6 +652,10 @@ link.
 
 ### What exists now
 
+T7.24 landed at e118730 after round 1 APPROVE with zero in-scope
+findings. Every record phase links back to the gallery. One out of
+scope M is now T7.25. A draft move that finishes after that click
+can still assign `/processing`.
 T7.21 landed after round 1 APPROVE with zero in-scope findings. The
 bound runner sits behind a lock on all paths, ruled by an explicit
 happens-before chain. The gate stops racing.
