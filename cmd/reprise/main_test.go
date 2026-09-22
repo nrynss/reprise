@@ -1262,6 +1262,94 @@ func TestTakeGateRouteBurstsTripAtWiredEdge(t *testing.T) {
 	}
 }
 
+// stackTakeGate wraps the route in the outer budget and then its own
+// budget, which is the order one chunk meets.
+func stackTakeGate(t *testing.T, now func() time.Time, name string, burst int) http.Handler {
+	t.Helper()
+	spendGate, err := gate.New(gate.Config{Now: now})
+	if err != nil {
+		t.Fatalf("open spend gate: %v", err)
+	}
+	inner, err := protectTake(spendGate, name, burst, stubHandler())
+	if err != nil {
+		t.Fatalf("protect %s: %v", name, err)
+	}
+	handler, err := spendGate.Protect(outerAPIRule(), inner)
+	if err != nil {
+		t.Fatalf("protect outer: %v", err)
+	}
+	return handler
+}
+
+// TestTakeGateSustainedUploadClearsOuterBurst drives the outer budget
+// and then the upload budget, which is the order one chunk meets. The
+// clock steps by the spacing of two 48 kHz stems. The run is longer
+// than the old outer burst and the shared outer burst. Zero requests
+// are refused. An instant double then refuses twelve, with the rate
+// limit body and a matching wait.
+func TestTakeGateSustainedUploadClearsOuterBurst(t *testing.T) {
+	start := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	now := start
+	// 65536 byte chunks. Two 48 kHz 16-bit stems are 192000 bytes a second.
+	chunkEvery := 65536 * time.Second / (2 * 96000)
+	handler := stackTakeGate(t, func() time.Time { return now }, "take-uploads", takeUploadsBurst)
+	// Past both outer bursts, including tokens a one minute refill
+	// would restore while the clock runs.
+	sustained := 16*outerAPIBurst + 128
+	for i := range sustained {
+		now = now.Add(chunkEvery)
+		if rec := takeGateHit(handler); rec.Code != http.StatusOK {
+			t.Fatalf("upload %d status = %d, want 200: %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	now = now.Add(uploadRefill)
+	const hammer = 60
+	refused := 0
+	for i := range hammer {
+		rec := takeGateHit(handler)
+		switch rec.Code {
+		case http.StatusOK:
+		case http.StatusTooManyRequests:
+			refused++
+			requireRateLimitHints(t, rec)
+			if rec.Header().Get("Retry-After") != "1" {
+				t.Fatalf("Retry-After = %q, want 1", rec.Header().Get("Retry-After"))
+			}
+		default:
+			t.Fatalf("upload hammer %d status = %d, want 200 or 429: %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	if refused != 12 {
+		t.Fatalf("upload refusals = %d, want 12 past the 48 burst", refused)
+	}
+}
+
+// TestTakeGateMintRefillStaysOneMinute sends session mints through the
+// outer budget and then the mint budget. Six pass. The next refuses
+// with a one minute wait. One second later it still refuses, so the
+// faster outer refill did not raise the mint rate.
+func TestTakeGateMintRefillStaysOneMinute(t *testing.T) {
+	start := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	now := start
+	handler := stackTakeGate(t, func() time.Time { return now }, "take-sessions", takeSessionsBurst)
+	for i := range takeSessionsBurst {
+		if rec := takeGateHit(handler); rec.Code != http.StatusOK {
+			t.Fatalf("mint %d status = %d, want 200: %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	rec := takeGateHit(handler)
+	requireRateLimitHints(t, rec)
+	if got := rec.Header().Get("Retry-After"); got != "60" {
+		t.Fatalf("Retry-After = %q, want 60 for a one minute mint refill", got)
+	}
+	now = now.Add(time.Second)
+	rec = takeGateHit(handler)
+	requireRateLimitHints(t, rec)
+	if got := rec.Header().Get("Retry-After"); got != "59" {
+		t.Fatalf("Retry-After = %q, want 59 one second later", got)
+	}
+}
+
 // TestTakeGateUploadHammerLeavesMint hammers uploads past its burst from
 // one client and requires a session mint to still pass.
 func TestTakeGateUploadHammerLeavesMint(t *testing.T) {

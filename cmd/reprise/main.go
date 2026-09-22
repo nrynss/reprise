@@ -450,9 +450,10 @@ func spendCeiling(cents int64) (cost.Price, error) {
 
 // Take path bursts size one honest take with two stems. Chunk uploads
 // dominate the honest count, so uploads carry the widest burst while
-// mint and completion stay narrow enough to trip a hammer. The binary
-// test replays these numbers, so a wrong burst fails there instead of
-// stalling a take at the edge.
+// mint and completion stay narrow enough to trip a hammer. A burst
+// alone cannot refill a whole take, so uploads and the outer budget
+// use uploadRefill. The binary test replays these numbers, so a wrong
+// limit fails there instead of stalling a take at the edge.
 const (
 	takeSessionsBurst   = 6
 	takeSessionEndBurst = 6
@@ -465,17 +466,42 @@ const (
 	outerAPIBurst       = 256
 )
 
-// takeRule returns the spend budget for one take path route. Every take
-// request also draws from the shared outer budget, so this shapes the
-// route share while the outer budget caps the take as a whole. One
-// honest take with two stems fits every burst below, while a double
-// cadence burst trips the route it hammers. The gate answers refusals
-// itself, so the header and the body agree on the wait.
+// uploadRefill restores one token every 200ms, five a second. Two 48
+// kHz stems send about 2.9 chunks a second, so five a second clears
+// one take. The shared outer budget uses the same refill. A one minute
+// outer refill stalls a take once 256 chunks are spent.
+const uploadRefill = 200 * time.Millisecond
+
+// takeRefill is one minute for every take route except uploads. Uploads
+// use uploadRefill so a two-stem take does not stall.
+func takeRefill(name string) time.Duration {
+	if name == "take-uploads" {
+		return uploadRefill
+	}
+	return time.Minute
+}
+
+// takeRule returns the spend budget for one take path route. The route
+// refill comes from takeRefill. A double cadence burst still trips the
+// route it hammers. The gate writes the refusal, so the header and the
+// body agree on the wait.
 func takeRule(name string, burst int) gate.Rule {
+	every := takeRefill(name)
 	return gate.Rule{
 		Name:      name,
-		PerClient: gate.Limit{Burst: burst, Every: time.Minute},
-		Global:    gate.Limit{Burst: 16 * burst, Every: time.Minute},
+		PerClient: gate.Limit{Burst: burst, Every: every},
+		Global:    gate.Limit{Burst: 16 * burst, Every: every},
+	}
+}
+
+// outerAPIRule is the shared budget in front of every mounted route.
+// It refills with the uploads, so one take is not cut off at 256. Mint
+// stays at one minute because its own route budget is unchanged.
+func outerAPIRule() gate.Rule {
+	return gate.Rule{
+		Name:      "api",
+		PerClient: gate.Limit{Burst: outerAPIBurst, Every: uploadRefill},
+		Global:    gate.Limit{Burst: 16 * outerAPIBurst, Every: uploadRefill},
 	}
 }
 
@@ -625,11 +651,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open episode service: %w", err)
 	}
-	outer := gate.Rule{
-		Name:      "api",
-		PerClient: gate.Limit{Burst: outerAPIBurst, Every: time.Minute},
-		Global:    gate.Limit{Burst: 16 * outerAPIBurst, Every: time.Minute},
-	}
+	outer := outerAPIRule()
 	sessions, err := protectTake(spendGate, "take-sessions", takeSessionsBurst, sessionBroker)
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect session mint: %w", err)
