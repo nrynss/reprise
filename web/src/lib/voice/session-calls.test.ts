@@ -88,26 +88,37 @@ describe('mintSession', () => {
 	});
 });
 
+function closeBody(stub: ReturnType<typeof vi.fn>, index: number): string {
+	const call = stub.mock.calls[index] as unknown[] | undefined;
+	const init = call?.[1] as RequestInit | undefined;
+	return typeof init?.body === 'string' ? init.body : '';
+}
+
 describe('closeSession', () => {
 	it('resolves when the close record lands', async () => {
-		stubFetchSequence([() => jsonResponse(200, { ok: true })]);
-		await expect(closeSession('s1')).resolves.toBeUndefined();
+		const stub = stubFetchSequence([() => jsonResponse(200, { ok: true })]);
+		await expect(closeSession('s1', 'prov-9')).resolves.toBeUndefined();
+		expect(closeBody(stub, 0)).toBe(JSON.stringify({ provider_session_id: 'prov-9' }));
 	});
 
-	it('retries once after a network drop, because the record is idempotent', async () => {
+	it('retries once after a network drop and sends the same provider id', async () => {
 		const stub = stubFetchSequence([
 			() => {
 				throw new TypeError('the network dropped');
 			},
 			() => jsonResponse(200, { ok: true })
 		]);
-		await expect(closeSession('s1')).resolves.toBeUndefined();
+		await expect(closeSession('s1', 'prov-9')).resolves.toBeUndefined();
 		expect(stub).toHaveBeenCalledTimes(2);
+		const want = JSON.stringify({ provider_session_id: 'prov-9' });
+		expect(closeBody(stub, 0)).toBe(want);
+		expect(closeBody(stub, 1)).toBe(want);
+		expect(closeBody(stub, 0)).not.toBe(JSON.stringify({ provider_session_id: '' }));
 	});
 
 	it('names the call when a challenge page answers, with no retry loop', async () => {
 		const stub = stubFetchSequence([() => htmlResponse(200, '<html><body>challenge</body></html>')]);
-		const failure = await closeSession('s1').then(
+		const failure = await closeSession('s1', 'prov-9').then(
 			() => null,
 			(error: unknown) => error
 		);
@@ -120,7 +131,7 @@ describe('closeSession', () => {
 		const stub = stubFetchSequence([
 			() => jsonResponse(429, { error: { code: 'busy', message: 'slow down' } }, { 'Retry-After': '5' })
 		]);
-		const failure = await closeSession('s1').then(
+		const failure = await closeSession('s1', 'prov-9').then(
 			() => null,
 			(error: unknown) => error
 		);

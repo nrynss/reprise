@@ -222,6 +222,7 @@ export class RecordController {
 	private completionPosted = false;
 	private uploadFailure: string | null = null;
 	private pendingEnd: string | null = null;
+	private pendingProviderId = '';
 	private mockChallenges: string[] = [];
 	private pendingCompletion: { episode: string; pair: StemPair; userBytes: number; hostBytes: number } | null =
 		null;
@@ -287,6 +288,7 @@ export class RecordController {
 		this.notice = 'Opening the session.';
 		this.uploadFailure = null;
 		this.pendingEnd = null;
+		this.pendingProviderId = '';
 		this.completionPosted = false;
 		this.emit();
 		try {
@@ -348,10 +350,12 @@ export class RecordController {
 			this.uploadFailure = describeUploadFailure(this.userUpload, this.hostUpload);
 			const userBytes = this.userUpload?.receipt?.sizeBytes ?? 0;
 			const hostBytes = this.hostUpload?.receipt?.sizeBytes ?? 0;
+			const providerSessionId = voice.providerSessionId;
 			try {
-				await closeSession(session.session_id);
+				await closeSession(session.session_id, providerSessionId);
 			} catch (error) {
 				this.pendingEnd = session.session_id;
+				this.pendingProviderId = providerSessionId;
 				this.pendingCompletion = {
 					episode: session.episode_id,
 					pair: this.storedPair(),
@@ -363,6 +367,7 @@ export class RecordController {
 				return;
 			}
 			this.pendingEnd = null;
+			this.pendingProviderId = '';
 			if (this.uploadFailure !== null) {
 				this.pendingCompletion = {
 					episode: session.episode_id,
@@ -391,12 +396,13 @@ export class RecordController {
 		const pending = this.pendingCompletion;
 		if (this.pendingEnd !== null) {
 			try {
-				await closeSession(this.pendingEnd);
+				await closeSession(this.pendingEnd, this.pendingProviderId);
 			} catch (error) {
 				this.failTake(describeSessionEndFailure(error));
 				return;
 			}
 			this.pendingEnd = null;
+			this.pendingProviderId = '';
 		}
 		if (this.completionPosted) {
 			await this.ensureCompletionDriver().retry();

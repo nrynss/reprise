@@ -24,16 +24,22 @@ export async function mintSession(): Promise<SessionStart> {
 	return parseSessionStart(JSON.stringify(value));
 }
 
-// closeSession records the provider close for one session. The socket close
-// already stopped the billing clock and this record is idempotent, so one
-// network drop earns one more attempt before the page says so loudly.
-export async function closeSession(sessionId: string): Promise<void> {
+// closeSession records the provider close for one session. The body carries
+// the provider id the socket learned. The socket close already stopped the
+// billing clock and this record is idempotent, so one network drop earns
+// one more attempt with the same id.
+export async function closeSession(sessionId: string, providerSessionId: string): Promise<void> {
 	const path = `/api/sessions/${encodeURIComponent(sessionId)}/end`;
+	const init: RequestInit = {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ provider_session_id: providerSessionId })
+	};
 	try {
-		await readJsonAnswer('session end', path, { method: 'POST' });
+		await readJsonAnswer('session end', path, init);
 	} catch (error) {
 		if (error instanceof ApiError && error.code === 'network') {
-			await readJsonAnswer('session end', path, { method: 'POST' });
+			await readJsonAnswer('session end', path, init);
 			return;
 		}
 		throw error;

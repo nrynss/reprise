@@ -295,12 +295,12 @@ func TestRecordSessionEndStoresProviderClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	episodeID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "prov-9")
+	episodeID, storedID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "prov-9")
 	if err != nil {
 		t.Fatalf("record end: %v", err)
 	}
-	if episodeID != "ep-1" {
-		t.Fatalf("episode id = %q, want ep-1", episodeID)
+	if episodeID != "ep-1" || storedID != "prov-9" {
+		t.Fatalf("end = %s %s, want ep-1 prov-9", episodeID, storedID)
 	}
 	var stored string
 	if err := db.Reader().QueryRowContext(t.Context(),
@@ -310,13 +310,42 @@ func TestRecordSessionEndStoresProviderClose(t *testing.T) {
 	if stored != "prov-9" {
 		t.Fatalf("provider id = %q, want prov-9", stored)
 	}
-	if _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "prov-9"); err != nil {
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "prov-9"); err != nil {
 		t.Fatalf("repeat end: %v", err)
 	}
-	if _, err := svc.RecordSessionEnd(t.Context(), "owner-2", "sess-1", "prov-9"); !errors.Is(err, episode.ErrNotFound) {
+	keptEpisode, keptID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "")
+	if err != nil {
+		t.Fatalf("empty end: %v", err)
+	}
+	if keptEpisode != "ep-1" || keptID != "prov-9" {
+		t.Fatalf("empty end = %s %s, want ep-1 prov-9", keptEpisode, keptID)
+	}
+	if err := db.Reader().QueryRowContext(t.Context(),
+		"SELECT provider_session_id FROM sessions WHERE id = 'sess-1'").Scan(&stored); err != nil {
+		t.Fatalf("read provider id after empty: %v", err)
+	}
+	if stored != "prov-9" {
+		t.Fatalf("provider id = %q, want prov-9 after an empty close", stored)
+	}
+	replacedEpisode, replacedID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "prov-10")
+	if err != nil {
+		t.Fatalf("replace end: %v", err)
+	}
+	if replacedEpisode != "ep-1" || replacedID != "prov-10" {
+		t.Fatalf("replace end = %s %s, want ep-1 prov-10", replacedEpisode, replacedID)
+	}
+	seedSession(t, db, "sess-2", "owner-1", "ep-1")
+	earlyEpisode, earlyID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-2", "")
+	if err != nil {
+		t.Fatalf("early end: %v", err)
+	}
+	if earlyEpisode != "ep-1" || earlyID != "" {
+		t.Fatalf("early end = %s %q, want ep-1 with no provider id", earlyEpisode, earlyID)
+	}
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-2", "sess-1", "prov-9"); !errors.Is(err, episode.ErrNotFound) {
 		t.Fatalf("foreign end error = %v, want ErrNotFound", err)
 	}
-	if _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "missing", "prov-9"); !errors.Is(err, episode.ErrNotFound) {
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "missing", "prov-9"); !errors.Is(err, episode.ErrNotFound) {
 		t.Fatalf("missing end error = %v, want ErrNotFound", err)
 	}
 }

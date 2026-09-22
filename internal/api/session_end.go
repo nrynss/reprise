@@ -17,8 +17,9 @@ import (
 // bind a fake without opening a database.
 type sessionStore interface {
 	// RecordSessionEnd stores the provider id on one owned diary
-	// session and returns its episode.
-	RecordSessionEnd(ctx context.Context, ownerID, sessionID, providerSessionID string) (string, error)
+	// session. It returns the episode id and the provider id the row
+	// holds after the call.
+	RecordSessionEnd(ctx context.Context, ownerID, sessionID, providerSessionID string) (string, string, error)
 }
 
 var _ sessionStore = (*episode.Service)(nil)
@@ -40,8 +41,8 @@ func NewSessionEnd(store sessionStore) http.Handler {
 }
 
 // sessionEndRequestJSON carries the provider close the browser already
-// sent. The provider id may be empty when the browser ended before the
-// session opened, and the settle skips such rows.
+// sent. An empty provider id means this call learned none. A stored id
+// stays, and the settle skips only a row that never recorded one.
 type sessionEndRequestJSON struct {
 	// ProviderSessionID is the provider session the browser closed.
 	ProviderSessionID string `json:"provider_session_id"`
@@ -53,14 +54,13 @@ type sessionEndJSON struct {
 	SessionID string `json:"session_id"`
 	// EpisodeID identifies the episode the session recorded.
 	EpisodeID string `json:"episode_id"`
-	// ProviderSessionID is the recorded provider session.
+	// ProviderSessionID is the provider id the row holds after the call.
 	ProviderSessionID string `json:"provider_session_id"`
 }
 
-// decodeSessionEndBody reads the close record. An empty body means the
-// browser closed without learning a provider id, so it decodes to the
-// zero close and the settle skips the row. Malformed JSON still refuses,
-// so a corrupt record never lands silent.
+// decodeSessionEndBody reads the close record. An empty body means this
+// call names no provider id. The store keeps an id it already holds.
+// Malformed JSON still refuses, so a corrupt record never lands silent.
 func decodeSessionEndBody(w http.ResponseWriter, r *http.Request) (sessionEndRequestJSON, bool) {
 	var body sessionEndRequestJSON
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
@@ -80,10 +80,9 @@ func decodeSessionEndBody(w http.ResponseWriter, r *http.Request) (sessionEndReq
 }
 
 // end answers POST /api/sessions/{id}/end by recording the provider id
-// on the diary session. The browser already ended the provider call, so
-// this call only stores what the later settle reads. An empty body
-// records the zero close. Unknown and foreign sessions both answer 404,
-// and a repeat end stays harmless.
+// on the diary session. An empty provider id leaves a stored id in place.
+// The answer echoes the id the row holds. Unknown and foreign sessions
+// both answer 404, and a repeat end stays harmless.
 func (h *SessionEnd) end(w http.ResponseWriter, r *http.Request) {
 	owner, ok := ownerOf(w, r)
 	if !ok {
@@ -98,7 +97,7 @@ func (h *SessionEnd) end(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sessionID := r.PathValue("id")
-	episodeID, err := h.store.RecordSessionEnd(r.Context(), owner, sessionID, body.ProviderSessionID)
+	episodeID, storedID, err := h.store.RecordSessionEnd(r.Context(), owner, sessionID, body.ProviderSessionID)
 	if errors.Is(err, episode.ErrNotFound) {
 		_ = wire.WriteError(w, http.StatusNotFound, CodeSessionNotFound, "no session lives at this id", nil)
 		return
@@ -110,6 +109,6 @@ func (h *SessionEnd) end(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sessionEndJSON{
 		SessionID:         sessionID,
 		EpisodeID:         episodeID,
-		ProviderSessionID: body.ProviderSessionID,
+		ProviderSessionID: storedID,
 	})
 }

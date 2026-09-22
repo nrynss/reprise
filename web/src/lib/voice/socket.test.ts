@@ -1,4 +1,16 @@
-import { describe, expect, it } from 'vitest';
+// The socket test loads recorded frames. These names cover that read
+// without node types on disk.
+declare module 'node:fs' {
+	export function readFileSync(path: string, encoding: 'utf8'): string;
+}
+
+declare const process: {
+	cwd(): string;
+};
+
+import { readFileSync } from 'node:fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { closeSession } from './session-calls';
 import { VoiceSocket, type SocketHandle } from './socket';
 import { bytesToPcm16, encodeBase64, floatToPcm16, pcm16ToBytes, pcm16ToFloat } from './pcm';
 import { drainHostBlock } from './take';
@@ -35,6 +47,31 @@ class FakeHandle implements SocketHandle {
 }
 
 const CONFIG: SessionConfig = { system_prompt: 'prompt', greeting: 'hello', keyterms: ['Mara'] };
+
+interface ProviderFrame {
+	type: string;
+	session_id?: string;
+	config?: { id?: string };
+}
+
+function steadyProviderFrames(): { ready: ProviderFrame; updated: ProviderFrame; other: ProviderFrame } {
+	const raw = readFileSync(process.cwd() + '/../testdata/sessions/steady/events.json', 'utf8');
+	const rows = JSON.parse(raw) as Array<{ event: ProviderFrame }>;
+	const ready = rows.find((row) => row.event.type === 'session.ready')?.event;
+	const updated = rows.find((row) => row.event.type === 'session.updated')?.event;
+	const other = rows.find((row) => row.event.type === 'reply.started')?.event;
+	if (ready === undefined || updated === undefined || other === undefined) {
+		throw new Error('the recorded frames are missing a ready, updated, or other event');
+	}
+	if (ready.session_id === undefined || ready.session_id === '' || ready.session_id !== updated.config?.id) {
+		throw new Error('the recorded ready and updated frames do not share a provider id');
+	}
+	return { ready, updated, other };
+}
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 function events() {
 	return {
@@ -167,6 +204,62 @@ describe('VoiceSocket', () => {
 		await socket.end();
 		const ends = handle.sent.filter((text) => JSON.parse(text).type === 'session.end');
 		expect(ends.length).toBe(1);
+	});
+
+	it('keeps the provider id from a recorded ready frame', () => {
+		const { ready, other } = steadyProviderFrames();
+		const handle = new FakeHandle();
+		const { socket } = wire(handle);
+		handle.open();
+		handle.receive(JSON.stringify(other));
+		expect(socket.providerSessionId).toBe('');
+		handle.receive(JSON.stringify(ready));
+		const learned = socket.providerSessionId;
+		expect(learned).toBe(ready.session_id);
+		handle.receive(JSON.stringify({ type: 'session.ready', session_id: '' }));
+		handle.receive(JSON.stringify({ type: 'session.updated', config: { id: '' } }));
+		handle.receive(JSON.stringify({ type: 'session.updated', config: { id: 'other-id' } }));
+		handle.receive(JSON.stringify(other));
+		expect(socket.providerSessionId).toBe(learned);
+	});
+
+	it('keeps the provider id from a recorded updated frame', () => {
+		const { updated, other } = steadyProviderFrames();
+		const handle = new FakeHandle();
+		const { socket } = wire(handle);
+		handle.open();
+		handle.receive(JSON.stringify(updated));
+		const learned = socket.providerSessionId;
+		expect(learned).toBe(updated.config?.id);
+		expect(learned).not.toBe('');
+		handle.receive(JSON.stringify({ type: 'session.ready' }));
+		handle.receive(JSON.stringify({ type: 'session.updated', config: {} }));
+		handle.receive(JSON.stringify(other));
+		expect(socket.providerSessionId).toBe(learned);
+	});
+
+	it('posts the learned id when a connected take closes', async () => {
+		const { ready, updated, other } = steadyProviderFrames();
+		const handle = new FakeHandle();
+		const { socket } = wire(handle);
+		handle.open();
+		handle.receive(JSON.stringify(updated));
+		handle.receive(JSON.stringify(ready));
+		handle.receive(JSON.stringify(other));
+		const learned = socket.providerSessionId;
+		expect(learned).not.toBe('');
+		const stub = vi.fn(async () => {
+			return new Response(JSON.stringify({ ok: true }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' }
+			});
+		});
+		vi.stubGlobal('fetch', stub);
+		await closeSession('diary-1', learned);
+		const call = stub.mock.calls[0] as unknown[] | undefined;
+		const init = call?.[1] as RequestInit | undefined;
+		expect(init?.body).toBe(JSON.stringify({ provider_session_id: learned }));
+		expect(init?.body).not.toBe(JSON.stringify({ provider_session_id: '' }));
 	});
 
 	it('settles a pre-open end without starting a session', async () => {

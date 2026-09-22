@@ -55,6 +55,7 @@ export class VoiceSocket {
 	private opened = false;
 	private endSent = false;
 	private endedOk = false;
+	private learnedProviderId = '';
 	private endWaiters: Array<() => void> = [];
 	private droppedAudio = 0;
 
@@ -91,6 +92,11 @@ export class VoiceSocket {
 		return this.endSent;
 	}
 
+	/** The provider session id from the socket, or empty when none has arrived. */
+	get providerSessionId(): string {
+		return this.learnedProviderId;
+	}
+
 	/** Send one 24 kHz PCM16 block. A block before the open drops and counts. */
 	sendAudio(pcm: Uint8Array): void {
 		if (!this.opened || this.endSent) {
@@ -121,6 +127,14 @@ export class VoiceSocket {
 			}
 		}
 		return waited;
+	}
+
+	// rememberProviderId keeps the first non-empty provider id. A later
+	// frame must not clear an id the socket already learned.
+	private rememberProviderId(value: unknown): void {
+		if (this.learnedProviderId !== '') return;
+		if (typeof value !== 'string' || value === '') return;
+		this.learnedProviderId = value;
 	}
 
 	private settleEnd(): void {
@@ -183,6 +197,19 @@ export class VoiceSocket {
 				for (const resolve of waiters) resolve();
 				this.handle.close();
 				this.events.onEnded();
+				break;
+			}
+			case 'session.ready': {
+				// The provider names the session here. A later frame must not clear it.
+				this.rememberProviderId(record['session_id']);
+				break;
+			}
+			case 'session.updated': {
+				// The same id also arrives under the config. Keep the first one learned.
+				const config = record['config'];
+				if (typeof config === 'object' && config !== null && !Array.isArray(config)) {
+					this.rememberProviderId((config as Record<string, unknown>)['id']);
+				}
 				break;
 			}
 			default:

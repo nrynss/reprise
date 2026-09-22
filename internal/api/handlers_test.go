@@ -7,12 +7,19 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	costsqlitestore "github.com/nrynss/keel/cost/sqlitestore"
+	flagsqlitestore "github.com/nrynss/keel/flag/sqlitestore"
 	"github.com/nrynss/keel/job"
+	"github.com/nrynss/keel/lease"
+	leasesqlitestore "github.com/nrynss/keel/lease/sqlitestore"
 	"github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/reprise/internal/broker"
 	"github.com/nrynss/reprise/internal/episode"
 	"github.com/nrynss/reprise/internal/identity"
 	"github.com/nrynss/reprise/internal/memory"
@@ -287,6 +294,7 @@ func TestEpisodeDetailReadsBackDecisions(t *testing.T) {
 		code   string
 	}{
 		{"malformed", "{", http.StatusBadRequest, CodeInvalidRequest},
+		{"empty body", "", http.StatusBadRequest, CodeInvalidRequest},
 		{"empty proposal", `{"decision":"accepted"}`, http.StatusBadRequest, CodeInvalidRequest},
 		{"bad value", `{"proposal_id":"cut-1","decision":"maybe"}`, http.StatusBadRequest, CodeInvalidRequest},
 		{"unknown proposal", `{"proposal_id":"missing","decision":"accepted"}`, http.StatusNotFound, CodeProposalNotFound},
@@ -507,6 +515,17 @@ func TestSessionEndAcceptsEmptyClose(t *testing.T) {
 		t.Fatalf("repeat empty end status = %d, want 200", rec.Code)
 	}
 
+	foreign, _ := mintGuest(t, guests)
+	foreignReq := httptest.NewRequest(http.MethodPost, "/api/sessions/sess-1/end", strings.NewReader(""))
+	rec = serve(guests, handler, foreign, foreignReq)
+	if status, code := envelopeCode(t, rec); status != http.StatusNotFound || code != CodeSessionNotFound {
+		t.Fatalf("foreign empty end status = %d code = %q, want 404 session_not_found", status, code)
+	}
+	rec = post("missing", strings.NewReader(""))
+	if status, code := envelopeCode(t, rec); status != http.StatusNotFound || code != CodeSessionNotFound {
+		t.Fatalf("missing empty end status = %d code = %q, want 404 session_not_found", status, code)
+	}
+
 	for _, tc := range []struct {
 		name string
 		body string
@@ -521,6 +540,284 @@ func TestSessionEndAcceptsEmptyClose(t *testing.T) {
 				t.Fatalf("status = %d code = %q, want 400 invalid_request", status, code)
 			}
 		})
+	}
+}
+
+// settleMinter satisfies the broker mint seam without calling a provider.
+type settleMinter struct{}
+
+// Mint returns a fixed token. The close tests never redeem it.
+func (settleMinter) Mint(context.Context, int) (string, error) {
+	return "token", nil
+}
+
+// settleBuilder satisfies the broker config seam with an empty config.
+type settleBuilder struct{}
+
+// BuildSessionConfig returns an empty config. The close tests never read it.
+func (settleBuilder) BuildSessionConfig(context.Context, string) (broker.SessionConfig, error) {
+	return broker.SessionConfig{}, nil
+}
+
+// openSettleBroker builds a broker on db so a close test can read SettleInput.
+// The constructor creates the linkage table. The test inserts the rows.
+func openSettleBroker(t *testing.T, db *sqlite.DB) *broker.Broker {
+	t.Helper()
+	quiet := slog.New(slog.DiscardHandler)
+	flags, err := flagsqlitestore.Open(t.Context(), flagsqlitestore.Config{DB: db, Logger: quiet})
+	if err != nil {
+		t.Fatalf("open flags: %v", err)
+	}
+	costs, err := costsqlitestore.Open(t.Context(), costsqlitestore.Config{DB: db, Limit: 1_000_000, Logger: quiet})
+	if err != nil {
+		t.Fatalf("open costs: %v", err)
+	}
+	leases, err := leasesqlitestore.Open(t.Context(), leasesqlitestore.Config{DB: db, Logger: quiet})
+	if err != nil {
+		t.Fatalf("open leases: %v", err)
+	}
+	quota, err := lease.NewQuota(4)
+	if err != nil {
+		t.Fatalf("open quota: %v", err)
+	}
+	diary, err := broker.NewSQLiteDiary(db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	settled, err := broker.New(broker.Config{
+		Flags:             flags,
+		Budgets:           costsqlitestore.NewKeyedBudget(costs),
+		DB:                db,
+		LeaseQuota:        quota,
+		LeaseStore:        leases,
+		Minter:            settleMinter{},
+		Sessions:          settleBuilder{},
+		Diary:             diary,
+		SessionCapSeconds: 1800,
+		GuestMaxSessions:  4,
+		OwnerSessionLimit: 1_000_000,
+	})
+	if err != nil {
+		t.Fatalf("new broker: %v", err)
+	}
+	return settled
+}
+
+// seedSettleLink writes one mint linkage so SettleInput can read the close.
+func seedSettleLink(t *testing.T, db *sqlite.DB, sessionID, ownerID, episodeID string) {
+	t.Helper()
+	raw, err := json.Marshal(costsqlitestore.Reservation{
+		ID:        "res-" + sessionID,
+		Amount:    1,
+		ExpiresAt: time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("encode reservation: %v", err)
+	}
+	if _, err := db.Writer().ExecContext(t.Context(),
+		`INSERT INTO session_settle (session_id, owner_id, episode_id, lease_id, reservation, token_cap, minted_at)
+		 VALUES (?, ?, ?, ?, ?, 1800, 1)`,
+		sessionID, ownerID, episodeID, "lease-"+sessionID, string(raw)); err != nil {
+		t.Fatalf("seed settle link %s: %v", sessionID, err)
+	}
+}
+
+// steadyProviderSessionID reads the provider id on the recorded ready
+// frame and the matching updated frame. The close of a connected take
+// carries this id.
+func steadyProviderSessionID(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "sessions", "steady", "events.json"))
+	if err != nil {
+		t.Fatalf("read recorded frames: %v", err)
+	}
+	var rows []struct {
+		Event struct {
+			Type      string `json:"type"`
+			SessionID string `json:"session_id"`
+			Config    struct {
+				ID string `json:"id"`
+			} `json:"config"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("decode recorded frames: %v", err)
+	}
+	var readyID, updatedID string
+	for _, row := range rows {
+		switch row.Event.Type {
+		case "session.ready":
+			if readyID == "" {
+				readyID = row.Event.SessionID
+			}
+		case "session.updated":
+			if updatedID == "" {
+				updatedID = row.Event.Config.ID
+			}
+		}
+	}
+	if readyID == "" || readyID != updatedID {
+		t.Fatalf("recorded provider id ready %q updated %q", readyID, updatedID)
+	}
+	return readyID
+}
+
+// TestSessionEndEmptyCloseKeepsStoredProvider posts an empty body after
+// a shaped close and requires the stored id and the JSON echo to stay.
+func TestSessionEndEmptyCloseKeepsStoredProvider(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "recording")
+	seedSessionRow(t, db, "sess-1", owner.ID, "ep-1")
+	handler := NewSessionEnd(newEpisodeService(t, db, nil).svc)
+	end := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/sessions/sess-1/end", strings.NewReader(body))
+		return serve(guests, handler, cookie, req)
+	}
+	stored := func() string {
+		t.Helper()
+		var got string
+		if err := db.Reader().QueryRowContext(t.Context(),
+			"SELECT provider_session_id FROM sessions WHERE id = 'sess-1'").Scan(&got); err != nil {
+			t.Fatalf("read provider id: %v", err)
+		}
+		return got
+	}
+	echo := func(rec *httptest.ResponseRecorder) sessionEndJSON {
+		t.Helper()
+		var body sessionEndJSON
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("decode end: %v", err)
+		}
+		return body
+	}
+
+	rec := end(`{"provider_session_id":"prov-9"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("shaped end status = %d, want 200", rec.Code)
+	}
+	if got := echo(rec); got.ProviderSessionID != "prov-9" || got.SessionID != "sess-1" || got.EpisodeID != "ep-1" {
+		t.Fatalf("shaped end = %+v, want prov-9 on sess-1", got)
+	}
+	if got := stored(); got != "prov-9" {
+		t.Fatalf("provider id = %q, want prov-9", got)
+	}
+
+	rec = end("")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty end status = %d, want 200", rec.Code)
+	}
+	if got := echo(rec); got.ProviderSessionID != "prov-9" {
+		t.Fatalf("empty echo = %q, want prov-9", got.ProviderSessionID)
+	}
+	if got := stored(); got != "prov-9" {
+		t.Fatalf("provider id = %q, want prov-9 after an empty close", got)
+	}
+
+	rec = end(`{"provider_session_id":""}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("blank id status = %d, want 200", rec.Code)
+	}
+	if got := echo(rec); got.ProviderSessionID != "prov-9" {
+		t.Fatalf("blank id echo = %q, want prov-9", got.ProviderSessionID)
+	}
+	if got := stored(); got != "prov-9" {
+		t.Fatalf("provider id = %q, want prov-9 after a blank id", got)
+	}
+
+	rec = end("{")
+	if status, code := envelopeCode(t, rec); status != http.StatusBadRequest || code != CodeInvalidRequest {
+		t.Fatalf("malformed status = %d code = %q, want 400 invalid_request", status, code)
+	}
+	if got := stored(); got != "prov-9" {
+		t.Fatalf("provider id = %q, want prov-9 after a refused body", got)
+	}
+}
+
+// TestConnectedCloseStoresProviderForSettle posts the provider id a
+// connected socket learned, then requires the row and the settle input
+// to keep it. An empty close before any id stays a skip. An empty close
+// after the id must not clear it.
+func TestConnectedCloseStoresProviderForSettle(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-early", owner.ID, 1, "recording")
+	seedEpisodeRow(t, db, "ep-live", owner.ID, 2, "recording")
+	seedSessionRow(t, db, "sess-early", owner.ID, "ep-early")
+	seedSessionRow(t, db, "sess-live", owner.ID, "ep-live")
+	handler := NewSessionEnd(newEpisodeService(t, db, nil).svc)
+	providerID := steadyProviderSessionID(t)
+	settled := openSettleBroker(t, db)
+	seedSettleLink(t, db, "sess-early", owner.ID, "ep-early")
+	seedSettleLink(t, db, "sess-live", owner.ID, "ep-live")
+
+	post := func(sessionID, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/end", strings.NewReader(body))
+		return serve(guests, handler, cookie, req)
+	}
+	column := func(sessionID string) string {
+		t.Helper()
+		var got string
+		if err := db.Reader().QueryRowContext(t.Context(),
+			"SELECT provider_session_id FROM sessions WHERE id = ?", sessionID).Scan(&got); err != nil {
+			t.Fatalf("read provider id: %v", err)
+		}
+		return got
+	}
+
+	rec := post("sess-early", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("early end status = %d, want 200", rec.Code)
+	}
+	var early sessionEndJSON
+	if err := json.NewDecoder(rec.Body).Decode(&early); err != nil {
+		t.Fatalf("decode early end: %v", err)
+	}
+	if early.ProviderSessionID != "" || column("sess-early") != "" {
+		t.Fatalf("early close stored %q echo %q, want empty", column("sess-early"), early.ProviderSessionID)
+	}
+	if _, err := settled.SettleInput(t.Context(), "sess-early"); !errors.Is(err, broker.ErrNoClose) {
+		t.Fatalf("early close settle err = %v, want ErrNoClose", err)
+	}
+
+	rec = post("sess-live", `{"provider_session_id":"`+providerID+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("connected end status = %d, want 200", rec.Code)
+	}
+	var connected sessionEndJSON
+	if err := json.NewDecoder(rec.Body).Decode(&connected); err != nil {
+		t.Fatalf("decode connected end: %v", err)
+	}
+	if connected.ProviderSessionID != providerID || column("sess-live") != providerID {
+		t.Fatalf("connected close stored %q echo %q, want %q", column("sess-live"), connected.ProviderSessionID, providerID)
+	}
+	in, err := settled.SettleInput(t.Context(), "sess-live")
+	if err != nil {
+		t.Fatalf("settle input: %v, want the connected close", err)
+	}
+	if in.ProviderSessionID == "" {
+		t.Fatal("connected close stored no provider id, and settle would skip it")
+	}
+	if in.ProviderSessionID != providerID {
+		t.Fatalf("settle provider id = %q, want %q", in.ProviderSessionID, providerID)
+	}
+
+	rec = post("sess-live", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty after connected status = %d, want 200", rec.Code)
+	}
+	var again sessionEndJSON
+	if err := json.NewDecoder(rec.Body).Decode(&again); err != nil {
+		t.Fatalf("decode empty after connected: %v", err)
+	}
+	if again.ProviderSessionID != providerID || column("sess-live") != providerID {
+		t.Fatalf("empty close stored %q echo %q, want %q", column("sess-live"), again.ProviderSessionID, providerID)
+	}
+	in, err = settled.SettleInput(t.Context(), "sess-live")
+	if err != nil || in.ProviderSessionID != providerID {
+		t.Fatalf("settle after empty close = %q err %v, want %q", in.ProviderSessionID, err, providerID)
 	}
 }
 
