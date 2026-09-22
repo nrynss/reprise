@@ -604,7 +604,7 @@ requires:   T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/record/
-status:     in-progress:review-r1:t7.24-rev-r1@476fa9cf3253eb5697d8db77902d01ddbceca843
+status:     in-progress:land:t7.24-impl@476fa9cf3253eb5697d8db77902d01ddbceca843
 ```
 Measured live: the ending page strands the guest with no way back
 to the gallery or a fresh take. A stuck page must always offer an
