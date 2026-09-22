@@ -559,7 +559,7 @@ requires:   T7.1, T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       internal/api/, web/src/lib/voice/
-status:     in-progress:implement:t7.22-impl
+status:     in-progress:review-r1:t7.22-rev-r1@a4567352b28bf769c2364d93e8cf1b59012eb76c
 ```
 Measured on two real takes: the browser posts `POST
 /api/sessions/{id}/end` with an empty body and the server answers
