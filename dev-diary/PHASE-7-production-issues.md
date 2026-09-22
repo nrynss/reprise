@@ -559,7 +559,7 @@ requires:   T7.1, T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       internal/api/, web/src/lib/voice/
-status:     in-progress:land:t7.22-rem-r1@1ba4c759ea532d3be7f75bc0c82ab802f6529754
+status:     done:c82992755154cbc8e3f3fa7c67765303399fe2c3
 ```
 Measured on two real takes: the browser posts `POST
 /api/sessions/{id}/end` with an empty body and the server answers
@@ -652,6 +652,9 @@ while the guest is still on the record page still reaches processing.
 
 ### What exists now
 
+T7.22 landed at c829927 after round 2 APPROVE with zero residue.
+An empty close still records. A connected socket posts the provider
+id it learned, and a later empty close leaves that id in place.
 T7.24 landed at e118730 after round 1 APPROVE with zero in-scope
 findings. Every record phase links back to the gallery. One out of
 scope M is now T7.25. A draft move that finishes after that click
