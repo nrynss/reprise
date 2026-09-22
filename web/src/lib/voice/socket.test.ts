@@ -1,15 +1,5 @@
-// The socket test loads recorded frames. These names cover that read
-// without node types on disk.
-declare module 'node:fs' {
-	export function readFileSync(path: string, encoding: 'utf8'): string;
-}
-
-declare const process: {
-	cwd(): string;
-};
-
-import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import steadyEvents from '../../../../testdata/sessions/steady/events.json';
 import { closeSession } from './session-calls';
 import { VoiceSocket, type SocketHandle } from './socket';
 import { bytesToPcm16, encodeBase64, floatToPcm16, pcm16ToBytes, pcm16ToFloat } from './pcm';
@@ -55,8 +45,7 @@ interface ProviderFrame {
 }
 
 function steadyProviderFrames(): { ready: ProviderFrame; updated: ProviderFrame; other: ProviderFrame } {
-	const raw = readFileSync(process.cwd() + '/../testdata/sessions/steady/events.json', 'utf8');
-	const rows = JSON.parse(raw) as Array<{ event: ProviderFrame }>;
+	const rows = steadyEvents as Array<{ event: ProviderFrame }>;
 	const ready = rows.find((row) => row.event.type === 'session.ready')?.event;
 	const updated = rows.find((row) => row.event.type === 'session.updated')?.event;
 	const other = rows.find((row) => row.event.type === 'reply.started')?.event;
