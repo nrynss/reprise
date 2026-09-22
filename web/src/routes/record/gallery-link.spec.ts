@@ -9,6 +9,13 @@ import type { Page } from '@playwright/test';
 
 interface MockVoice {
 	feedBlocks(count: number): void;
+	finishTake(): Promise<void>;
+	awaitRetry(): Promise<void>;
+}
+
+interface AssignWatch {
+	__assignLog: string[];
+	__assignSpy: (url: string | URL) => void;
 }
 
 async function startMockTake(page: Page): Promise<void> {
@@ -60,6 +67,103 @@ async function holdDraftMove(page: Page): Promise<() => void> {
 		}
 	});
 	return release;
+}
+
+const draftMoveBody = {
+	episode_id: 'mock-episode',
+	moved: true,
+	scheduled: true,
+	job_id: 'tj-1',
+	state: 'draft'
+};
+
+// Hold the draft move, then answer 200 with one draft body. Aborting the
+// held call would hide a late jump to processing, so this helper fulfills.
+// The first call can refuse, which leaves the retry in flight for the hold.
+async function holdDraftMoveForFulfill(
+	page: Page,
+	failFirst = false
+): Promise<() => Promise<void>> {
+	let seen = 0;
+	let release: () => void = () => {};
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let markDone: () => void = () => {};
+	const done = new Promise<void>((resolve) => {
+		markDone = resolve;
+	});
+	await page.route('**/stems/complete', async (route) => {
+		seen += 1;
+		if (failFirst && seen === 1) {
+			await route.fulfill({
+				status: 500,
+				contentType: 'application/json',
+				body: JSON.stringify({ error: { code: 'overloaded', message: 'the server is busy' } })
+			});
+			return;
+		}
+		try {
+			await held;
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify(draftMoveBody)
+			});
+		} catch {
+			// The page left, or the request had already ended.
+		} finally {
+			markDone();
+		}
+	});
+	return async () => {
+		release();
+		await done;
+	};
+}
+
+// Watch location.assign so a late jump is visible in the same turn it
+// happens. The processing URL is recorded before the browser commits it.
+async function watchAssign(page: Page): Promise<void> {
+	const installed = await page.evaluate(() => {
+		const target = window as unknown as AssignWatch;
+		const log: string[] = [];
+		target.__assignLog = log;
+		const original = Location.prototype.assign;
+		const spy = function (this: Location, url: string | URL): void {
+			log.push(String(url));
+			original.call(this, url);
+		};
+		Location.prototype.assign = spy;
+		target.__assignSpy = spy;
+		return Location.prototype.assign === spy;
+	});
+	expect(installed).toBe(true);
+}
+
+// Read the path after the move settles. A jump to processing destroys the
+// page, and that still counts as leaving the gallery.
+async function expectStayedOnGallery(page: Page, wait: 'take' | 'retry' = 'take'): Promise<void> {
+	const settled = await page
+		.evaluate(async (which) => {
+			const target = window as unknown as AssignWatch & { __mockVoice: MockVoice };
+			if (which === 'retry') await target.__mockVoice.awaitRetry();
+			else await target.__mockVoice.finishTake();
+			return {
+				path: new URL(window.location.href).pathname,
+				assigns: target.__assignLog
+			};
+		}, wait)
+		.catch(async (error: unknown) => {
+			const message = error instanceof Error ? error.message : '';
+			if (!message.includes('context was destroyed')) throw error;
+			await page.waitForURL(/\/processing/);
+			return { path: new URL(page.url()).pathname, assigns: [page.url()] };
+		});
+	expect(settled.path).toBe('/');
+	expect(settled.assigns.some((url) => url.includes('/processing'))).toBe(false);
+	await expect(page.getByRole('heading', { name: 'The season so far', exact: true })).toBeVisible();
+	expect(new URL(page.url()).pathname).toBe('/');
 }
 
 async function stubDraftMove(page: Page, ok: boolean): Promise<void> {
@@ -133,6 +237,37 @@ test('ending returns to the gallery by the link', async ({ page }) => {
 	} finally {
 		release();
 	}
+});
+
+test('a draft move that finishes after the gallery link stays there', async ({ page }) => {
+	await startMockTake(page);
+	await page.evaluate((count) => {
+		(window as unknown as { __mockVoice: MockVoice }).__mockVoice.feedBlocks(count);
+	}, 12);
+	await watchAssign(page);
+	const fulfill = await holdDraftMoveForFulfill(page);
+	await confirmEnd(page);
+	await expect(page.getByRole('heading', { name: 'Record', exact: true })).toBeVisible();
+	await expect(page.getByRole('status')).toHaveText('Moving the take to draft.');
+	await followGalleryLink(page);
+	await fulfill();
+	await expectStayedOnGallery(page);
+});
+
+test('a retried draft move that finishes after the gallery link stays there', async ({ page }) => {
+	await startMockTake(page);
+	await page.evaluate((count) => {
+		(window as unknown as { __mockVoice: MockVoice }).__mockVoice.feedBlocks(count);
+	}, 12);
+	await watchAssign(page);
+	const fulfill = await holdDraftMoveForFulfill(page, true);
+	await confirmEnd(page);
+	await expect(page.getByRole('heading', { name: 'Draft move retry' })).toBeVisible();
+	await page.getByRole('button', { name: 'Retry draft move' }).click();
+	await expect(page.getByRole('status')).toHaveText('Moving the take to draft.');
+	await followGalleryLink(page);
+	await fulfill();
+	await expectStayedOnGallery(page, 'retry');
 });
 
 test('a refused ending returns to the gallery by the link', async ({ page }) => {

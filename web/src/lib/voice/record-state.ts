@@ -80,6 +80,7 @@ export interface MockVoiceHarness {
 	finishUploads(): Promise<{ userBytes: number; hostBytes: number }>;
 	finishTake(): Promise<void>;
 	retryCompletion(): Promise<void>;
+	awaitRetry(): Promise<void>;
 	completionState(): string;
 	completionText(): string;
 	capAdvance(ms: number): void;
@@ -226,6 +227,12 @@ export class RecordController {
 	private mockChallenges: string[] = [];
 	private pendingCompletion: { episode: string; pair: StemPair; userBytes: number; hostBytes: number } | null =
 		null;
+	// destroyed is set when the page drops this controller. A draft move
+	// already in flight may still settle, and it must not navigate after that.
+	private destroyed = false;
+	// retrying is the retry already in flight. The mock handle waits on it
+	// without starting another post.
+	private retrying: Promise<void> | null = null;
 
 	constructor(options: {
 		mock: boolean;
@@ -261,8 +268,10 @@ export class RecordController {
 		document.addEventListener('visibilitychange', this.visibleListener);
 	}
 
-	/** Stop timers and listeners, and end a take the page walks away from. */
+	/** Stop timers and listeners, and end a take the page walks away from.
+	A later success does not open processing. */
 	destroy(): void {
+		this.destroyed = true;
 		if (this.hideListener !== null) {
 			window.removeEventListener('pagehide', this.hideListener);
 			this.hideListener = null;
@@ -393,6 +402,20 @@ export class RecordController {
 	outcome instead of scheduling twice. */
 	async retryCompletion(): Promise<void> {
 		if (this.pendingCompletion === null) return;
+		const run = this.postRetry();
+		this.retrying = run;
+		try {
+			await run;
+		} finally {
+			if (this.retrying === run) this.retrying = null;
+		}
+	}
+
+	// postRetry reposts the stored pair after a loud refusal. The close
+	// record goes first when one is still pending. A failed repost stays
+	// on the record page. A success hands the take to processing.
+	private async postRetry(): Promise<void> {
+		if (this.pendingCompletion === null) return;
 		const pending = this.pendingCompletion;
 		if (this.pendingEnd !== null) {
 			try {
@@ -487,8 +510,11 @@ export class RecordController {
 
 	// goProcessing hands the finished take to the processing screen. The
 	// handoff names the episode and the durable totals, plus the mock flag
-	// under the harness so the doubles stay in charge there.
+	// under the harness so the doubles stay in charge there. End and retry
+	// both come through here. A page that has already gone does not assign,
+	// so a late success cannot pull the guest off the gallery.
 	private goProcessing(episode: string, userBytes: number, hostBytes: number): void {
+		if (this.destroyed) return;
 		const suffix = this.mockMode ? '&mock=1' : '';
 		window.location.assign(
 			`/processing?episode=${encodeURIComponent(episode)}&uploads=done&userBytes=${userBytes}&hostBytes=${hostBytes}${suffix}`
@@ -524,6 +550,7 @@ export class RecordController {
 			finishUploads: () => this.finishUploads(),
 			finishTake: () => this.endTake(),
 			retryCompletion: () => this.retryCompletion(),
+			awaitRetry: () => this.retrying ?? Promise.resolve(),
 			completionState: () => this.completion?.status ?? 'none',
 			completionText: () => this.completion?.text ?? '',
 			capAdvance: (ms: number) => {
