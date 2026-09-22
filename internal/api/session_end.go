@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/nrynss/keel/wire"
@@ -54,10 +57,33 @@ type sessionEndJSON struct {
 	ProviderSessionID string `json:"provider_session_id"`
 }
 
+// decodeSessionEndBody reads the close record. An empty body means the
+// browser closed without learning a provider id, so it decodes to the
+// zero close and the settle skips the row. Malformed JSON still refuses,
+// so a corrupt record never lands silent.
+func decodeSessionEndBody(w http.ResponseWriter, r *http.Request) (sessionEndRequestJSON, bool) {
+	var body sessionEndRequestJSON
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "this request carries no usable body", nil)
+		return sessionEndRequestJSON{}, false
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return body, true
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		_ = wire.WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "this request carries no usable body", nil)
+		return sessionEndRequestJSON{}, false
+	}
+	return body, true
+}
+
 // end answers POST /api/sessions/{id}/end by recording the provider id
 // on the diary session. The browser already ended the provider call, so
-// this call only stores what the later settle reads. Unknown and foreign
-// sessions both answer 404, and a repeat end stays harmless.
+// this call only stores what the later settle reads. An empty body
+// records the zero close. Unknown and foreign sessions both answer 404,
+// and a repeat end stays harmless.
 func (h *SessionEnd) end(w http.ResponseWriter, r *http.Request) {
 	owner, ok := ownerOf(w, r)
 	if !ok {
@@ -67,8 +93,8 @@ func (h *SessionEnd) end(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the session store is not wired", nil)
 		return
 	}
-	var body sessionEndRequestJSON
-	if !decodeBody(w, r, &body) {
+	body, ok := decodeSessionEndBody(w, r)
+	if !ok {
 		return
 	}
 	sessionID := r.PathValue("id")

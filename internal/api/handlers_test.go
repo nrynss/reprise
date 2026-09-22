@@ -446,6 +446,84 @@ func TestSessionEndRecordsProviderClose(t *testing.T) {
 	}
 }
 
+// TestSessionEndAcceptsEmptyClose posts the empty close the browser
+// sends and requires a 200 with the row stored. Malformed bodies still
+// refuse loudly, and a repeat empty close stays harmless.
+func TestSessionEndAcceptsEmptyClose(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "recording")
+	seedSessionRow(t, db, "sess-1", owner.ID, "ep-1")
+	seedEpisodeRow(t, db, "ep-2", owner.ID, 2, "recording")
+	seedSessionRow(t, db, "sess-2", owner.ID, "ep-2")
+	stack := newEpisodeService(t, db, nil)
+	handler := NewSessionEnd(stack.svc)
+
+	post := func(sessionID string, bodyReader *strings.Reader) *httptest.ResponseRecorder {
+		var req *http.Request
+		if bodyReader == nil {
+			req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/end", nil)
+		} else {
+			req = httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+"/end", bodyReader)
+		}
+		return serve(guests, handler, cookie, req)
+	}
+	stored := func(sessionID string) string {
+		t.Helper()
+		var got string
+		if err := db.Reader().QueryRowContext(t.Context(),
+			"SELECT provider_session_id FROM sessions WHERE id = ?", sessionID).Scan(&got); err != nil {
+			t.Fatalf("read provider id: %v", err)
+		}
+		return got
+	}
+
+	rec := post("sess-1", strings.NewReader(""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty end status = %d, want 200", rec.Code)
+	}
+	var body sessionEndJSON
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode empty end: %v", err)
+	}
+	if body.SessionID != "sess-1" || body.EpisodeID != "ep-1" || body.ProviderSessionID != "" {
+		t.Fatalf("empty end = %+v, want sess-1 on ep-1 with no provider id", body)
+	}
+	if got := stored("sess-1"); got != "" {
+		t.Fatalf("provider id = %q, want empty", got)
+	}
+
+	rec = post("sess-2", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("nil body end status = %d, want 200", rec.Code)
+	}
+	if got := stored("sess-2"); got != "" {
+		t.Fatalf("provider id = %q, want empty", got)
+	}
+
+	rec = post("sess-1", strings.NewReader(""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("repeat empty end status = %d, want 200", rec.Code)
+	}
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"truncated object", "{"},
+		{"wrong type", `{"provider_session_id":9}`},
+		{"list shape", `[]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := post("sess-1", strings.NewReader(tc.body))
+			if status, code := envelopeCode(t, rec); status != http.StatusBadRequest || code != CodeInvalidRequest {
+				t.Fatalf("status = %d code = %q, want 400 invalid_request", status, code)
+			}
+		})
+	}
+}
+
 // TestThreadsCountsComeFromRows seeds stored mentions across two episodes
 // and requires the thread index to repeat their counts.
 func TestThreadsCountsComeFromRows(t *testing.T) {
