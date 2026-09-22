@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { pageTitle } from '$lib/shell';
 	import { RecordController, emptySnapshot } from '$lib/voice/record-state';
 	import {
@@ -83,6 +84,7 @@
 </svelte:head>
 
 <main>
+	<a href={resolve('/')}>Back to gallery</a>
 	<h1>{snap.phase === 'live' ? 'On air' : 'Record'}</h1>
 	<p role="status">{snap.notice}</p>
 
