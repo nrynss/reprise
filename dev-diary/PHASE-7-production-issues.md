@@ -622,7 +622,7 @@ requires:   T7.22, T7.24
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/
-status:     in-progress:review-r2:t7.25-rev-r2@0249ab9931c47e9d54826f4a2b9869c6c842c9e1
+status:     in-progress:remediate-r2:t7.25-rem-r2
 ```
 T7.24 round 1 recorded one out of scope M. The gallery link does
 reach `/` during an in-flight draft move. `endTake` keeps running.
