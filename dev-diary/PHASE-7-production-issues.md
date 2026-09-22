@@ -581,7 +581,7 @@ requires:   T7.19
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     in-progress:land:t7.23-impl@6237394df7c2b71a2689ffd133a43f126c79705b
+status:     done:6d606b1de2195e4fc6e2083914553103f654dc32
 ```
 Measured on two real takes: sparse chunk PUTs answer 429 (indices
 0, 2, 5, 11 across takes), stalling the draft move. T7.19 budgets
@@ -652,6 +652,10 @@ while the guest is still on the record page still reaches processing.
 
 ### What exists now
 
+T7.23 landed at 6d606b1 after round 1 APPROVE with zero findings.
+Chunk 429s on the edge were the app gate. Uploads and the outer
+rule now refill one token every 200ms. One two-stem take clears
+both gates. Mint still stops at 6 per minute.
 T7.22 landed at c829927 after round 2 APPROVE with zero residue.
 An empty close still records. A connected socket posts the provider
 id it learned, and a later empty close leaves that id in place.
