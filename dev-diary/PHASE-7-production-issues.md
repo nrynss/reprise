@@ -559,7 +559,7 @@ requires:   T7.1, T7.12
 fixture-ok: yes
 size:       XS · light
 owns:       internal/api/, web/src/lib/voice/
-status:     in-progress:review-r2:t7.22-rev-r2@1ba4c759ea532d3be7f75bc0c82ab802f6529754
+status:     in-progress:land:t7.22-rem-r1@1ba4c759ea532d3be7f75bc0c82ab802f6529754
 ```
 Measured on two real takes: the browser posts `POST
 /api/sessions/{id}/end` with an empty body and the server answers
@@ -581,7 +581,7 @@ requires:   T7.19
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     in-progress:implement:t7.23-impl
+status:     in-progress:review-r1:t7.23-rev-r1@6237394df7c2b71a2689ffd133a43f126c79705b
 ```
 Measured on two real takes: sparse chunk PUTs answer 429 (indices
 0, 2, 5, 11 across takes), stalling the draft move. T7.19 budgets
