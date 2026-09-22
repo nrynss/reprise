@@ -581,7 +581,7 @@ requires:   T7.19
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     in-progress:review-r1:t7.23-rev-r1@6237394df7c2b71a2689ffd133a43f126c79705b
+status:     in-progress:land:t7.23-impl@6237394df7c2b71a2689ffd133a43f126c79705b
 ```
 Measured on two real takes: sparse chunk PUTs answer 429 (indices
 0, 2, 5, 11 across takes), stalling the draft move. T7.19 budgets
