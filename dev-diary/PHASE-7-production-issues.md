@@ -643,7 +643,7 @@ requires:   T7.23
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     in-progress:implement:t7.26-impl
+status:     in-progress:land:t7.26-impl@fee8b89cb2b8dee34babc802269bd7a8c5d111b1
 ```
 A real Chrome take opened both stems as `audio/pcm`. The upload
 allowlist refused that type with `unsupported_type`. No blob was
