@@ -193,6 +193,15 @@ export class RecordController {
 	private greeting = '';
 	private context: AudioContext | null = null;
 	private recorder: AudioRecorder | null = null;
+	// liveArmed means this open already asked for the microphone. A failed
+	// open closes that context. A mock take never sets it.
+	private liveArmed = false;
+	// acceptBlocks stays false until a take can keep audio, and goes false
+	// again when that open fails. Otherwise a late block leaks into the retry.
+	private acceptBlocks = false;
+	private earlyBlocks: CaptureChunk[] = [];
+	private flushingBlocks = false;
+	private captureReady: Promise<void> = Promise.resolve();
 	private player: PcmStreamPlayer | null = null;
 	private userUpload: ChunkUploader | null = null;
 	private hostUpload: ChunkUploader | null = null;
@@ -304,6 +313,7 @@ export class RecordController {
 			if (this.mockMode) {
 				await this.startMockTake();
 			} else {
+				this.openLiveCapture();
 				await this.startRealTake();
 			}
 			this.takeStart = this.context?.currentTime ?? 0;
@@ -318,6 +328,9 @@ export class RecordController {
 				}
 			}, 500);
 		} catch (error) {
+			this.acceptBlocks = false;
+			this.earlyBlocks = [];
+			this.abandonCapture();
 			this.phase = 'preflight';
 			this.notice = error instanceof Error ? error.message : 'The session did not open.';
 			this.emit();
@@ -612,21 +625,19 @@ export class RecordController {
 		return perf.memory.usedJSHeapSize;
 	}
 
-	private async startRealTake(): Promise<void> {
-		this.session = await mintSession();
-		this.greeting = this.session.config.greeting;
-		this.owner = this.session.episode_id;
-		this.context = new AudioContext();
-		await this.context.resume();
-		this.player = new PcmStreamPlayer({ context: this.context, streamRate: 24000 });
-		await this.openUploads();
-		this.requireUploadsOpen();
-		this.voice = this.wireVoice(browserSocket(socketUrl(this.session.token)));
-		this.guard = new SessionGuard({ url: `/api/sessions/${this.session.session_id}/end` });
-		this.guard.attach();
+	// openLiveCapture runs inside the start click, before any wait. WebKit
+	// treats the first wait as the end of that click, so the context and
+	// the microphone have to open first. The mint follows.
+	private openLiveCapture(): void {
+		this.liveArmed = true;
+		this.acceptBlocks = true;
+		const context = new AudioContext();
+		this.context = context;
+		const resumed = context.resume();
+		void resumed.catch(() => undefined);
 		this.recorder = new AudioRecorder({
 			mode: 'pcm',
-			context: this.context,
+			context,
 			autoStopSeconds: 0,
 			echoCancellation: true,
 			noiseSuppression: false,
@@ -634,10 +645,55 @@ export class RecordController {
 			retain: false,
 			onChunk: (chunk) => this.handleUserBlock(chunk)
 		});
-		await this.recorder.start();
+		const started = this.recorder.start();
+		const ready = Promise.all([resumed, started]).then(() => undefined);
+		void ready.catch(() => undefined);
+		this.captureReady = ready;
+	}
+
+	// abandonCapture closes a microphone this open started. The recorder drops
+	// an in-flight request. The context belongs to the page, so the recorder
+	// leaves it open.
+	private abandonCapture(): void {
+		if (!this.liveArmed) return;
+		this.liveArmed = false;
+		const recorder = this.recorder;
+		this.recorder = null;
+		try {
+			recorder?.reset();
+		} catch {
+			// The error from the open is the one the page shows.
+		}
+		const context = this.context;
+		this.context = null;
+		if (context !== null) {
+			void context.close().catch(() => undefined);
+		}
+	}
+
+	private async startRealTake(): Promise<void> {
+		this.session = await mintSession();
+		this.greeting = this.session.config.greeting;
+		this.owner = this.session.episode_id;
+		await this.captureReady;
+		const context = this.context;
+		const recorder = this.recorder;
+		if (context === null || recorder === null || recorder.state !== 'recording') {
+			const reason = recorder?.error;
+			if (reason instanceof Error) throw reason;
+			throw new Error('The microphone did not open.');
+		}
+		this.player = new PcmStreamPlayer({ context, streamRate: 24000 });
+		await this.openUploads();
+		this.requireUploadsOpen();
+		this.voice = this.wireVoice(browserSocket(socketUrl(this.session.token)));
+		this.guard = new SessionGuard({ url: `/api/sessions/${this.session.session_id}/end` });
+		this.guard.attach();
+		this.flushEarlyBlocks();
 	}
 
 	private async startMockTake(): Promise<void> {
+		this.acceptBlocks = true;
 		this.context = new AudioContext();
 		await this.context.resume();
 		this.session = {
@@ -726,7 +782,31 @@ export class RecordController {
 		await this.hostUpload.start();
 	}
 
+	// The microphone is open before the mint returns, so blocks can arrive
+	// before the upload and the socket exist. They wait, then drain in order,
+	// and the stem keeps the opening.
 	private handleUserBlock(chunk: CaptureChunk): void {
+		if (!this.acceptBlocks) return;
+		this.earlyBlocks.push(chunk);
+		this.flushEarlyBlocks();
+	}
+
+	private flushEarlyBlocks(): void {
+		if (this.flushingBlocks) return;
+		if (this.context === null || this.userUpload === null || this.voice === null) return;
+		this.flushingBlocks = true;
+		try {
+			while (this.earlyBlocks.length > 0) {
+				const chunk = this.earlyBlocks.shift();
+				if (chunk === undefined) break;
+				this.publishUserBlock(chunk);
+			}
+		} finally {
+			this.flushingBlocks = false;
+		}
+	}
+
+	private publishUserBlock(chunk: CaptureChunk): void {
 		if (this.context === null || this.userUpload === null || this.voice === null) return;
 		const drained = drainUserBlock(chunk.samples, this.context.sampleRate);
 		this.userUpload.append(drained.upload);

@@ -11,5 +11,9 @@ export default defineConfig({
 	use: {
 		baseURL: 'http://localhost:4173'
 	},
+	projects: [
+		{ name: 'chromium', use: { browserName: 'chromium' } },
+		{ name: 'webkit', use: { browserName: 'webkit' } }
+	],
 	reporter: [['list']]
 });

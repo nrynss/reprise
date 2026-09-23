@@ -34,9 +34,9 @@ jobs:
         run: npm ci
         working-directory: web
 
-      # Playwright needs its own browser build.
-      - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+      # Playwright needs its own browser builds.
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
         working-directory: web
 
       - name: Run the gate
