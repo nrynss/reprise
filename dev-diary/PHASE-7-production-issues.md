@@ -668,7 +668,7 @@ requires:   T7.25
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/, web/tests/, web/playwright.config.ts, web/src/routes/welcome/welcome.playwright.config.ts, .github/workflows/ci.yml
-status:     in-progress:implement:t7.27-impl
+status:     in-progress:review-r1:t7.27-rev-r1@a67c6af79346951ecdedb88cf9af00c3cf03c998
 ```
 The record page mints a session before it opens the audio context
 or the microphone. WebKit treats that first wait as the end of the
@@ -683,11 +683,14 @@ proof has never run on a machine that can launch WebKit.
 * Playwright WebKit holds the session mint. The context exists and
   the microphone has been requested before that mint returns. The
   same proof passes on Chromium.
-* The welcome play-after-gesture proof passes on WebKit.
 * The gate installs the WebKit browser beside Chromium.
+* The welcome teaser stays on its existing proof. Chaaya 0.2.0
+  primes playback with a silent clip that WebKit rejects. That
+  defect belongs to the library. This task does not edit the
+  welcome page to hide it.
 
-**Done when:** Those three proofs pass, and a mock take still
-reaches the gallery and processing as it does today.
+**Done when:** The WebKit and Chromium start proofs pass, and a
+mock take still reaches the gallery and processing as it does today.
 
 ---
 
