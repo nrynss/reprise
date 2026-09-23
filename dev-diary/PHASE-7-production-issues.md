@@ -643,7 +643,7 @@ requires:   T7.23
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     in-progress:land:t7.26-impl@fee8b89cb2b8dee34babc802269bd7a8c5d111b1
+status:     done:8947687c56eee16dbb7f3e871eecc3adfdf12e34
 ```
 A real Chrome take opened both stems as `audio/pcm`. The upload
 allowlist refused that type with `unsupported_type`. No blob was
@@ -704,6 +704,13 @@ reaches the gallery and processing as it does today.
 
 ### What exists now
 
+T7.26 landed at 8947687 after round 1 APPROVE with zero findings.
+Raw PCM stems now open as `audio/pcm` through the real upload
+handler. A type outside the set still refuses with
+`unsupported_type` at completion. Stored raw bytes head to WAV
+from the stored stem rate through one builder, eager on link,
+on locate for render, and on read in edit inputs. The draft move
+links both stems and the duration probe reads the stored rate.
 T7.25 landed at feecda1 after round 3 APPROVE with zero residue.
 A draft move that finishes after the guest leaves the record page
 does not open processing. A move that finishes while they are still
@@ -817,3 +824,8 @@ flip until the login exists.
 T7.1 and T7.2 own disjoint paths and may start together. T7.3 waits
 on T7.2 for the shared `main.go`. T7.4 is blocked on the owner login
 decision, not on code. T7.5 appends round 2 and never rewrites round 1.
+T7.26 ran while a sibling orchestrator opened T7.27. Main moved
+twice mid-task and the rebase landed clean. This session exposes
+no shared memory tools, so nothing was recorded outside git. The
+box carries ffmpeg 9.0.2 against the pinned 9.0.1, so the Go
+subset stood in for the full gate on this task.
