@@ -643,7 +643,7 @@ requires:   T7.23
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go
-status:     not-started
+status:     in-progress:implement:t7.26-impl
 ```
 A real Chrome take opened both stems as `audio/pcm`. The upload
 allowlist refused that type with `unsupported_type`. No blob was
@@ -661,6 +661,33 @@ were never saved.
 
 **Done when:** A fixture take opens both stems as `audio/pcm`, the
 draft move links them, and the duration probe reports the stored rate.
+
+### T7.27: A WebKit browser can start a take
+```yaml
+requires:   T7.25
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/lib/voice/, web/tests/, web/playwright.config.ts, web/src/routes/welcome/welcome.playwright.config.ts, .github/workflows/ci.yml
+status:     in-progress:implement:t7.27-impl
+```
+The record page mints a session before it opens the audio context
+or the microphone. WebKit treats that first wait as the end of the
+click, so the context stays suspended and the microphone request is
+no longer a gesture. Chromium still allows both. The welcome teaser
+was specified to play on WebKit after the first gesture, and that
+proof has never run on a machine that can launch WebKit.
+
+* Inside the start click, before any wait, open the audio context,
+  resume it, and start the microphone. The session mint follows.
+  A mock take still opens no microphone.
+* Playwright WebKit holds the session mint. The context exists and
+  the microphone has been requested before that mint returns. The
+  same proof passes on Chromium.
+* The welcome play-after-gesture proof passes on WebKit.
+* The gate installs the WebKit browser beside Chromium.
+
+**Done when:** Those three proofs pass, and a mock take still
+reaches the gallery and processing as it does today.
 
 ---
 
