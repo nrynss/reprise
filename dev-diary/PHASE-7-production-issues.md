@@ -668,7 +668,7 @@ requires:   T7.25
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/, web/tests/, web/playwright.config.ts, web/src/routes/welcome/welcome.playwright.config.ts, .github/workflows/ci.yml
-status:     in-progress:land:t7.27-rem-r1@2c8ba807ab3726ab6a0c66aca8f592fe6df8ddf9
+status:     done:a9f12371f3f76ff3ee5a96b65bc0e72ee69261db
 ```
 The record page mints a session before it opens the audio context
 or the microphone. WebKit treats that first wait as the end of the
@@ -818,6 +818,10 @@ partial Chrome run; browser fields beyond the user agent string are
 still missing.
 A later Chrome take opened both stems as `audio/pcm`. The allowlist
 refused the open, so retry found no stored ids. T7.26 owns that fix.
+T7.27 landed at a9f1237. A WebKit start opens the audio context and
+requests the microphone before the session mint. The welcome teaser
+still fails on WebKit because Chaaya 0.2.0 rejects its silent prime.
+That defect is https://github.com/nrynss/chaaya/issues/5.
 T7.4 is deferred, not merely waiting: owner login plus the live
 switch exercise ships as its own phase after dogfooding, not as a
 leftover row here.
