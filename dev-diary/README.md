@@ -6,16 +6,16 @@ How work runs lives only in [`../AGENTS.md`](../AGENTS.md). This file holds fact
 - [`project.md`](project.md): the build, and every departure from the product spec.
 - [`libraries.md`](libraries.md): what Keel and Chaaya carry, and what Reprise builds.
 
-**Current status:** Built on Keel `v0.3.0` and Chaaya `0.2.0`. Public edge
-`https://reprise.nryn.dev` serves the `5d33a24` build. P0 through P5 are
-done, including the seeded season copy (T5.2) and the first visit screen
-(T5.5). T6.1b first verification is in re-review: the live call passes,
-and the record carries six honest gaps (stubbed episode routes, unwired
-settle, uploader owner mismatch, admin stub, no Gemini path, bare media
-refusals). Those gaps are now phase P7, which ends with a second
-verification round. Each mint holds about 2.25 dollars of the 20 dollar
-daily ceiling until the settle lands, so dogfood sparingly. T6.4b real
-voices, T6.2 materials, and T6.3 public flip wait on the re-verification.
+**Current status:** Built on Keel `v0.3.0` and Chaaya `0.2.0`. The public edge
+at `https://reprise.nryn.dev` has passed workstation verification. P0 through
+P5 are done, including the seeded season copy (T5.2) and first visit screen
+(T5.5). T6.1b production verification, T6.2 submission materials, and T6.3
+repository preparation are marked done. P7 has landed the API wiring, budget
+settlement, transcript and editorial pipeline, and later browser fixes. The
+production probe confirms a live transcript, editorial proposals, and a
+settled session. T7.26 is in review for raw PCM stem uploads. T7.27 is in
+implementation for WebKit recording. T7.4 owner login is deferred. T6.4b
+real-voice checks remain open, and the final P7 exit checks are not complete.
 
 The libraries carry the general work. Chaaya `0.2.0` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered
