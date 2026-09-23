@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -93,8 +94,10 @@ const nanosPerCent = 10_000_000
 // mediaContentTypes is the closed set the blob store persists. It carries
 // the image, audio, video and subtitle types the media library accepts by
 // default, plus the MP4 audio the render writes, which the default set
-// leaves out, and the JSON provider receipts the passes persist, because
-// provider output persists on receipt and artifact URLs expire.
+// leaves out, the raw PCM the browser takes post, which later passes wrap
+// in a WAV header from the stored stem rate, and the JSON provider
+// receipts the passes persist, because provider output persists on receipt
+// and artifact URLs expire.
 var mediaContentTypes = []string{
 	"image/png",
 	"image/jpeg",
@@ -104,6 +107,7 @@ var mediaContentTypes = []string{
 	"audio/ogg",
 	"audio/webm",
 	"audio/mp4",
+	"audio/pcm",
 	"video/mp4",
 	"application/pdf",
 	"text/vtt",
@@ -1224,6 +1228,128 @@ func (p *pipeline) memoryFunc(ownerID, episodeID string) job.Func {
 	}
 }
 
+// errRawStemEmpty reports a raw PCM stem with no usable audio bytes.
+// An empty file and an odd length both land here, because 16 bit samples
+// always arrive in pairs.
+var errRawStemEmpty = errors.New("reprise: raw stem holds no audio")
+
+// errStemRateInvalid reports a stem sample rate that builds no WAV
+// header. The header carries the rate the completion stored, so a zero
+// or negative rate stops the build instead of writing a silent file.
+var errStemRateInvalid = errors.New("reprise: stem sample rate is not positive")
+
+// stemFile describes one linked stem row: the blob id, the stored sample
+// rate, and the alignment offset.
+type stemFile struct {
+	mediaID string
+	rate    int64
+	offset  int64
+}
+
+// linkedStemFiles returns the oldest linked stem per role for one owner
+// episode. The oldest row wins per role, matching the stem reader, so a
+// repeat that stored a second pair never swaps the audio a running job
+// reads.
+func linkedStemFiles(ctx context.Context, db *sqlite.DB, ownerID, episodeID string) (map[string]stemFile, error) {
+	rows, err := db.Reader().QueryContext(ctx,
+		`SELECT media_id, role, sample_rate, start_offset_ms FROM stems WHERE owner_id = ? AND episode_id = ? ORDER BY rowid ASC`,
+		ownerID, episodeID)
+	if err != nil {
+		return nil, fmt.Errorf("reprise: read linked stems: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]stemFile{}
+	for rows.Next() {
+		var mediaID, role string
+		var rate, offset int64
+		if err := rows.Scan(&mediaID, &role, &rate, &offset); err != nil {
+			return nil, fmt.Errorf("reprise: read linked stems: %w", err)
+		}
+		if _, seen := found[role]; !seen {
+			found[role] = stemFile{mediaID: mediaID, rate: rate, offset: offset}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reprise: read linked stems: %w", err)
+	}
+	return found, nil
+}
+
+// isWAVDocument reports whether b carries a RIFF WAVE header. Stored WAV
+// stems pass through untouched, while headerless raw PCM takes convert.
+func isWAVDocument(b []byte) bool {
+	if len(b) < 12 {
+		return false
+	}
+	return b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F' &&
+		b[8] == 'W' && b[9] == 'A' && b[10] == 'V' && b[11] == 'E'
+}
+
+// wavFromMonoPCM builds a WAV document from raw signed 16 bit mono bytes
+// at the given sample rate. The browser posts headerless PCM, and the
+// probe reads only headed audio, so the stored rate shapes the header
+// here. The header is 44 bytes: RIFF, WAVE, one PCM fmt chunk, and one
+// data chunk. An empty or odd raw and a non-positive rate refuse with a
+// clear error instead of a silent zero length file.
+func wavFromMonoPCM(raw []byte, rate int64) ([]byte, error) {
+	if len(raw) == 0 {
+		return nil, errRawStemEmpty
+	}
+	if len(raw)%2 != 0 {
+		return nil, fmt.Errorf("reprise: raw stem holds %d bytes: %w", len(raw), errRawStemEmpty)
+	}
+	if rate <= 0 || rate > math.MaxUint32/2 {
+		return nil, fmt.Errorf("reprise: raw stem rate %d: %w", rate, errStemRateInvalid)
+	}
+	if len(raw) > math.MaxUint32-44 {
+		return nil, fmt.Errorf("reprise: raw stem holds %d bytes: %w", len(raw), errRawStemEmpty)
+	}
+	out := make([]byte, 0, 44+len(raw))
+	var head [44]byte
+	copy(head[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(head[4:8], uint32(36+len(raw)))
+	copy(head[8:12], "WAVE")
+	copy(head[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(head[16:20], 16)
+	binary.LittleEndian.PutUint16(head[20:22], 1)
+	binary.LittleEndian.PutUint16(head[22:24], 1)
+	binary.LittleEndian.PutUint32(head[24:28], uint32(rate))
+	binary.LittleEndian.PutUint32(head[28:32], uint32(rate*2))
+	binary.LittleEndian.PutUint16(head[32:34], 2)
+	binary.LittleEndian.PutUint16(head[34:36], 16)
+	copy(head[36:40], "data")
+	binary.LittleEndian.PutUint32(head[40:44], uint32(len(raw)))
+	out = append(out, head[:]...)
+	out = append(out, raw...)
+	return out, nil
+}
+
+// ensureWAVInPlace rewrites the file at path to a WAV document when it
+// still holds headerless raw PCM at the given rate. A file that already
+// carries a RIFF WAVE header stays untouched, so existing WAV stems never
+// change. It reports whether it rewrote the file.
+func ensureWAVInPlace(path string, rate int64) (bool, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("reprise: read stem file: %w", err)
+	}
+	if isWAVDocument(raw) {
+		return false, nil
+	}
+	wav, err := wavFromMonoPCM(raw, rate)
+	if err != nil {
+		return false, err
+	}
+	mode := os.FileMode(0o644)
+	if info, statErr := os.Stat(path); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := os.WriteFile(path, wav, mode); err != nil {
+		return false, fmt.Errorf("reprise: write headed stem: %w", err)
+	}
+	return true, nil
+}
+
 // locateStems resolves both stem files for one episode with their
 // alignment offsets. Blobs rest as files named by their ids under the
 // media directory, so the render reads them in place through a root
@@ -1231,30 +1357,9 @@ func (p *pipeline) memoryFunc(ownerID, episodeID string) job.Func {
 // completion that stored a second pair never swaps the stems a running job
 // reads.
 func (p *pipeline) locateStems(ctx context.Context, ownerID, episodeID string) (userPath, hostPath string, userOffsetMs, hostOffsetMs int64, err error) {
-	type stem struct {
-		mediaID string
-		offset  int64
-	}
-	rows, err := p.db.Reader().QueryContext(ctx,
-		`SELECT media_id, role, start_offset_ms FROM stems WHERE owner_id = ? AND episode_id = ? ORDER BY rowid ASC`,
-		ownerID, episodeID)
+	found, err := linkedStemFiles(ctx, p.db, ownerID, episodeID)
 	if err != nil {
-		return "", "", 0, 0, fmt.Errorf("reprise: locate stems: %w", err)
-	}
-	defer rows.Close()
-	found := map[string]stem{}
-	for rows.Next() {
-		var mediaID, role string
-		var offset int64
-		if err := rows.Scan(&mediaID, &role, &offset); err != nil {
-			return "", "", 0, 0, fmt.Errorf("reprise: locate stems: %w", err)
-		}
-		if _, seen := found[role]; !seen {
-			found[role] = stem{mediaID: mediaID, offset: offset}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return "", "", 0, 0, fmt.Errorf("reprise: locate stems: %w", err)
+		return "", "", 0, 0, err
 	}
 	root, err := os.OpenRoot(p.mediaDir)
 	if err != nil {
@@ -1271,7 +1376,11 @@ func (p *pipeline) locateStems(ctx context.Context, ownerID, episodeID string) (
 			return "", 0, fmt.Errorf("reprise: locate stems: open %s stem: %w", role, err)
 		}
 		_ = f.Close()
-		return filepath.Join(p.mediaDir, s.mediaID), s.offset, nil
+		path := filepath.Join(p.mediaDir, s.mediaID)
+		if _, err := ensureWAVInPlace(path, s.rate); err != nil {
+			return "", 0, fmt.Errorf("reprise: locate stems: head %s stem: %w", role, err)
+		}
+		return path, s.offset, nil
 	}
 	userPath, userOffsetMs, err = pathFor(transcript.RoleUser)
 	if err != nil {
@@ -1695,6 +1804,7 @@ func (h *stemsComplete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, api.CodeInternal, "the stems could not be linked", nil)
 		return
 	}
+	h.convertRawStems(r.Context(), owner.ID, episodeID)
 	jobID, scheduled, err := h.drafts.ensureTranscript(r.Context(), owner.ID, episodeID)
 	if errors.Is(err, job.ErrLimit) {
 		_ = wire.WriteError(w, http.StatusTooManyRequests, codePipelineBusy, "the edit queue is full, retry this completion", nil)
@@ -1742,6 +1852,32 @@ func (h *stemsComplete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// convertRawStems rewrites headerless raw PCM stem files to WAV in place
+// right after the completion links them. The browser posts raw samples
+// and the stored rate shapes the header, so the render and the probe read
+// headed audio. A file that already carries a header stays untouched. A
+// failure logs and the read paths still head the bytes on the fly, so the
+// completion never fails work the schedule can still run.
+func (h *stemsComplete) convertRawStems(ctx context.Context, ownerID, episodeID string) {
+	if h.drafts == nil || h.drafts.pipe == nil || h.drafts.pipe.mediaDir == "" {
+		return
+	}
+	found, err := linkedStemFiles(ctx, h.db, ownerID, episodeID)
+	if err != nil {
+		log.Printf("reprise stems: list linked stems for %s: %v", episodeID, err)
+		return
+	}
+	for _, role := range []string{transcript.RoleUser, transcript.RoleHost} {
+		s, ok := found[role]
+		if !ok || s.mediaID == "" {
+			continue
+		}
+		if _, err := ensureWAVInPlace(filepath.Join(h.drafts.pipe.mediaDir, s.mediaID), s.rate); err != nil {
+			log.Printf("reprise stems: head %s stem for %s: %v", role, episodeID, err)
+		}
+	}
 }
 
 // blobOwner returns the owner the media index stored a blob under. Unknown
@@ -1868,6 +2004,53 @@ func stampEpisode(ctx context.Context, store job.Store, jobID, ownerID, episodeI
 	return nil
 }
 
+// headedStemAudio returns headed audio for one stem role. Stored WAV
+// passes through untouched. Headerless raw PCM gains a header built from
+// the stored stem rate, so a crash between link and convert still
+// converges on playable audio.
+func headedStemAudio(ctx context.Context, db *sqlite.DB, ownerID, episodeID, role string, raw []byte) ([]byte, error) {
+	if isWAVDocument(raw) {
+		return raw, nil
+	}
+	found, err := linkedStemFiles(ctx, db, ownerID, episodeID)
+	if err != nil {
+		return nil, err
+	}
+	s, ok := found[role]
+	if !ok || s.mediaID == "" {
+		return nil, fmt.Errorf("reprise: head stem: missing %s stem", role)
+	}
+	wav, err := wavFromMonoPCM(raw, s.rate)
+	if err != nil {
+		return nil, fmt.Errorf("reprise: head %s stem: %w", role, err)
+	}
+	return wav, nil
+}
+
+// probeHeadedAudio probes headed audio bytes through a temp file. The
+// file leaves after the probe, so no derived copy lingers beside the
+// stored blob.
+func probeHeadedAudio(ctx context.Context, audio []byte) (float64, error) {
+	tmp, err := os.CreateTemp("", "stem-*.wav")
+	if err != nil {
+		return 0, fmt.Errorf("reprise: stage headed stem: %w", err)
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err := tmp.Write(audio); err != nil {
+		_ = tmp.Close()
+		return 0, fmt.Errorf("reprise: stage headed stem: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return 0, fmt.Errorf("reprise: stage headed stem: %w", err)
+	}
+	length, err := ffmpeg.Duration(ctx, ffmpeg.Tools{}, name)
+	if err != nil {
+		return 0, fmt.Errorf("reprise: probe user stem: %w", err)
+	}
+	return length.Seconds(), nil
+}
+
 // editInputs reads both stem blobs and probes the user stem length for one
 // transcript or editorial run. Host replies stay empty and offsets stay
 // zero, because the live pass stores no host word timings and no alignment
@@ -1878,22 +2061,39 @@ func (j *jobs) editInputs(ctx context.Context, ownerID, episodeID string) (userA
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	userAudio, err = os.ReadFile(userPath)
+	rawUser, err := os.ReadFile(userPath)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("reprise: read user stem: %w", err)
 	}
-	hostAudio, err = os.ReadFile(hostPath)
+	rawHost, err := os.ReadFile(hostPath)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("reprise: read host stem: %w", err)
 	}
-	length, err := ffmpeg.Duration(ctx, ffmpeg.Tools{}, userPath)
+	userAudio, err = headedStemAudio(ctx, j.pipe.db, ownerID, episodeID, transcript.RoleUser, rawUser)
 	if err != nil {
-		return nil, nil, 0, fmt.Errorf("reprise: probe user stem: %w", err)
+		return nil, nil, 0, err
 	}
-	if length.Seconds() <= 0 {
+	hostAudio, err = headedStemAudio(ctx, j.pipe.db, ownerID, episodeID, transcript.RoleHost, rawHost)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	var length float64
+	if isWAVDocument(rawUser) {
+		probed, err := ffmpeg.Duration(ctx, ffmpeg.Tools{}, userPath)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("reprise: probe user stem: %w", err)
+		}
+		length = probed.Seconds()
+	} else {
+		length, err = probeHeadedAudio(ctx, userAudio)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+	}
+	if length <= 0 {
 		return nil, nil, 0, fmt.Errorf("reprise: probe user stem: heard no audio")
 	}
-	return userAudio, hostAudio, length.Seconds(), nil
+	return userAudio, hostAudio, length, nil
 }
 
 // ensureTranscript starts one transcript job for a draft episode with both
