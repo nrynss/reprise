@@ -668,7 +668,7 @@ requires:   T7.25
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/, web/tests/, web/playwright.config.ts, web/src/routes/welcome/welcome.playwright.config.ts, .github/workflows/ci.yml
-status:     in-progress:review-r1:t7.27-rev-r1@a67c6af79346951ecdedb88cf9af00c3cf03c998
+status:     in-progress:remediate-r1:t7.27-rem-r1
 ```
 The record page mints a session before it opens the audio context
 or the microphone. WebKit treats that first wait as the end of the
