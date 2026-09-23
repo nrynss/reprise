@@ -637,6 +637,31 @@ That page has no way back.
 **Done when:** That probe stays on `/`, and a move that finishes
 while the guest is still on the record page still reaches processing.
 
+### T7.26: Accept a raw PCM stem upload
+```yaml
+requires:   T7.23
+fixture-ok: yes
+size:       S · mid
+owns:       cmd/reprise/main.go
+status:     not-started
+```
+A real Chrome take opened both stems as `audio/pcm`. The upload
+allowlist refused that type with `unsupported_type`. No blob was
+stored. Retry then answered `stems_not_found`, because those ids
+were never saved.
+
+* Add `audio/pcm` to the closed content type set. A type still
+  outside the set still answers `unsupported_type`.
+* The stored bytes are raw signed 16-bit mono. The sample rate is
+  the rate already stored on the stem row. The file `ffmpeg` probes
+  must carry a header built from those bytes and that rate. A raw
+  file with no header is not a WAV.
+* One open of `audio/pcm` stores. The draft move links both stems.
+  The duration probe reads the stored rate.
+
+**Done when:** A fixture take opens both stems as `audio/pcm`, the
+draft move links them, and the duration probe reports the stored rate.
+
 ---
 
 ## Exit criteria
@@ -754,6 +779,8 @@ recreated mid-take at 10:10 UTC with no crash and no OOM; cause
 unknown. Ceiling is open (zero held reservations). T6.4b holds one
 partial Chrome run; browser fields beyond the user agent string are
 still missing.
+A later Chrome take opened both stems as `audio/pcm`. The allowlist
+refused the open, so retry found no stored ids. T7.26 owns that fix.
 T7.4 is deferred, not merely waiting: owner login plus the live
 switch exercise ships as its own phase after dogfooding, not as a
 leftover row here.
