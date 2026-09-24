@@ -744,18 +744,31 @@ no stored mention to call back to, which is the beat the demo sells.
   with a plain title.
 * Each paid kind reserves budget first. A restart marks an
   interrupted paid job `interrupted` and never reruns it.
+* Split the wiring so the next three tasks can run side by side. Add
+  `cmd/reprise/privacy.go`, `cmd/reprise/seed.go` and
+  `cmd/reprise/export.go`. Each file holds two empty hooks that
+  `main.go` already calls.
+* The first hook returns the job kinds that feature registers, and
+  `main.go` merges them before the runner opens. A kind name that
+  appears twice refuses the boot.
+* The second hook mounts that feature's routes. It receives one
+  wiring struct with the mux, the spend gate, the outer rule, the
+  guest middleware, the database, the runner and the media store.
+* After this task, a feature wires itself by editing only its own
+  file. Nothing else in `cmd/reprise/` needs to change.
 
 **Done when:** A fixture episode goes from mark done to `ready`
 through the wired binary with no network. Its chapters, cover and
 commitments are stored rows. A second mark done starts no second
-chain.
+chain. The three hook files exist, `main.go` calls every hook, and
+a test proves a duplicate kind name refuses the boot.
 
 ### T7.30: Publish, erase and share reach the binary
 ```yaml
 requires:   T7.28, T7.29
 fixture-ok: yes
 size:       L · frontier
-owns:       cmd/reprise/, internal/api/routes.go, internal/privacy/, internal/retention/, web/src/routes/share/, web/src/routes/threads/threads.ts
+owns:       cmd/reprise/privacy.go, internal/api/routes.go, internal/privacy/, internal/retention/, web/src/routes/share/, web/src/routes/threads/threads.ts
 status:     not-started
 ```
 The binary never imports `internal/privacy` or `internal/retention`.
@@ -781,10 +794,10 @@ removes a guest past the window in a fixture run.
 
 ### T7.31: New guests receive the seeded season
 ```yaml
-requires:   T7.30
+requires:   T7.29
 fixture-ok: yes
 size:       M · mid
-owns:       cmd/reprise/, internal/seed/, web/src/routes/welcome/
+owns:       cmd/reprise/seed.go, internal/seed/, web/src/routes/welcome/
 status:     not-started
 ```
 The binary never imports `internal/seed`. Nothing syncs `data/season/`
@@ -804,10 +817,10 @@ the host's opening. An empty catalog still renders the record button.
 
 ### T7.32: Export reaches the binary
 ```yaml
-requires:   T7.31
+requires:   T7.28, T7.29, T7.30
 fixture-ok: yes
 size:       M · mid
-owns:       cmd/reprise/, internal/export/, web/src/routes/episode/, web/src/routes/threads/threads.ts
+owns:       cmd/reprise/export.go, internal/export/, web/src/routes/episode/, web/src/routes/threads/threads.ts
 status:     not-started
 ```
 The binary never imports `internal/export`. No route serves an export
