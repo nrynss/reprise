@@ -10,7 +10,7 @@
 		"check": "svelte-check --tsconfig ./tsconfig.json",
 		"lint": "eslint .",
 		"test": "vitest run",
-		"test:e2e": "playwright test"
+		"test:e2e": "playwright test && playwright test -c src/lib/voice/mock.playwright.config.ts && playwright test -c src/routes/record/mock.playwright.config.ts && playwright test -c \"src/routes/episode/[id]/edit/edit.playwright.config.ts\" && playwright test -c src/routes/gallery.playwright.config.ts && playwright test -c src/routes/share/share.playwright.config.ts && playwright test -c src/routes/threads/threads.playwright.config.ts && playwright test -c src/routes/welcome/welcome.playwright.config.ts"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.0",
