@@ -57,15 +57,16 @@ describe('render clock', () => {
 		const snaps: Screen[] = [];
 		const controller = await mounted(snaps);
 		const snap = snaps.at(-1);
-		// The render removed one second, so it runs two seconds and "Two"
-		// starts at one second in the file the player loaded.
-		expect(snap?.duration).toBe(2);
+		// The render removed one second and overlapped the join by a ten
+		// millisecond crossfade. So it runs 1.99 s, and "Two" starts at
+		// 0.99 s in the file the player loaded.
+		expect(snap?.duration).toBe(1.99);
 		expect(snap?.words.map((word) => [word.text, word.start])).toEqual([
 			['One', 0],
-			['Two', 1]
+			['Two', 0.99]
 		]);
 		controller.seekWord(1);
-		expect(snaps.at(-1)?.position).toBe(1);
+		expect(snaps.at(-1)?.position).toBe(0.99);
 		controller.destroy();
 	});
 
@@ -136,9 +137,11 @@ describe('render clock words', () => {
 			]
 		});
 		// The one second opening and the gap push the episode 1.75 s later.
+		// The gap overlaps each side by a ten millisecond crossfade, which
+		// takes 20 ms back. The cut's own join takes 10 ms more from "Two".
 		expect(placed.map((word) => [word.text, word.start])).toEqual([
-			['One', 1.75],
-			['Two', 2.75]
+			['One', 1.73],
+			['Two', 2.72]
 		]);
 	});
 
@@ -149,5 +152,45 @@ describe('render clock words', () => {
 			proposals: [proposal({ id: 'cold', kind: 'cold_open', startWord: 2, endWord: 2, decision: 'reverted' })]
 		});
 		expect(placed[0]?.start).toBe(0);
+	});
+
+	it('places a word after two joins where the rendered file plays it', () => {
+		// The render measured a moment 4.5 s into this take at 2.48 s. Two
+		// cuts took two seconds out and each join overlapped by 10 ms. So
+		// the word at 4 s starts at 1.98 s.
+		const placed = renderClockWords({
+			words: [
+				{ text: 'a', start: 0, end: 1 },
+				{ text: 'b', start: 1, end: 2 },
+				{ text: 'c', start: 2, end: 3 },
+				{ text: 'd', start: 3, end: 4 },
+				{ text: 'e', start: 4, end: 5 }
+			],
+			renderWords: [],
+			proposals: [proposal({ id: 'cut-b', startWord: 1, endWord: 1 }), proposal({ id: 'cut-d', startWord: 3, endWord: 3 })]
+		});
+		expect(placed.map((word) => [word.text, word.start])).toEqual([
+			['a', 0],
+			['c', 0.99],
+			['e', 1.98]
+		]);
+	});
+
+	it('butts a join together when one side is shorter than the fade', () => {
+		// The render fades a join only when both sides last 10 ms. The
+		// five millisecond word leaves a join with no fade after it.
+		const placed = renderClockWords({
+			words: [
+				{ text: 'blip', start: 0, end: 0.005 },
+				{ text: 'um', start: 0.005, end: 1 },
+				{ text: 'Two', start: 1, end: 2 }
+			],
+			renderWords: [],
+			proposals: [proposal({ id: 'cut-um', startWord: 1, endWord: 1 })]
+		});
+		expect(placed.map((word) => [word.text, word.start])).toEqual([
+			['blip', 0],
+			['Two', 0.005]
+		]);
 	});
 });

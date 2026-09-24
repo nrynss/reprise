@@ -1704,16 +1704,58 @@ export interface LiveDetail {
 	editorialOutcome: LiveOutcome | null;
 }
 
-// The silence the render lays between the cold open and the episode.
-const COLD_OPEN_GAP_SECONDS = 0.75;
+// The silence the render lays between the cold open and the episode, and
+// the crossfade it lays at each join, in milliseconds.
+const COLD_OPEN_GAP_MS = 750;
+const CROSSFADE_MS = 10;
+
+// One span of the take in whole milliseconds.
+interface SpanMs {
+	start: number;
+	end: number;
+}
+
+// The crossfade at one join. The render fades only when both sides last
+// at least the fade, and otherwise butts them together.
+function joinFadeMs(leftMs: number, rightMs: number): number {
+	return leftMs >= CROSSFADE_MS && rightMs >= CROSSFADE_MS ? CROSSFADE_MS : 0;
+}
+
+// The spans a set of cuts leaves, as the render keeps them. Cuts merge
+// first when they touch. The take runs on past its last word, so the
+// final span stays open.
+function keptSpans(cuts: SpanMs[]): SpanMs[] {
+	const sorted = [...cuts].sort((a, b) => a.start - b.start || a.end - b.end);
+	const kept: SpanMs[] = [];
+	let cursor = 0;
+	for (const cut of sorted) {
+		if (cut.end <= cursor) continue;
+		if (cut.start > cursor) kept.push({ start: cursor, end: cut.start });
+		cursor = Math.max(cursor, cut.end);
+	}
+	kept.push({ start: cursor, end: Number.POSITIVE_INFINITY });
+	return kept;
+}
+
+// The render-clock length of spans joined in order, less each crossfade.
+function joinedLengthMs(spans: SpanMs[]): number {
+	let total = 0;
+	spans.forEach((span, index) => {
+		total += span.end - span.start;
+		const prior = spans[index - 1];
+		if (prior) total -= joinFadeMs(prior.end - prior.start, span.end - span.start);
+	});
+	return total;
+}
 
 // The words that follow the rendered file, on its clock. Words analysis
 // transcribed from the render win whenever they exist. Otherwise the edit
 // words move the way the render moved them. An accepted cut removes its
-// words and pulls every later word earlier. An applied cold open plays
-// first, then a short gap, then the episode. The opening repeats words
-// the list already holds, so no word lights while it plays. Each join also
-// overlaps by a ten millisecond crossfade, which this leaves out.
+// words and pulls every later word earlier. Each join then overlaps its
+// sides by a ten millisecond crossfade, which pulls later words earlier
+// again. An applied cold open plays first, then a short gap, then the
+// episode. The gap overlaps each side by the same fade. The opening
+// repeats words the list already holds, so no word lights while it plays.
 export function renderClockWords(
 	detail: Pick<LiveDetail, 'words' | 'proposals' | 'renderWords'>
 ): LiveWord[] {
@@ -1732,25 +1774,55 @@ export function renderClockWords(
 			last.end > first.start
 		);
 	};
-	const cuts: Parameters<typeof toEditedTime>[1] = detail.proposals
-		.filter((proposal) => proposal.kind === 'cut' && proposal.decision === 'accepted' && spans(proposal))
-		.map((proposal) => ({
-			id: proposal.id,
-			range: { start: proposal.startWord, end: proposal.endWord },
-			reason: proposal.reason
-		}));
-	const edited = (seconds: number): number => toEditedTime(words, cuts, seconds);
+	const ms = (seconds: number): number => Math.round(seconds * 1000);
+	const spanOf = (proposal: LiveProposal): SpanMs => ({
+		start: ms(words[proposal.startWord]?.start ?? 0),
+		end: ms(words[proposal.endWord]?.end ?? 0)
+	});
+	const accepted = detail.proposals.filter(
+		(proposal) => proposal.kind === 'cut' && proposal.decision === 'accepted' && spans(proposal)
+	);
+	const cuts: Parameters<typeof toEditedTime>[1] = accepted.map((proposal) => ({
+		id: proposal.id,
+		range: { start: proposal.startWord, end: proposal.endWord },
+		reason: proposal.reason
+	}));
+	const kept = keptSpans(accepted.map(spanOf));
+	// The fades a moment on the take clock sits behind, one per join
+	// before the span that holds it.
+	const fadesBefore = (atMs: number): number => {
+		let total = 0;
+		for (let index = 1; index < kept.length; index += 1) {
+			const span = kept[index] as SpanMs;
+			const prior = kept[index - 1] as SpanMs;
+			if (span.start > atMs) break;
+			total += joinFadeMs(prior.end - prior.start, span.end - span.start);
+		}
+		return total;
+	};
+	let leadMs = 0;
 	const cold = detail.proposals.filter((proposal) => proposal.kind === 'cold_open').at(-1);
-	let lead = 0;
 	if (cold && cold.decision !== 'reverted' && spans(cold)) {
-		const kept =
-			edited(words[cold.endWord]?.end ?? 0) - edited(words[cold.startWord]?.start ?? 0);
-		if (kept > 0) lead = kept + COLD_OPEN_GAP_SECONDS;
+		const span = spanOf(cold);
+		const opening = kept
+			.map((keep) => ({ start: Math.max(span.start, keep.start), end: Math.min(span.end, keep.end) }))
+			.filter((piece) => piece.end > piece.start);
+		if (opening.length > 0) {
+			const openingMs = joinedLengthMs(opening);
+			const episodeMs = joinedLengthMs(kept);
+			leadMs =
+				openingMs +
+				COLD_OPEN_GAP_MS -
+				joinFadeMs(openingMs, COLD_OPEN_GAP_MS) -
+				joinFadeMs(COLD_OPEN_GAP_MS, episodeMs);
+		}
 	}
+	const at = (seconds: number): number =>
+		(ms(toEditedTime(words, cuts, seconds)) - fadesBefore(ms(seconds)) + leadMs) / 1000;
 	const placed: LiveWord[] = [];
 	words.forEach((word, index) => {
 		if (cuts.some((cut) => index >= cut.range.start && index <= cut.range.end)) return;
-		placed.push({ text: word.text, start: edited(word.start) + lead, end: edited(word.end) + lead });
+		placed.push({ text: word.text, start: at(word.start), end: at(word.end) });
 	});
 	return placed;
 }
