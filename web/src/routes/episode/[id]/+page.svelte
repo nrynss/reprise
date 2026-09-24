@@ -90,6 +90,9 @@
 				<p role="status" aria-label="Playback position">
 					{formatClock(snap.position)} of {formatClock(snap.duration)}
 				</p>
+				{#if snap.live && snap.words.length === 0}
+					<p>No stored words sit on this render yet, so no transcript follows playback.</p>
+				{/if}
 			</section>
 		{:else if snap.live}
 			<section aria-label="Episode playback">

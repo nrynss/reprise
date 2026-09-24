@@ -5,7 +5,7 @@
 // that offset when a thread link opens.
 import { AudioPlayer } from '@nrynss/chaaya/audio';
 import { isTerminalStatus, JobStream, type JobSnapshot, type JobStatus } from '@nrynss/chaaya/job';
-import { activeWordAt } from '@nrynss/chaaya/transcript';
+import { activeWordAt, toEditedTime } from '@nrynss/chaaya/transcript';
 
 export type EpisodeState = 'ready' | 'rendering' | 'draft';
 
@@ -1194,6 +1194,7 @@ export class EpisodeController {
 	private readonly onChange: (snap: EpisodeScreen) => void;
 	private player: AudioPlayer | null = null;
 	private ticker: number | null = null;
+	private durationTimer: number | null = null;
 	private search = '';
 
 	constructor(episodeId: string, onChange: (snap: EpisodeScreen) => void) {
@@ -1229,6 +1230,7 @@ export class EpisodeController {
 			window.clearInterval(this.ticker);
 			this.ticker = null;
 		}
+		this.stopDurationWatch();
 		this.player?.pause();
 		this.player = null;
 	}
@@ -1412,9 +1414,13 @@ export class EpisodeController {
 				: momentQuote === null
 					? `Quoted moment at word ${momentWord}. No stored quote names it.`
 					: `Quoted moment at word ${momentWord}. “${momentQuote}”`;
+		// The player loads the render, so the words and the scrubber sit on
+		// the render clock. The last placed word gives a first length, and
+		// the audio element replaces it once it reads the file.
 		const renderUrl = detail.renderAudioUrl;
-		const last = detail.words.length > 0 ? detail.words[detail.words.length - 1] : undefined;
-		const duration = renderUrl ? (last?.end ?? null) : null;
+		const words = renderUrl ? renderClockWords(detail) : detail.words;
+		const duration = renderUrl ? (words.at(-1)?.end ?? 0) : null;
+		this.stopDurationWatch();
 		this.player?.pause();
 		this.player = null;
 		if (renderUrl) {
@@ -1433,7 +1439,7 @@ export class EpisodeController {
 			visibility: detail.episode.visibility,
 			audioUrl: renderUrl,
 			duration,
-			words: detail.words.map((word) => ({
+			words: words.map((word) => ({
 				start: word.start,
 				end: word.end,
 				text: word.text,
@@ -1449,6 +1455,34 @@ export class EpisodeController {
 		};
 		this.emit();
 		this.expose(momentWord);
+		if (renderUrl) this.watchDuration();
+	}
+
+	// Poll the element until it knows the length of the loaded file. A
+	// failed load stops the poll, and the placed words keep the length.
+	private watchDuration(): void {
+		this.stopDurationWatch();
+		this.durationTimer = window.setInterval(() => {
+			if (!this.player || this.player.error || this.syncDuration()) this.stopDurationWatch();
+		}, 250);
+	}
+
+	private stopDurationWatch(): void {
+		if (this.durationTimer === null) return;
+		window.clearInterval(this.durationTimer);
+		this.durationTimer = null;
+	}
+
+	// Copy the element length onto the screen once it is known. Returns
+	// true when the length is known.
+	private syncDuration(): boolean {
+		const length = this.player?.duration ?? 0;
+		if (!Number.isFinite(length) || length <= 0) return false;
+		if (this.snap.duration !== length) {
+			this.snap = { ...this.snap, duration: length };
+			this.emit();
+		}
+		return true;
 	}
 
 	private expose(quote: number | null): void {
@@ -1539,6 +1573,8 @@ export interface LiveWord {
 }
 
 // One episode with its proposals, edit words, and playable addresses.
+// Render words come from the rendered file itself, and stay empty until
+// analysis stores them.
 export interface LiveDetail {
 	episode: LiveEpisode;
 	proposals: LiveProposal[];
@@ -1546,6 +1582,58 @@ export interface LiveDetail {
 	words: LiveWord[];
 	audioUrl: string;
 	renderAudioUrl: string;
+	renderWords: LiveWord[];
+}
+
+// The silence the render lays between the cold open and the episode.
+const COLD_OPEN_GAP_SECONDS = 0.75;
+
+// The words that follow the rendered file, on its clock. Words analysis
+// transcribed from the render win whenever they exist. Otherwise the edit
+// words move the way the render moved them. An accepted cut removes its
+// words and pulls every later word earlier. An applied cold open plays
+// first, then a short gap, then the episode. The opening repeats words
+// the list already holds, so no word lights while it plays. Each join also
+// overlaps by a ten millisecond crossfade, which this leaves out.
+export function renderClockWords(
+	detail: Pick<LiveDetail, 'words' | 'proposals' | 'renderWords'>
+): LiveWord[] {
+	if (detail.renderWords.length > 0) return detail.renderWords.map((word) => ({ ...word }));
+	const words = detail.words;
+	// The render drops a range that runs backwards, past the words, or
+	// over no time at all, so this drops it too.
+	const spans = (proposal: LiveProposal): boolean => {
+		const first = words[proposal.startWord];
+		const last = words[proposal.endWord];
+		return (
+			proposal.startWord >= 0 &&
+			proposal.endWord >= proposal.startWord &&
+			first !== undefined &&
+			last !== undefined &&
+			last.end > first.start
+		);
+	};
+	const cuts: Parameters<typeof toEditedTime>[1] = detail.proposals
+		.filter((proposal) => proposal.kind === 'cut' && proposal.decision === 'accepted' && spans(proposal))
+		.map((proposal) => ({
+			id: proposal.id,
+			range: { start: proposal.startWord, end: proposal.endWord },
+			reason: proposal.reason
+		}));
+	const edited = (seconds: number): number => toEditedTime(words, cuts, seconds);
+	const cold = detail.proposals.filter((proposal) => proposal.kind === 'cold_open').at(-1);
+	let lead = 0;
+	if (cold && cold.decision !== 'reverted' && spans(cold)) {
+		const kept =
+			edited(words[cold.endWord]?.end ?? 0) - edited(words[cold.startWord]?.start ?? 0);
+		if (kept > 0) lead = kept + COLD_OPEN_GAP_SECONDS;
+	}
+	const placed: LiveWord[] = [];
+	words.forEach((word, index) => {
+		if (cuts.some((cut) => index >= cut.range.start && index <= cut.range.end)) return;
+		placed.push({ text: word.text, start: edited(word.start) + lead, end: edited(word.end) + lead });
+	});
+	return placed;
 }
 
 // The editor link for a live draft, or null for every other episode.
@@ -1709,13 +1797,20 @@ export function parseEpisodeDetail(raw: string): LiveDetail {
 		const word = parseLiveWord(value);
 		if (word) words.push(word);
 	}
+	const rawRendered = Array.isArray(decoded['render_words']) ? (decoded['render_words'] as unknown[]) : [];
+	const renderWords: LiveWord[] = [];
+	for (const value of rawRendered) {
+		const word = parseLiveWord(value);
+		if (word) renderWords.push(word);
+	}
 	return {
 		episode,
 		proposals,
 		outcome: parseLiveOutcome(decoded['transcript_outcome']),
 		words,
 		audioUrl: textField(decoded, 'audio_url'),
-		renderAudioUrl: textField(decoded, 'render_audio_url')
+		renderAudioUrl: textField(decoded, 'render_audio_url'),
+		renderWords
 	};
 }
 

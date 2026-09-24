@@ -92,3 +92,42 @@ func TestPlaybackReadsStoredRows(t *testing.T) {
 		t.Fatalf("empty owner error = %v, want ErrInvalid", err)
 	}
 }
+
+// TestRenderedWordsReadTheRenderClock requires the rendered source alone,
+// in start order with times in seconds, and ErrNotFound for a foreign
+// owner. An episode with no rendered words returns an empty slice.
+func TestRenderedWordsReadTheRenderClock(t *testing.T) {
+	t.Parallel()
+	db := openDatabase(t)
+	plantEpisode(t, db, "ep-1", 1, episode.StateReady)
+	plantEpisode(t, db, "ep-2", 2, episode.StateDraft)
+	if _, err := db.Writer().ExecContext(t.Context(),
+		`INSERT INTO words (id, owner_id, episode_id, text, start_ms, end_ms, source) VALUES
+		 ('word-edit', 'owner-1', 'ep-1', 'Raw', 0, 500, 'edit'),
+		 ('word-late', 'owner-1', 'ep-1', 'Two', 1000, 1600, 'rendered'),
+		 ('word-early', 'owner-1', 'ep-1', 'One', 0, 900, 'rendered')`); err != nil {
+		t.Fatalf("seed words: %v", err)
+	}
+	svc, err := episode.NewService(episode.Config{DB: db})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	words, err := svc.RenderedWords(t.Context(), "owner-1", "ep-1")
+	if err != nil {
+		t.Fatalf("rendered words: %v", err)
+	}
+	if len(words) != 2 || words[0].Text != "One" || words[1].Text != "Two" ||
+		math.Abs(words[1].Start-1) > 0.000001 || math.Abs(words[1].End-1.6) > 0.000001 {
+		t.Fatalf("words = %+v, want One then Two in seconds", words)
+	}
+	none, err := svc.RenderedWords(t.Context(), "owner-1", "ep-2")
+	if err != nil {
+		t.Fatalf("empty rendered words: %v", err)
+	}
+	if none == nil || len(none) != 0 {
+		t.Fatalf("words = %+v, want an empty slice", none)
+	}
+	if _, err := svc.RenderedWords(t.Context(), "owner-2", "ep-1"); !errors.Is(err, episode.ErrNotFound) {
+		t.Fatalf("foreign words error = %v, want ErrNotFound", err)
+	}
+}

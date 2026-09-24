@@ -52,7 +52,8 @@ func secondsNear(got, want float64) bool {
 // stems, and two renders, and requires the detail to return word
 // seconds, the user stem address, and the newest render address. A
 // second episode with only a host stem and no render omits the render
-// address and serves the host stem.
+// address and serves the host stem. Rendered words ride beside the
+// render they came from, and never beside an episode with no render.
 func TestEpisodeDetailServesWordsStemAndRender(t *testing.T) {
 	t.Parallel()
 	db, guests := openDiary(t)
@@ -69,6 +70,7 @@ func TestEpisodeDetailServesWordsStemAndRender(t *testing.T) {
 
 	seedEpisodeRow(t, db, "ep-2", owner.ID, 2, "ready")
 	seedStemRow(t, db, "stem-host-only", owner.ID, "ep-2", "host-only", "host")
+	seedWordRow(t, db, "word-stale", owner.ID, "ep-2", "Stale", "rendered", 0, 300)
 
 	handler := NewEpisodes(newEpisodeService(t, db, nil).svc)
 	detail := func(id string) episodeDetailJSON {
@@ -103,6 +105,10 @@ func TestEpisodeDetailServesWordsStemAndRender(t *testing.T) {
 	if got.RenderAudioURL != "/media/opus-new" {
 		t.Fatalf("render address = %q, want the newest render", got.RenderAudioURL)
 	}
+	if len(got.RenderWords) != 1 || got.RenderWords[0].Text != "Nope" ||
+		!secondsNear(got.RenderWords[0].Start, 0.1) || !secondsNear(got.RenderWords[0].End, 0.2) {
+		t.Fatalf("render words = %+v, want Nope from 0.1 to 0.2", got.RenderWords)
+	}
 
 	bare := detail("ep-2")
 	if len(bare.Words) != 0 {
@@ -113,5 +119,8 @@ func TestEpisodeDetailServesWordsStemAndRender(t *testing.T) {
 	}
 	if bare.RenderAudioURL != "" {
 		t.Fatalf("render address = %q, want empty", bare.RenderAudioURL)
+	}
+	if bare.RenderWords == nil || len(bare.RenderWords) != 0 {
+		t.Fatalf("render words = %+v, want an empty list with no render", bare.RenderWords)
 	}
 }

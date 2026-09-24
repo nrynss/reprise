@@ -31,6 +31,9 @@ type episodeStore interface {
 	// EditWords returns edit-source words for an episode the owner holds,
 	// oldest first, with times in seconds.
 	EditWords(ctx context.Context, ownerID, episodeID string) ([]episode.EditWord, error)
+	// RenderedWords returns words transcribed from the rendered file for
+	// an episode the owner holds, oldest first, with times in seconds.
+	RenderedWords(ctx context.Context, ownerID, episodeID string) ([]episode.EditWord, error)
 	// StemMediaID returns the user stem media id, or the host stem when
 	// no user stem is stored, or empty when neither is stored.
 	StemMediaID(ctx context.Context, ownerID, episodeID string) (string, error)
@@ -111,7 +114,8 @@ type wordJSON struct {
 
 // episodeDetailJSON carries one episode with its proposals, edit words,
 // and playable addresses. The editor reads the words and the stem
-// address. The episode view plays the render address when one exists.
+// address. The episode view plays the render address when one exists,
+// and follows it with the rendered words.
 // The transcript outcome rides beside them, so the detail agrees with
 // the completion answer on what the last pass did.
 type episodeDetailJSON struct {
@@ -130,6 +134,10 @@ type episodeDetailJSON struct {
 	// RenderAudioURL is /media/{id} for the newest render, or empty
 	// when no render exists.
 	RenderAudioURL string `json:"render_audio_url"`
+	// RenderWords holds the words analysis transcribed from the render,
+	// oldest first, on the render clock. It stays empty until analysis
+	// stores them, and always while no render exists.
+	RenderWords []wordJSON `json:"render_words"`
 }
 
 // transcriptOutcomeJSON carries one pass outcome on the wire. Error stays
@@ -260,16 +268,21 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the render could not be read", nil)
 		return
 	}
-	words := make([]wordJSON, 0, len(stored))
-	for _, word := range stored {
-		words = append(words, wordJSON{Text: word.Text, Start: word.Start, End: word.End})
+	var rendered []episode.EditWord
+	if renderID != "" {
+		rendered, err = h.store.RenderedWords(r.Context(), owner, episodeID)
+		if err != nil {
+			_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the rendered words could not be read", nil)
+			return
+		}
 	}
 	detail := episodeDetailJSON{
 		Episode:        episodeOf(ep),
 		Proposals:      out,
-		Words:          words,
+		Words:          wordsOf(stored),
 		AudioURL:       mediaPath(stemID),
 		RenderAudioURL: mediaPath(renderID),
+		RenderWords:    wordsOf(rendered),
 	}
 	if outcome.Found {
 		detail.TranscriptOutcome = &transcriptOutcomeJSON{
@@ -279,6 +292,16 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// wordsOf converts stored words to their wire shape. It never returns
+// nil, so the body always carries a list.
+func wordsOf(stored []episode.EditWord) []wordJSON {
+	out := make([]wordJSON, 0, len(stored))
+	for _, word := range stored {
+		out = append(out, wordJSON{Text: word.Text, Start: word.Start, End: word.End})
+	}
+	return out
 }
 
 // mediaPath is the owner media route for one blob, or empty when no

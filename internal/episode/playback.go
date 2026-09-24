@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/nrynss/reprise/internal/analysis"
 	"github.com/nrynss/reprise/internal/transcript"
 )
 
-// EditWord is one edit-source word on the episode clock. Start and End
-// are seconds, converted from the stored milliseconds.
+// EditWord is one stored word. Edit words sit on the episode clock and
+// rendered words sit on the render clock. Start and End are seconds,
+// converted from the stored milliseconds.
 type EditWord struct {
 	// Text is the word as stored.
 	Text string
@@ -25,8 +27,22 @@ type EditWord struct {
 // their places. Unknown and foreign episodes report ErrNotFound. An
 // episode with no edit words returns an empty slice.
 func (s *Service) EditWords(ctx context.Context, ownerID, episodeID string) ([]EditWord, error) {
+	return s.storedWords(ctx, ownerID, episodeID, transcript.SourceEdit)
+}
+
+// RenderedWords returns the words analysis transcribed from the rendered
+// file, oldest start first, on the render clock. The player loads that
+// file, so these words follow it with no cut arithmetic. An episode whose
+// analysis stored no words returns an empty slice. Unknown and foreign
+// episodes report ErrNotFound.
+func (s *Service) RenderedWords(ctx context.Context, ownerID, episodeID string) ([]EditWord, error) {
+	return s.storedWords(ctx, ownerID, episodeID, analysis.SourceRendered)
+}
+
+// storedWords reads one word source for an episode the owner holds.
+func (s *Service) storedWords(ctx context.Context, ownerID, episodeID, source string) ([]EditWord, error) {
 	if s == nil || s.db == nil || ownerID == "" || episodeID == "" {
-		return nil, fmt.Errorf("episode: edit words %q: %w", episodeID, ErrInvalid)
+		return nil, fmt.Errorf("episode: %s words %q: %w", source, episodeID, ErrInvalid)
 	}
 	if _, err := s.Get(ctx, ownerID, episodeID); err != nil {
 		return nil, err
@@ -35,9 +51,9 @@ func (s *Service) EditWords(ctx context.Context, ownerID, episodeID string) ([]E
 		`SELECT text, start_ms, end_ms FROM words
 		 WHERE episode_id = ? AND owner_id = ? AND source = ?
 		 ORDER BY start_ms ASC, rowid ASC`,
-		episodeID, ownerID, transcript.SourceEdit)
+		episodeID, ownerID, source)
 	if err != nil {
-		return nil, fmt.Errorf("episode: edit words %q: %w", episodeID, err)
+		return nil, fmt.Errorf("episode: %s words %q: %w", source, episodeID, err)
 	}
 	defer rows.Close()
 	out := make([]EditWord, 0)
@@ -45,14 +61,14 @@ func (s *Service) EditWords(ctx context.Context, ownerID, episodeID string) ([]E
 		var word EditWord
 		var startMs, endMs int64
 		if err := rows.Scan(&word.Text, &startMs, &endMs); err != nil {
-			return nil, fmt.Errorf("episode: edit words %q: %w", episodeID, err)
+			return nil, fmt.Errorf("episode: %s words %q: %w", source, episodeID, err)
 		}
 		word.Start = float64(startMs) / 1000
 		word.End = float64(endMs) / 1000
 		out = append(out, word)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("episode: edit words %q: %w", episodeID, err)
+		return nil, fmt.Errorf("episode: %s words %q: %w", source, episodeID, err)
 	}
 	return out, nil
 }
