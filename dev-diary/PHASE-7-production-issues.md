@@ -692,6 +692,35 @@ proof has never run on a machine that can launch WebKit.
 **Done when:** The WebKit and Chromium start proofs pass, and a
 mock take still reaches the gallery and processing as it does today.
 
+### T7.28: A live draft can be heard
+```yaml
+requires:   T7.26, T7.1
+fixture-ok: yes
+size:       M · mid
+owns:       web/src/routes/+page.svelte, web/src/routes/episode/, web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts, internal/api/episodes.go
+status:     not-started
+```
+A real take reached draft. The transcript pass is done and the
+proposals are stored. The gallery opens that card on the episode
+detail. The detail leaves the audio address empty for every live
+episode, and it has no link to the editor. The editor is where a
+draft is heard, and the gallery opens it only for a fixture draft.
+Opening the editor by hand reads words and an audio address the
+detail endpoint does not send, then shows a scripted sample.
+
+* A live draft card opens the editor. The detail of a draft links
+  there too.
+* The detail endpoint returns the stored words and a playable
+  address for the stored stems. The editor plays that audio and
+  shows those words.
+* Once a render exists, the detail page plays that rendered file.
+  A draft with no render still says playback waits, and it still
+  offers the editor.
+
+**Done when:** A fixture draft with stored words and stems plays
+in the editor from the gallery, and a detail whose render exists
+plays that file.
+
 ---
 
 ## Exit criteria
