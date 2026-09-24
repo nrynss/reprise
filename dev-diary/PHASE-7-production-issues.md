@@ -727,7 +727,7 @@ requires:   T7.26, T7.28
 fixture-ok: yes
 size:       L · frontier
 owns:       cmd/reprise/, internal/episode/, internal/analysis/, internal/api/episodes.go, web/src/routes/threads/threads.ts
-status:     in-progress:implement:t7.29-impl
+status:     in-progress:review-r1:t7.29-rev-r1@9892c64652e75b629366afac456726dd050129d9
 ```
 Mark done starts the render job and nothing after it. No caller
 runs `MarkRendered` or `MarkReady`. `analysisFunc`, `coverFunc` and
@@ -794,6 +794,9 @@ after the 90 day window.
   show their real outcome.
 * Register the erasure and retention sweep kinds, and run the sweep on
   a schedule.
+* `internal/api/routes.go` registers stubs on the publish and erase
+  patterns. Mounting them again from the privacy hook panics, so drop
+  those stubs when the real routes land.
 
 **Done when:** A `curl` with no cookie reads a published episode
 through its share token and gets 404 after revoke. An erased episode
@@ -818,6 +821,8 @@ seeded from the query string.
 * Copy the catalog to each new guest once, on the first season read.
   The owner gets no copy.
 * The welcome page reads the real catalog state and teaser episode.
+* A seeded copy that adds a render row also adds its render link row,
+  or the detail never sends that episode's rendered words.
 
 **Done when:** A fixture catalog of one episode appears in a new
 guest's gallery once, carries the seeded flag, and its mention feeds
@@ -860,6 +865,24 @@ test:e2e` reads only `web/tests/`, so the gate never runs them.
 
 **Done when:** Breaking the gallery page makes `./tools/check.sh`
 fail, and a fresh worktree passes the gate three times in a row.
+
+### T7.34: The gate passes the editor draft
+```yaml
+requires:   T7.28
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/lib/editor/draft.ts
+status:     in-progress:implement:t7.34-impl
+```
+The svelte 4 leakage scan in `tools/check.sh` matches `get(`, and
+`draft.ts` calls `Map.get` in `proposalIdForCut`. CI fails on
+`main` at that scan, so nothing deploys.
+
+* Read the cut proposal without a call the scan reads as a store
+  `get`. Behaviour stays the same.
+
+**Done when:** `git grep` with the scan's own pattern finds nothing
+under `web/src`, and the editor tests still pass.
 
 ---
 
