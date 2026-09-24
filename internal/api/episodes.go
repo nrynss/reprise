@@ -23,7 +23,8 @@ type episodeStore interface {
 	// Decide appends one decision row on a proposal the owner holds.
 	Decide(ctx context.Context, ownerID, episodeID, proposalID, decision string) error
 	// RequestRender moves a draft episode to rendering and starts its
-	// render job, returning the job id.
+	// render job, returning the job id. An empty id with no error means
+	// the render waits for the render slot.
 	RequestRender(ctx context.Context, ownerID, episodeID string) (string, error)
 	// TranscriptOutcome returns the latest transcript pass outcome for
 	// an episode the owner holds.
@@ -193,12 +194,17 @@ type decisionJSON struct {
 	Decision string `json:"decision"`
 }
 
-// doneJSON answers a mark done with the started render job.
+// doneJSON answers a mark done with the started render job, or with a
+// render that waits for the render slot.
 type doneJSON struct {
 	// EpisodeID identifies the rendering episode.
 	EpisodeID string `json:"episode_id"`
-	// JobID identifies the render job the gallery follows.
+	// JobID identifies the render job the gallery follows. It stays empty
+	// while the render waits.
 	JobID string `json:"job_id"`
+	// Queued says the render waits for another render to finish. The
+	// server starts it then, with no further request.
+	Queued bool `json:"queued"`
 	// State is the new lifecycle state.
 	State string `json:"state"`
 }
@@ -409,6 +415,8 @@ func (h *Episodes) decide(w http.ResponseWriter, r *http.Request) {
 // done answers POST /api/episodes/{id}/done by moving a draft episode to
 // rendering and starting its render job. Nothing else moves an episode,
 // and a repeat tap reports the illegal move instead of starting again.
+// When another render holds the slot, the episode waits in rendering and
+// the answer says the render is queued.
 func (h *Episodes) done(w http.ResponseWriter, r *http.Request) {
 	owner, ok := ownerOf(w, r)
 	if !ok {
@@ -432,7 +440,7 @@ func (h *Episodes) done(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, job.ErrLimit) {
-		_ = wire.WriteError(w, http.StatusTooManyRequests, CodeRenderBusy, "the render queue is full, retry this episode", nil)
+		_ = wire.WriteError(w, http.StatusTooManyRequests, CodeRenderBusy, "the render queue was full, so the episode failed", nil)
 		return
 	}
 	if errors.Is(err, episode.ErrStart) {
@@ -443,5 +451,10 @@ func (h *Episodes) done(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the render job could not start", nil)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, doneJSON{EpisodeID: episodeID, JobID: jobID, State: string(episode.StateRendering)})
+	writeJSON(w, http.StatusAccepted, doneJSON{
+		EpisodeID: episodeID,
+		JobID:     jobID,
+		Queued:    jobID == "",
+		State:     string(episode.StateRendering),
+	})
 }

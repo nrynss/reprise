@@ -746,6 +746,8 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 // episodeConfig wires the episode service over the scheduler. Mark done
 // starts the chained render through it, stamped with its episode, and the
 // detail reads every pass back under the kind names the scheduler starts.
+// A mark done that meets a busy render slot leaves its episode waiting in
+// rendering, because the advance starts every such render in turn.
 func episodeConfig(db *sqlite.DB, j *jobs) episode.Config {
 	return episode.Config{
 		DB:             db,
@@ -753,6 +755,7 @@ func episodeConfig(db *sqlite.DB, j *jobs) episode.Config {
 		RenderKind:     kindRender,
 		Render:         renderChain{jobs: j},
 		TranscriptKind: kindEditTranscript,
+		WaitWhenBusy:   true,
 	}
 }
 

@@ -3,6 +3,7 @@ package episode_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/nrynss/keel/job"
@@ -253,6 +254,55 @@ func TestRequestRenderFailsEpisodeWhenJobNeverStarts(t *testing.T) {
 	}
 	if got := stateOf(t, db, "ep-1"); got != episode.StateFailed {
 		t.Fatalf("state = %s, want failed", got)
+	}
+}
+
+// TestRequestRenderWaitsWhenTheRenderSlotIsBusy requires a busy render
+// slot to leave the episode rendering with no job when the service waits,
+// and to fail it when the service does not. A repeat tap on the waiting
+// episode starts nothing.
+func TestRequestRenderWaitsWhenTheRenderSlotIsBusy(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		wait  bool
+		state episode.State
+	}{
+		{"waits", true, episode.StateRendering},
+		{"fails", false, episode.StateFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := openDatabase(t)
+			plantEpisode(t, db, "ep-1", 1, episode.StateDraft)
+			starter := &fakeStarter{err: fmt.Errorf("render kind full: %w", job.ErrLimit)}
+			svc, err := episode.NewService(episode.Config{
+				DB:           db,
+				Starter:      starter,
+				RenderKind:   "render",
+				Render:       fakeRender{},
+				WaitWhenBusy: tc.wait,
+			})
+			if err != nil {
+				t.Fatalf("new service: %v", err)
+			}
+			jobID, err := svc.RequestRender(t.Context(), "owner-1", "ep-1")
+			if tc.wait && (err != nil || jobID != "") {
+				t.Fatalf("request render = %q, %v, want an empty id and no error", jobID, err)
+			}
+			if !tc.wait && !errors.Is(err, episode.ErrStart) {
+				t.Fatalf("request render error = %v, want ErrStart", err)
+			}
+			if got := stateOf(t, db, "ep-1"); got != tc.state {
+				t.Fatalf("state = %s, want %s", got, tc.state)
+			}
+			if _, err := svc.RequestRender(t.Context(), "owner-1", "ep-1"); !errors.Is(err, episode.ErrIllegalTransition) {
+				t.Fatalf("repeat request error = %v, want ErrIllegalTransition", err)
+			}
+			if starter.calls != 1 {
+				t.Fatalf("starter calls = %d, want one", starter.calls)
+			}
+		})
 	}
 }
 

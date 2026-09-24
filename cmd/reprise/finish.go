@@ -38,6 +38,10 @@ const advanceInterval = 30 * time.Second
 // failed to open.
 var errNoRunner = errors.New("reprise: job runner is not open")
 
+// errNotRendering reports a render start for an episode that is not
+// rendering and that no render served.
+var errNotRendering = errors.New("reprise: episode is not rendering")
+
 // errPlainCover is the answer the plain cover model gives every call, so
 // the cover pass stores its deterministic panel.
 var errPlainCover = errors.New("reprise: plain cover draws no art")
@@ -77,17 +81,26 @@ func (j *jobs) StartKind(ctx context.Context, kind string, fn job.Func) (string,
 // episode on it before returning, so the detail names the job from its
 // first read. A render start answers with the render already running
 // for the episode, if one is, so mark done never races the advance into
-// a second render.
+// a second render. It also answers with the render that already moved
+// the episode past rendering. A render start for an episode in any other
+// state reports errNotRendering and starts nothing.
 func (j *jobs) StartEpisodeKind(ctx context.Context, kind, ownerID, episodeID string, fn job.Func) (string, error) {
 	if kind == kindRender {
 		j.schedMu.Lock()
 		defer j.schedMu.Unlock()
+		state, err := episode.Current(ctx, j.pipe.db, episodeID)
+		if err != nil {
+			return "", err
+		}
 		last, err := episode.LastKindJob(ctx, j.pipe.db, episodeID, kindRender)
 		if err != nil {
 			return "", err
 		}
-		if last.Found && !jobTerminal(last.Status) {
+		if last.Found && (!jobTerminal(last.Status) || state != episode.StateRendering) {
 			return last.JobID, nil
+		}
+		if state != episode.StateRendering {
+			return "", fmt.Errorf("reprise: start render for %s in %s: %w", episodeID, state, errNotRendering)
 		}
 	}
 	return j.startStamped(ctx, kind, episodeDescriptor{OwnerID: ownerID, EpisodeID: episodeID}, fn)

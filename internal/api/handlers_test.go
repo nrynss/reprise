@@ -346,8 +346,8 @@ func TestMarkDoneStartsRenderOnce(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode done: %v", err)
 	}
-	if body.JobID != "job-1" || body.EpisodeID != "ep-1" || body.State != "rendering" {
-		t.Fatalf("done = %+v, want job-1 on ep-1 rendering", body)
+	if body.JobID != "job-1" || body.EpisodeID != "ep-1" || body.State != "rendering" || body.Queued {
+		t.Fatalf("done = %+v, want job-1 on ep-1 rendering, not queued", body)
 	}
 	if stack.starter.calls != 1 || len(stack.starter.kinds) != 1 || stack.starter.kinds[0] != "render" {
 		t.Fatalf("starter calls = %d, want one render start", stack.starter.calls)
@@ -373,8 +373,61 @@ func TestMarkDoneStartsRenderOnce(t *testing.T) {
 	}
 }
 
-// TestMarkDoneReportsStarterFaults requires a full queue to answer 429
-// and a broken start to answer 503, with the episode waiting in failed.
+// TestMarkDoneQueuesBehindABusyRender marks a draft done while the render
+// kind is full, on a service that waits. The answer is 202 with the
+// render queued and no job, the episode waits in rendering, and a repeat
+// tap is refused without a second start.
+func TestMarkDoneQueuesBehindABusyRender(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "draft")
+	starter := &countingStarter{err: job.ErrLimit}
+	svc, err := episode.NewService(episode.Config{
+		DB:           db,
+		Starter:      starter,
+		RenderKind:   "render",
+		Render:       stubRender{},
+		WaitWhenBusy: true,
+	})
+	if err != nil {
+		t.Fatalf("new episode service: %v", err)
+	}
+	handler := NewEpisodes(svc)
+	done := func() *httptest.ResponseRecorder {
+		return serve(guests, handler, cookie,
+			httptest.NewRequest(http.MethodPost, "/api/episodes/ep-1/done", nil))
+	}
+	rec := done()
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("done status = %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	var body doneJSON
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode done: %v", err)
+	}
+	if !body.Queued || body.JobID != "" || body.State != "rendering" {
+		t.Fatalf("done = %+v, want a queued render with no job, rendering", body)
+	}
+	var state string
+	if err := db.Reader().QueryRowContext(t.Context(),
+		"SELECT state FROM episodes WHERE id = 'ep-1'").Scan(&state); err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state != "rendering" {
+		t.Fatalf("state = %q, want rendering", state)
+	}
+	if status, code := envelopeCode(t, done()); status != http.StatusConflict || code != CodeIllegalTransition {
+		t.Fatalf("repeat done status = %d code = %q, want 409 illegal_transition", status, code)
+	}
+	if starter.calls != 1 {
+		t.Fatalf("starter calls = %d, want one", starter.calls)
+	}
+}
+
+// TestMarkDoneReportsStarterFaults requires a full queue on a service
+// that does not wait to answer 429, and a broken start to answer 503,
+// with the episode failed.
 func TestMarkDoneReportsStarterFaults(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

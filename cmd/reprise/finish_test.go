@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -310,6 +311,17 @@ func postDone(t *testing.T, routes http.Handler, cookie *http.Cookie, episodeID 
 	rec := httptest.NewRecorder()
 	routes.ServeHTTP(rec, req)
 	return rec.Code
+}
+
+// postDoneBody marks one episode done through the routes and returns the
+// status with the body.
+func postDoneBody(t *testing.T, routes http.Handler, cookie *http.Cookie, episodeID string) (int, []byte) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/episodes/"+episodeID+"/done", bytes.NewReader(nil))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	routes.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
 }
 
 // finishDetail reads one episode detail through the routes.
@@ -900,6 +912,115 @@ func TestMarkDoneJoinsTheWaitingRender(t *testing.T) {
 		t.Fatalf("mark done started %s, want the running render %s", jobID, first.JobID)
 	}
 	waitState(t, fx, episodeID, episode.StateReady)
+	if n := kindJobsFor(t, fx, kindRender, episodeID); n != 1 {
+		t.Fatalf("render jobs = %d, want one", n)
+	}
+}
+
+// TestMarkDoneWhileRenderBusyWaitsAndShips holds the one render slot with
+// guest A's render, the way a second guest's render or a render the boot
+// started does. Guest B marks done while it runs. B answers 202 with its
+// render queued and waits in rendering, never failed. A repeat tap starts
+// nothing. Once the slot frees, the advance renders B, and both episodes
+// ship with one render each.
+func TestMarkDoneWhileRenderBusyWaitsAndShips(t *testing.T) {
+	fx := openWireFixture(t)
+	useFinishModels(fx, false)
+	j := bootFinishJobs(t, fx)
+	routes, guests := finishRoutes(t, fx, j)
+	_, ownerA := finishGuest(t, guests)
+	cookieB, ownerB := finishGuest(t, guests)
+	first := finishDraft(t, fx, ownerA)
+	second := finishDraft(t, fx, ownerB)
+
+	release := make(chan struct{})
+	var once sync.Once
+	free := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(free)
+	if err := episode.MarkDone(t.Context(), fx.db, first); err != nil {
+		t.Fatalf("mark first done: %v", err)
+	}
+	held := func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
+		<-release
+		return j.renderFunc(ownerA, first)(ctx, progress)
+	}
+	if _, err := j.StartEpisodeKind(t.Context(), kindRender, ownerA, first, held); err != nil {
+		t.Fatalf("hold the render slot: %v", err)
+	}
+
+	code, body := postDoneBody(t, routes, cookieB, second)
+	if got := finishState(t, fx, second); got != episode.StateRendering {
+		t.Fatalf("mark done on a busy render slot answered %d and left the episode %s, want rendering", code, got)
+	}
+	if code != http.StatusAccepted {
+		t.Fatalf("mark done on a busy render slot answered %d, want %d", code, http.StatusAccepted)
+	}
+	var queued struct {
+		JobID  string `json:"job_id"`
+		Queued bool   `json:"queued"`
+		State  string `json:"state"`
+	}
+	if err := json.Unmarshal(body, &queued); err != nil {
+		t.Fatalf("decode done: %v", err)
+	}
+	if !queued.Queued || queued.JobID != "" || queued.State != string(episode.StateRendering) {
+		t.Fatalf("done = %+v, want a queued render with no job", queued)
+	}
+	if code := postDone(t, routes, cookieB, second); code != http.StatusConflict {
+		t.Fatalf("repeat mark done answered %d, want %d", code, http.StatusConflict)
+	}
+	j.advanceAll(t.Context())
+	if n := kindJobsFor(t, fx, kindRender, second); n != 0 {
+		t.Fatalf("render jobs for the waiting episode = %d while the slot is held, want none", n)
+	}
+
+	free()
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		j.advanceAll(t.Context())
+		if finishState(t, fx, first) == episode.StateReady && finishState(t, fx, second) == episode.StateReady {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("first %s, second %s, want both ready", finishState(t, fx, first), finishState(t, fx, second))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, id := range []string{first, second} {
+		if n := kindJobsFor(t, fx, kindRender, id); n != 1 {
+			t.Fatalf("render jobs for %s = %d, want one", id, n)
+		}
+	}
+}
+
+// TestRenderStartJoinsTheRenderThatShipped starts a render the way mark
+// done does for an episode a finished render already moved past
+// rendering. The start answers with that render and starts no second one.
+func TestRenderStartJoinsTheRenderThatShipped(t *testing.T) {
+	fx := openWireFixture(t)
+	useFinishModels(fx, false)
+	j := bootFinishJobs(t, fx)
+	const owner = "owner-render-shipped"
+	insertWireUser(t, fx, owner)
+	episodeID := finishDraft(t, fx, owner)
+	if err := episode.MarkDone(t.Context(), fx.db, episodeID); err != nil {
+		t.Fatalf("mark done: %v", err)
+	}
+	if err := j.startWaitingRender(t.Context(), owner, episodeID); err != nil {
+		t.Fatalf("start waiting render: %v", err)
+	}
+	waitState(t, fx, episodeID, episode.StateReady)
+	first, err := episode.LastKindJob(t.Context(), fx.db, episodeID, kindRender)
+	if err != nil || !first.Found {
+		t.Fatalf("finished render = %+v, %v, want one", first, err)
+	}
+	jobID, err := j.StartEpisodeKind(t.Context(), kindRender, owner, episodeID, j.renderFunc(owner, episodeID))
+	if err != nil {
+		t.Fatalf("late render start: %v", err)
+	}
+	if jobID != first.JobID {
+		t.Fatalf("late render start answered %s, want the finished render %s", jobID, first.JobID)
+	}
 	if n := kindJobsFor(t, fx, kindRender, episodeID); n != 1 {
 		t.Fatalf("render jobs = %d, want one", n)
 	}

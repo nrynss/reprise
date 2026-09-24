@@ -43,6 +43,7 @@ type Service struct {
 	renderKind     string
 	render         Renderer
 	transcriptKind string
+	waitWhenBusy   bool
 }
 
 // Config carries what NewService needs. DB is the shared diary handle.
@@ -61,6 +62,11 @@ type Config struct {
 	// matches. Leave it empty when the process starts no transcript
 	// jobs, and the outcome read reports no pass.
 	TranscriptKind string
+	// WaitWhenBusy leaves a marked episode in rendering when the render
+	// kind refuses a start with job.ErrLimit. Set it only when the process
+	// later starts a render for every rendering episode with no render
+	// job. Left unset, a refused start fails the episode.
+	WaitWhenBusy bool
 }
 
 // NewService returns a Service over cfg. It reports ErrInvalid for a nil
@@ -75,5 +81,6 @@ func NewService(cfg Config) (*Service, error) {
 		renderKind:     cfg.RenderKind,
 		render:         cfg.Render,
 		transcriptKind: cfg.TranscriptKind,
+		waitWhenBusy:   cfg.WaitWhenBusy,
 	}, nil
 }
