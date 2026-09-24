@@ -297,10 +297,15 @@ func (j *jobs) advance(ctx context.Context, ownerID, episodeID string, self sett
 	}
 	db := j.pipe.db
 	state, err := episode.Current(ctx, db, episodeID)
+	if errors.Is(err, episode.ErrNotFound) {
+		j.forgetSettled(episodeID)
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 	if state != episode.StateAnalysing {
+		j.forgetSettled(episodeID)
 		return nil
 	}
 	renderID, err := episode.NewestRenderID(ctx, db, episodeID)
@@ -361,7 +366,20 @@ func (j *jobs) advance(ctx context.Context, ownerID, episodeID string, self sett
 	if err := episode.MarkReady(ctx, db, episodeID); err != nil && !errors.Is(err, episode.ErrIllegalTransition) {
 		return err
 	}
+	j.forgetSettled(episodeID)
 	return nil
+}
+
+// forgetSettled drops every settled outcome kept for one episode. It runs
+// once the episode leaves analysing, because only an analysing episode
+// reads them. So the map holds entries for analysing episodes alone. The
+// caller holds schedMu.
+func (j *jobs) forgetSettled(episodeID string) {
+	for key := range j.settled {
+		if key.episodeID == episodeID {
+			delete(j.settled, key)
+		}
+	}
 }
 
 // startPass starts one pass after the render, stamped with the render it

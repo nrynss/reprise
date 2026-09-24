@@ -904,3 +904,30 @@ func TestMarkDoneJoinsTheWaitingRender(t *testing.T) {
 		t.Fatalf("render jobs = %d, want one", n)
 	}
 }
+
+// TestSettledOutcomesDrainOnShip ships one episode through the chain and
+// then advances again. The settled outcomes the passes left serve only an
+// analysing episode, so none stays once the episode is ready.
+func TestSettledOutcomesDrainOnShip(t *testing.T) {
+	fx := openWireFixture(t)
+	useFinishModels(fx, false)
+	j := bootFinishJobs(t, fx)
+	const owner = "owner-settled-drain"
+	insertWireUser(t, fx, owner)
+	episodeID := finishDraft(t, fx, owner)
+	svc, err := episode.NewService(episodeConfig(fx.db, j))
+	if err != nil {
+		t.Fatalf("new episode service: %v", err)
+	}
+	if _, err := svc.RequestRender(t.Context(), owner, episodeID); err != nil {
+		t.Fatalf("request render: %v", err)
+	}
+	waitState(t, fx, episodeID, episode.StateReady)
+	j.advanceAll(t.Context())
+	j.schedMu.Lock()
+	held := len(j.settled)
+	j.schedMu.Unlock()
+	if held != 0 {
+		t.Fatalf("settled holds %d outcomes after the episode shipped, want none", held)
+	}
+}
