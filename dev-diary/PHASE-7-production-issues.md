@@ -872,7 +872,7 @@ requires:   T7.28
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/editor/draft.ts
-status:     in-progress:implement:t7.34-impl
+status:     in-progress:review-r1:t7.34-rev-r1@13248a4fc1c24d6179d15e270bfc38b12ad7407a
 ```
 The svelte 4 leakage scan in `tools/check.sh` matches `get(`, and
 `draft.ts` calls `Map.get` in `proposalIdForCut`. CI fails on
