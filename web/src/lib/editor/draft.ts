@@ -140,10 +140,40 @@ export function queryValue(search: string, name: string): string | null {
 	return null;
 }
 
-// Proposal ids mirror the fixture: prop-<cut id> for cuts.
-function proposalIdForCut(cutId: string): string {
+// Fixture proposal ids follow one pattern: prop-<cut id> for cuts, and
+// a fixed id per kind for the rest. Live ids come from the stored rows.
+function fixtureProposalId(cutId: string): string {
 	return `prop-${cutId}`;
 }
+
+// The stored proposal id behind each non-cut kind, or empty when the
+// draft stores none of that kind.
+interface StoredIds {
+	coldOpen: string;
+	title: string;
+	notes: string;
+	callback: string;
+}
+
+const FIXTURE_IDS: StoredIds = {
+	coldOpen: 'prop-cold-open',
+	title: 'prop-title',
+	notes: 'prop-notes',
+	callback: 'prop-callback'
+};
+
+const FIXTURE_ROW_IDS: StoredIds = {
+	coldOpen: 'dec-cold-open',
+	title: 'dec-title',
+	notes: 'dec-notes',
+	callback: 'dec-callback'
+};
+
+// The latest stored decision values. A cut applies only when its latest
+// row reads accepted, which is the rule the render reads. Every other
+// kind applies until a row reads reverted.
+const DECISION_ACCEPTED = 'accepted';
+const DECISION_REVERTED = 'reverted';
 
 interface StoredProposal {
 	id: string;
@@ -151,6 +181,7 @@ interface StoredProposal {
 	start: number;
 	end: number;
 	reason: string;
+	decision: string;
 }
 
 interface StoredDraft {
@@ -201,7 +232,8 @@ function readStoredDraft(value: unknown, episodeId: string): StoredDraft {
 			kind: textOf(item, 'kind'),
 			start: numberOf(item, 'start_word'),
 			end: numberOf(item, 'end_word'),
-			reason: textOf(item, 'reason')
+			reason: textOf(item, 'reason'),
+			decision: textOf(item, 'decision')
 		});
 	}
 	const title = textOf(episode, 'title') || `Episode ${episodeId}`;
@@ -217,6 +249,9 @@ export class DraftController {
 	private snap: DraftSnapshot;
 	private readonly onChange: (snap: DraftSnapshot) => void;
 	private fixtureMode = true;
+	// Live cut ids map to the stored proposal each decision row names.
+	private cutProposals = new Map<string, string>();
+	private storedIds: StoredIds = FIXTURE_IDS;
 
 	constructor(options: DraftOptions) {
 		this.episodeId = options.episodeId;
@@ -252,6 +287,8 @@ export class DraftController {
 
 	private loadFromFixture(notice: string): void {
 		this.fixtureMode = true;
+		this.cutProposals = new Map();
+		this.storedIds = FIXTURE_IDS;
 		const fixture = loadFixture(this.episodeId);
 		this.installDraft({
 			title: fixture.title,
@@ -267,6 +304,8 @@ export class DraftController {
 				fixture.proposals.find((proposal) => proposal.kind === 'show_notes')?.reason ?? '',
 			audioUrl: fixture.audioUrl,
 			channels: fixture.channels.map((channel) => channel.slice()),
+			reverted: { coldOpen: false, title: false, notes: false, callback: false },
+			decisions: [],
 			notice
 		});
 	}
@@ -282,17 +321,58 @@ export class DraftController {
 			return;
 		}
 		const words = stored.words;
-		const cuts: EditCut[] = stored.proposals
-			.filter((proposal) => proposal.kind === 'cut')
-			.map((proposal, index) => ({
-				id: proposal.id || `cut-${index + 1}`,
-				range: { start: proposal.start, end: proposal.end },
+		// A cut shows as applied only while the render would apply it. A
+		// reverted cut stays off the transcript and keeps its decision row,
+		// so a reload shows what the render will do.
+		const cuts: EditCut[] = [];
+		const decisions: DecisionRow[] = [];
+		const cutProposals = new Map<string, string>();
+		for (const proposal of stored.proposals) {
+			if (proposal.kind !== 'cut' || !proposal.id) continue;
+			if (proposal.decision === DECISION_ACCEPTED) {
+				cuts.push({
+					id: proposal.id,
+					range: { start: proposal.start, end: proposal.end },
+					reason: proposal.reason
+				});
+				cutProposals.set(proposal.id, proposal.id);
+			} else if (proposal.decision === DECISION_REVERTED) {
+				decisions.push({
+					id: `dec-${proposal.id}`,
+					proposalId: proposal.id,
+					cutId: proposal.id,
+					decision: 'reverted',
+					reason: proposal.reason
+				});
+			}
+		}
+		// The latest proposal of each kind is the one the render reads.
+		const latest = (kind: string): StoredProposal | undefined =>
+			stored.proposals.filter((proposal) => proposal.kind === kind && proposal.id).at(-1);
+		const cold = latest('cold_open');
+		const title = latest('title');
+		const callback = latest('callback');
+		const notes = latest('show_notes');
+		const isReverted = (proposal: StoredProposal | undefined): boolean =>
+			proposal?.decision === DECISION_REVERTED;
+		for (const proposal of [cold, title, notes, callback]) {
+			if (!proposal || !isReverted(proposal)) continue;
+			decisions.push({
+				id: `dec-${proposal.id}`,
+				proposalId: proposal.id,
+				cutId: '',
+				decision: 'reverted',
 				reason: proposal.reason
-			}));
-		const cold = stored.proposals.find((proposal) => proposal.kind === 'cold_open');
-		const callback = stored.proposals.find((proposal) => proposal.kind === 'callback');
-		const notes = stored.proposals.find((proposal) => proposal.kind === 'show_notes');
+			});
+		}
 		this.fixtureMode = false;
+		this.cutProposals = cutProposals;
+		this.storedIds = {
+			coldOpen: cold?.id ?? '',
+			title: title?.id ?? '',
+			notes: notes?.id ?? '',
+			callback: callback?.id ?? ''
+		};
 		this.installDraft({
 			title: stored.title,
 			words,
@@ -309,6 +389,13 @@ export class DraftController {
 			notes: notes?.reason ?? '',
 			audioUrl: stored.audioUrl,
 			channels: null,
+			reverted: {
+				coldOpen: isReverted(cold),
+				title: isReverted(title),
+				notes: isReverted(notes),
+				callback: isReverted(callback)
+			},
+			decisions,
 			notice: words.length > 0 ? 'Draft loaded.' : 'Draft loaded. No words stored yet.'
 		});
 	}
@@ -326,6 +413,8 @@ export class DraftController {
 		notes: string;
 		audioUrl: string;
 		channels: Float32Array[] | null;
+		reverted: { coldOpen: boolean; title: boolean; notes: boolean; callback: boolean };
+		decisions: DecisionRow[];
 		notice: string;
 	}): void {
 		this.editor = new TranscriptEditor(args.words);
@@ -348,21 +437,22 @@ export class DraftController {
 				reason: args.coldReason,
 				quote: quoteRange(args.words, args.coldStart, args.coldEnd)
 			},
-			coldOpenReverted: false,
+			coldOpenReverted: args.reverted.coldOpen,
 			proposedTitle: args.title,
-			titleReverted: false,
+			titleReverted: args.reverted.title,
 			proposedNotes: args.notes,
-			notesReverted: false,
-			callback: args.callback,
-			callbackQuote: args.callbackQuote,
+			notesReverted: args.reverted.notes,
+			callback: args.reverted.callback ? '' : args.callback,
+			callbackQuote: args.reverted.callback ? '' : args.callbackQuote,
 			proposedCallback: args.callback,
-			callbackReverted: false,
-			callbacksCleared: false,
-			decisions: [],
+			callbackReverted: args.reverted.callback,
+			callbacksCleared: args.reverted.callback,
+			decisions: args.decisions,
 			renderStage: 'idle',
 			renderDetail: '',
-			notes: args.notes
+			notes: args.reverted.notes ? '' : args.notes
 		};
+		if (args.reverted.title) this.snap = { ...this.snap, title: `Episode ${this.episodeId}` };
 		this.refreshCuts();
 		this.emit();
 		if (args.channels) {
@@ -400,7 +490,7 @@ export class DraftController {
 			cutOf,
 			cutCards: cuts.map((cut) => ({
 				id: cut.id,
-				proposalId: proposalIdForCut(cut.id),
+				proposalId: this.proposalIdForCut(cut.id),
 				reason: cut.reason,
 				quote: quoteRange(words, cut.range.start, cut.range.end)
 			})),
@@ -409,11 +499,27 @@ export class DraftController {
 		};
 	}
 
+	// The proposal id a cut decision names. A fixture cut follows the
+	// fixture pattern. A live cut names its stored proposal, or empty
+	// when no stored proposal backs it.
+	private proposalIdForCut(cutId: string): string {
+		if (this.fixtureMode) return fixtureProposalId(cutId);
+		return this.cutProposals.get(cutId) ?? '';
+	}
+
 	// Revert one cut with one action. The decision row is the revertible
-	// record, written locally first so the screen answers even when the
-	// decisions endpoint is still a stub.
+	// record. A fixture draft keeps the local row as its record. A live
+	// draft puts the cut back when the server refuses the row, because
+	// the render reads the stored rows and would still cut those words.
 	revertCut(cutId: string): void {
 		if (!this.editor) return;
+		const proposalId = this.proposalIdForCut(cutId);
+		if (!proposalId) {
+			this.snap = { ...this.snap, notice: `No stored proposal backs cut ${cutId}. Nothing changed.` };
+			this.emit();
+			return;
+		}
+		const index = this.editor.cuts.findIndex((cut) => cut.id === cutId);
 		const result = this.editor.revert(cutId);
 		if (typeof result === 'string') {
 			this.snap = { ...this.snap, notice: `No cut named ${cutId}. Nothing changed.` };
@@ -422,7 +528,7 @@ export class DraftController {
 		}
 		const row: DecisionRow = {
 			id: `dec-${result.id}`,
-			proposalId: proposalIdForCut(result.id),
+			proposalId,
 			cutId: result.id,
 			decision: 'reverted',
 			reason: result.reason
@@ -434,39 +540,66 @@ export class DraftController {
 		};
 		this.refreshCuts();
 		this.emit();
-		this.postDecision(row.proposalId);
-	}
-
-	// Post one decision row to the decisions endpoint. The local row above
-	// is the record, so a refused POST changes nothing on screen.
-	private postDecision(proposalId: string): void {
-		void fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}/decisions`, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ proposal_id: proposalId, decision: 'reverted' })
-		}).catch(() => {
-			// The stub endpoint refuses. The local row above is the record.
+		const restored = { ...result, range: { ...result.range } };
+		this.postDecision(row, 'The cut stays in the render.', () => {
+			if (!this.editor) return;
+			this.editor.cuts.splice(Math.max(0, index), 0, restored);
+			this.refreshCuts();
 		});
 	}
 
+	// Post one decision row. A fixture draft has no stored proposals, so a
+	// refusal there changes nothing on screen. A live refusal drops the
+	// local row, runs undo, and says the server kept the proposal.
+	private postDecision(row: DecisionRow, kept: string, undo: () => void): void {
+		const live = !this.fixtureMode;
+		void fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}/decisions`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ proposal_id: row.proposalId, decision: row.decision })
+		})
+			.then((response) => (response.ok ? null : `status ${response.status}`))
+			.catch(() => 'no answer')
+			.then((failure) => {
+				if (failure === null || !live) return;
+				this.snap = {
+					...this.snap,
+					decisions: this.snap.decisions.filter((held) => held.id !== row.id)
+				};
+				undo();
+				this.snap = {
+					...this.snap,
+					notice: `The server did not store that revert (${failure}). ${kept}`
+				};
+				this.emit();
+			});
+	}
+
 	// Write one decision row for a non-cut revert. A second revert of the
-	// same kind changes nothing, so the row stays the single record.
-	private recordNonCutRevert(proposalId: string, rowId: string, reason: string): boolean {
+	// same kind changes nothing, so the row stays the single record. A
+	// live draft with no stored proposal of that kind has nothing to
+	// revert.
+	private recordNonCutRevert(kind: keyof StoredIds, reason: string): DecisionRow | null {
+		const proposalId = this.storedIds[kind];
+		if (!proposalId) {
+			this.snap = { ...this.snap, notice: `No stored proposal of that kind. Nothing changed.` };
+			this.emit();
+			return null;
+		}
 		if (this.snap.decisions.some((row) => row.proposalId === proposalId)) {
 			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
 			this.emit();
-			return false;
+			return null;
 		}
 		const row: DecisionRow = {
-			id: rowId,
+			id: this.fixtureMode ? FIXTURE_ROW_IDS[kind] : `dec-${proposalId}`,
 			proposalId,
 			cutId: '',
 			decision: 'reverted',
 			reason
 		};
 		this.snap = { ...this.snap, decisions: [...this.snap.decisions, row] };
-		this.postDecision(row.proposalId);
-		return true;
+		return row;
 	}
 
 	// Revert the cold open with one action. The range stays on screen
@@ -479,13 +612,17 @@ export class DraftController {
 			return;
 		}
 		const reason = this.snap.coldOpen.reason || 'Proposed cold open.';
-		if (!this.recordNonCutRevert('prop-cold-open', 'dec-cold-open', reason)) return;
+		const row = this.recordNonCutRevert('coldOpen', reason);
+		if (!row) return;
 		this.snap = {
 			...this.snap,
 			coldOpenReverted: true,
 			notice: `Reverted the cold open. The episode starts at the top.`
 		};
 		this.emit();
+		this.postDecision(row, 'The cold open stays in the render.', () => {
+			this.snap = { ...this.snap, coldOpenReverted: false };
+		});
 	}
 
 	// Revert the title with one action. The heading falls back to the
@@ -498,7 +635,9 @@ export class DraftController {
 			return;
 		}
 		const reason = this.snap.proposedTitle || 'Proposed title.';
-		if (!this.recordNonCutRevert('prop-title', 'dec-title', reason)) return;
+		const row = this.recordNonCutRevert('title', reason);
+		if (!row) return;
+		const title = this.snap.title;
 		this.snap = {
 			...this.snap,
 			title: `Episode ${this.episodeId}`,
@@ -506,6 +645,9 @@ export class DraftController {
 			notice: `Reverted the title.`
 		};
 		this.emit();
+		this.postDecision(row, 'The proposed title stays.', () => {
+			this.snap = { ...this.snap, title, titleReverted: false };
+		});
 	}
 
 	// Revert the show notes with one action. Notes fall back to empty,
@@ -518,9 +660,14 @@ export class DraftController {
 			return;
 		}
 		const reason = this.snap.proposedNotes || 'Proposed show notes.';
-		if (!this.recordNonCutRevert('prop-notes', 'dec-notes', reason)) return;
+		const row = this.recordNonCutRevert('notes', reason);
+		if (!row) return;
+		const notes = this.snap.notes;
 		this.snap = { ...this.snap, notes: '', notesReverted: true, notice: `Reverted the show notes.` };
 		this.emit();
+		this.postDecision(row, 'The proposed show notes stay.', () => {
+			this.snap = { ...this.snap, notes, notesReverted: false };
+		});
 	}
 
 	// Revert the callback with one action. The proposal state flips and the
@@ -533,7 +680,9 @@ export class DraftController {
 			return;
 		}
 		const reason = this.snap.proposedCallback || 'Planted callback.';
-		if (!this.recordNonCutRevert('prop-callback', 'dec-callback', reason)) return;
+		const row = this.recordNonCutRevert('callback', reason);
+		if (!row) return;
+		const { callback, callbackQuote } = this.snap;
 		this.snap = {
 			...this.snap,
 			callback: '',
@@ -543,6 +692,15 @@ export class DraftController {
 			notice: `Reverted the callback and cleared it from the next opening.`
 		};
 		this.emit();
+		this.postDecision(row, 'The callback stays planted.', () => {
+			this.snap = {
+				...this.snap,
+				callback,
+				callbackQuote,
+				callbackReverted: false,
+				callbacksCleared: false
+			};
+		});
 	}
 
 	// Seek playback to one word start. The position state moves at once so

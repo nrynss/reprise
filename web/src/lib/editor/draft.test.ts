@@ -197,7 +197,7 @@ describe('draft controller', () => {
 							start_word: 0,
 							end_word: 1,
 							reason: 'Trim the open.',
-							decision: ''
+							decision: 'accepted'
 						}
 					],
 					words: [
