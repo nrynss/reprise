@@ -697,7 +697,7 @@ mock take still reaches the gallery and processing as it does today.
 requires:   T7.26, T7.1
 fixture-ok: yes
 size:       M · mid
-owns:       web/src/routes/+page.svelte, web/src/routes/episode/, web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts, internal/api/episodes.go
+owns:       web/src/routes/+page.svelte, web/src/routes/episode/, web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts, internal/api/episodes.go, internal/episode/playback.go
 status:     in-progress:implement:t7.28-impl
 ```
 A real take reached draft. The transcript pass is done and the
@@ -723,7 +723,7 @@ plays that file.
 
 ### T7.29: A rendered episode reaches ready
 ```yaml
-requires:   T7.26
+requires:   T7.26, T7.28
 fixture-ok: yes
 size:       L · frontier
 owns:       cmd/reprise/, internal/episode/
