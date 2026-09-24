@@ -3,7 +3,14 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { pageTitle } from '$lib/shell';
-	import { emptyGallery, formatEpisodeNumber, GalleryController, seasonHref } from './threads/threads';
+	import {
+		emptyGallery,
+		formatEpisodeNumber,
+		galleryCardKind,
+		GalleryController,
+		jobCardHref,
+		seasonHref
+	} from './threads/threads';
 
 	let snap = $state(emptyGallery());
 	let controller = $state<GalleryController | null>(null);
@@ -57,8 +64,9 @@
 	{#if snap.ready && snap.rows.length > 0}
 		<ol aria-label="Episodes, newest first">
 			{#each snap.rows as row (row.id)}
+				{@const kind = galleryCardKind(row, controller && row.jobId ? controller.cardFor(row.jobId) : null)}
 				<li>
-					{#if row.state === 'draft'}
+					{#if kind === 'editor'}
 						<a
 							class="card"
 							href={resolve(seasonHref(row))}
@@ -74,7 +82,7 @@
 								<p class="job">In the editor · proposals waiting</p>
 							{/if}
 						</a>
-					{:else if row.jobId}
+					{:else if kind === 'job'}
 						<article aria-label={`${row.title}, ${row.state}`}>
 							<div class="cover" role="img" aria-label={`Cover of episode ${row.number}`}>
 								<span>{formatEpisodeNumber(row.number)}</span>
@@ -96,9 +104,9 @@
 							</div>
 							<p class="job">{controller ? controller.cardFor(row.jobId).detail : ''}</p>
 							{#if row.fixture && row.state === 'rendering'}
-								<a href={resolve(seasonHref(row))}>Open the processing screen</a>
+								<a href={resolve(jobCardHref(row))}>Open the processing screen</a>
 							{:else}
-								<a href={resolve(seasonHref(row))}>Open the episode</a>
+								<a href={resolve(jobCardHref(row))}>Open the episode</a>
 							{/if}
 						</article>
 					{:else}

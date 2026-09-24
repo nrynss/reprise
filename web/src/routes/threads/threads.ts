@@ -744,12 +744,36 @@ export async function runSeasonGates(root: HTMLElement): Promise<string> {
 	}
 }
 
-// One rendering card as the gallery draws it.
+// One rendering card as the gallery draws it. Status is the latest job
+// state the card knows.
 export interface GalleryCardProgress {
 	jobId: string;
 	percent: number;
 	detail: string;
 	running: boolean;
+	status: JobStatus;
+}
+
+// Which card one gallery row draws. A row whose job has not finished
+// keeps its progress card, draft or not, so a running pass shows its
+// progress and a failed pass shows its text. A draft opens the editor
+// once its job is done, or when it names no job. Any other row with a
+// job keeps its progress card, and the rest open the episode.
+export type GalleryCardKind = 'job' | 'editor' | 'episode';
+
+export function galleryCardKind(row: SeasonRow, card: GalleryCardProgress | null): GalleryCardKind {
+	if (row.state === 'draft' && (!row.jobId || card?.status === 'done')) return 'editor';
+	if (row.jobId) return 'job';
+	return 'episode';
+}
+
+// Where the link on a progress card goes. A live draft whose pass has
+// not finished opens the episode, which shows the pass state, because
+// the editor has no words to show yet. Every other row follows its
+// season link.
+export function jobCardHref(row: SeasonRow): SeasonHref {
+	if (row.state === 'draft' && !row.fixture) return `/episode/${row.id}`;
+	return seasonHref(row);
 }
 
 // One gallery row in either mode. Fixture rows carry a duration and a
@@ -914,7 +938,7 @@ export class GalleryController {
 	cardFor(jobId: string): GalleryCardProgress {
 		const held = this.snap.progress[jobId];
 		if (held) return held;
-		return { jobId, percent: 0, detail: 'Waiting for the job.', running: true };
+		return { jobId, percent: 0, detail: 'Waiting for the job.', running: true, status: 'running' };
 	}
 
 	private mountFixture(search: string): void {
@@ -1053,6 +1077,7 @@ export class GalleryController {
 
 	private followJob(jobId: string): void {
 		const seed = readHighWater(browserStore(), jobId);
+		const status = this.statuses[jobId] ?? 'running';
 		this.snap = {
 			...this.snap,
 			progress: {
@@ -1061,7 +1086,8 @@ export class GalleryController {
 					jobId,
 					percent: seed,
 					detail: seed > 0 ? `Working · ${seed}% · kept across reload` : 'Working · starting.',
-					running: true
+					running: !isTerminalStatus(status),
+					status
 				}
 			}
 		};
@@ -1093,16 +1119,22 @@ export class GalleryController {
 			const live = progressPercent(entry.stream.current ?? 0, entry.stream.total ?? 4);
 			const held = next[entry.jobId]?.percent ?? 0;
 			const percent = writeHighWater(browserStore(), entry.jobId, Math.max(live, held));
-			const running = !isTerminalStatus(entry.stream.status);
+			// A stored terminal state stands, because a finished job never
+			// runs again. A fresh stream reads queued before its first state.
+			const known = this.statuses[entry.jobId];
+			const status = known && isTerminalStatus(known) ? known : entry.stream.status;
+			this.statuses[entry.jobId] = status;
+			const running = !isTerminalStatus(status);
 			const stage = entry.stream.stage ? `${entry.stream.stage} · ` : '';
 			const detail =
-				entry.stream.status === 'done'
+				status === 'done'
 					? 'Ready. Open the episode.'
 					: entry.stream.connection === 'failed'
 						? 'The job stream failed. The mark above is kept.'
 						: `Working · ${stage}${percent}% · progress survives a reload`;
-			if (!next[entry.jobId] || next[entry.jobId]?.percent !== percent || next[entry.jobId]?.detail !== detail) {
-				next[entry.jobId] = { jobId: entry.jobId, percent, detail, running };
+			const prior = next[entry.jobId];
+			if (!prior || prior.percent !== percent || prior.detail !== detail || prior.status !== status) {
+				next[entry.jobId] = { jobId: entry.jobId, percent, detail, running, status };
 				changed = true;
 			}
 		}
