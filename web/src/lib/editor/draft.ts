@@ -249,8 +249,10 @@ export class DraftController {
 	private snap: DraftSnapshot;
 	private readonly onChange: (snap: DraftSnapshot) => void;
 	private fixtureMode = true;
-	// Live cut ids map to the stored proposal each decision row names.
-	private cutProposals: Record<string, string> = {};
+	// Live cut ids map to the stored proposal each decision row names. A
+	// null-prototype record keeps an id like "constructor" or "__proto__"
+	// from reading or writing an inherited member instead of its own.
+	private cutProposals: Record<string, string> = Object.create(null);
 	private storedIds: StoredIds = FIXTURE_IDS;
 
 	constructor(options: DraftOptions) {
@@ -287,7 +289,7 @@ export class DraftController {
 
 	private loadFromFixture(notice: string): void {
 		this.fixtureMode = true;
-		this.cutProposals = {};
+		this.cutProposals = Object.create(null);
 		this.storedIds = FIXTURE_IDS;
 		const fixture = loadFixture(this.episodeId);
 		this.installDraft({
@@ -326,7 +328,7 @@ export class DraftController {
 		// so a reload shows what the render will do.
 		const cuts: EditCut[] = [];
 		const decisions: DecisionRow[] = [];
-		const cutProposals: Record<string, string> = {};
+		const cutProposals: Record<string, string> = Object.create(null);
 		for (const proposal of stored.proposals) {
 			if (proposal.kind !== 'cut' || !proposal.id) continue;
 			if (proposal.decision === DECISION_ACCEPTED) {
