@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/nrynss/keel/job"
+	"github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/reprise/internal/analysis"
 	"github.com/nrynss/reprise/internal/episode"
 )
 
@@ -103,12 +105,17 @@ func TestRenderedWordsReadTheRenderClock(t *testing.T) {
 	db := openDatabase(t)
 	plantEpisode(t, db, "ep-1", 1, episode.StateReady)
 	plantEpisode(t, db, "ep-2", 2, episode.StateDraft)
+	plantRender(t, db, "render-1", "ep-1")
 	if _, err := db.Writer().ExecContext(t.Context(),
-		`INSERT INTO words (id, owner_id, episode_id, text, start_ms, end_ms, source) VALUES
-		 ('word-edit', 'owner-1', 'ep-1', 'Raw', 0, 500, 'edit'),
-		 ('word-late', 'owner-1', 'ep-1', 'Two', 1000, 1600, 'rendered'),
-		 ('word-early', 'owner-1', 'ep-1', 'One', 0, 900, 'rendered')`); err != nil {
-		t.Fatalf("seed words: %v", err)
+		`INSERT INTO words (id, owner_id, episode_id, text, start_ms, end_ms, source)
+		 VALUES ('word-edit', 'owner-1', 'ep-1', 'Raw', 0, 500, 'edit')`); err != nil {
+		t.Fatalf("seed edit word: %v", err)
+	}
+	if err := analysis.ReplaceWords(t.Context(), db.Writer(), "owner-1", "ep-1", "render-1", []analysis.Word{
+		{Text: "Two", StartMs: 1000, EndMs: 1600},
+		{Text: "One", StartMs: 0, EndMs: 900},
+	}); err != nil {
+		t.Fatalf("seed rendered words: %v", err)
 	}
 	svc, err := episode.NewService(episode.Config{DB: db})
 	if err != nil {
@@ -131,6 +138,70 @@ func TestRenderedWordsReadTheRenderClock(t *testing.T) {
 	}
 	if _, err := svc.RenderedWords(t.Context(), "owner-2", "ep-1"); !errors.Is(err, episode.ErrNotFound) {
 		t.Fatalf("foreign words error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestRenderedWordsFollowTheNewestRender stores words analysis took from
+// one render, then stores a newer render. The old words stay out, so a
+// new render never plays under them. Analysis of the newer render brings
+// its words back.
+func TestRenderedWordsFollowTheNewestRender(t *testing.T) {
+	t.Parallel()
+	db := openDatabase(t)
+	plantEpisode(t, db, "ep-1", 1, episode.StateReady)
+	plantRender(t, db, "render-old", "ep-1")
+	if err := analysis.ReplaceWords(t.Context(), db.Writer(), "owner-1", "ep-1", "render-old",
+		[]analysis.Word{{Text: "Old", StartMs: 0, EndMs: 400}}); err != nil {
+		t.Fatalf("seed old words: %v", err)
+	}
+	svc, err := episode.NewService(episode.Config{DB: db})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	words, err := svc.RenderedWords(t.Context(), "owner-1", "ep-1")
+	if err != nil {
+		t.Fatalf("rendered words: %v", err)
+	}
+	if len(words) != 1 || words[0].Text != "Old" {
+		t.Fatalf("words = %+v, want the words of the only render", words)
+	}
+	plantRender(t, db, "render-new", "ep-1")
+	stale, err := svc.RenderedWords(t.Context(), "owner-1", "ep-1")
+	if err != nil {
+		t.Fatalf("stale rendered words: %v", err)
+	}
+	if stale == nil || len(stale) != 0 {
+		t.Fatalf("words = %+v, want none while the newest render has no analysis", stale)
+	}
+	newest, err := episode.NewestRenderID(t.Context(), db, "ep-1")
+	if err != nil {
+		t.Fatalf("newest render: %v", err)
+	}
+	if newest != "render-new" {
+		t.Fatalf("newest render = %q, want render-new", newest)
+	}
+	if err := analysis.ReplaceWords(t.Context(), db.Writer(), "owner-1", "ep-1", "render-new",
+		[]analysis.Word{{Text: "New", StartMs: 0, EndMs: 400}}); err != nil {
+		t.Fatalf("seed new words: %v", err)
+	}
+	fresh, err := svc.RenderedWords(t.Context(), "owner-1", "ep-1")
+	if err != nil {
+		t.Fatalf("fresh rendered words: %v", err)
+	}
+	if len(fresh) != 1 || fresh[0].Text != "New" {
+		t.Fatalf("words = %+v, want the newest render words", fresh)
+	}
+}
+
+// plantRender stores one render row with a playable file for an episode
+// owner-1 holds, and fails the test on error.
+func plantRender(t *testing.T, db *sqlite.DB, id, episodeID string) {
+	t.Helper()
+	if _, err := db.Writer().ExecContext(t.Context(),
+		`INSERT INTO renders (id, owner_id, episode_id, input_hash, opus_media_id, aac_media_id, loudness)
+		 VALUES (?, 'owner-1', ?, ?, ?, ?, -16)`,
+		id, episodeID, "hash-"+id, "opus-"+id, "aac-"+id); err != nil {
+		t.Fatalf("plant render %s: %v", id, err)
 	}
 }
 

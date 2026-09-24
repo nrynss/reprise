@@ -16,9 +16,11 @@ import (
 	costsqlitestore "github.com/nrynss/keel/cost/sqlitestore"
 	flagsqlitestore "github.com/nrynss/keel/flag/sqlitestore"
 	"github.com/nrynss/keel/job"
+	jobsqlitestore "github.com/nrynss/keel/job/sqlitestore"
 	"github.com/nrynss/keel/lease"
 	leasesqlitestore "github.com/nrynss/keel/lease/sqlitestore"
 	"github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/reprise/internal/analysis"
 	"github.com/nrynss/reprise/internal/broker"
 	"github.com/nrynss/reprise/internal/episode"
 	"github.com/nrynss/reprise/internal/identity"
@@ -47,6 +49,12 @@ func openDiary(t *testing.T) (*sqlite.DB, *identity.Service) {
 	}
 	if err := memory.Migrate(t.Context(), db); err != nil {
 		t.Fatalf("open memory index: %v", err)
+	}
+	if err := analysis.Migrate(t.Context(), db); err != nil {
+		t.Fatalf("open render link: %v", err)
+	}
+	if _, err := jobsqlitestore.Open(t.Context(), jobsqlitestore.Config{DB: db}); err != nil {
+		t.Fatalf("open job rows: %v", err)
 	}
 	svc, err := identity.New(t.Context(), identity.Config{
 		DB:         db,

@@ -104,7 +104,8 @@ func runConfig(t *testing.T, db *sql.DB, batch *analysis.ScriptedTranscriber, ch
 		Rates:        probeRates(),
 		OwnerID:      "owner-a",
 		EpisodeID:    "ep-1",
-		Render: func(context.Context, string, string) (analysis.RenderedFile, error) {
+		RenderID:     renderOf("ep-1"),
+		Render: func(context.Context, string, string, string) (analysis.RenderedFile, error) {
 			return analysis.RenderedFile{Audio: fixtureRender(t), DurationSecs: 45}, nil
 		},
 		PollInterval: time.Millisecond,
@@ -169,6 +170,13 @@ func TestRunStoresFullAnalysis(t *testing.T) {
 	}
 	if len(stored) != 40 || stored[5].Text != "Mara" || stored[5].StartMs != 6000 {
 		t.Fatalf("stored words miss Mara at 6000: %+v", stored[5])
+	}
+	source, err := analysis.RenderedSource(t.Context(), db, "ep-1")
+	if err != nil {
+		t.Fatalf("rendered source: %v", err)
+	}
+	if source != renderOf("ep-1") {
+		t.Fatalf("rendered source = %q, want the render the pass transcribed", source)
 	}
 	rows, err := db.QueryContext(t.Context(),
 		"SELECT kind, word_offset, quote FROM mentions WHERE episode_id = 'ep-1' ORDER BY word_offset ASC")
@@ -398,4 +406,24 @@ func TestUploaderMatchesBatchClient(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 	var _ analysis.Uploader = client
+}
+
+// TestRunRefusesWithoutRender requires a named render before any paid
+// call, because the stored words must name the render they came from.
+func TestRunRefusesWithoutRender(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "ep-1", "owner-a", 1, "analysing")
+	batch := &analysis.ScriptedTranscriber{Completion: episodeResult(), Deleted: deletedResult()}
+	chapterer := &analysis.ScriptedChapterer{Drafts: episodeDrafts()}
+	budgets := &fakeBudget{}
+	cfg := runConfig(t, db, batch, chapterer, budgets, func(context.Context, string, []byte) error { return nil })
+	cfg.RenderID = ""
+	if _, err := analysis.Run(t.Context(), cfg); !errors.Is(err, analysis.ErrInvalid) {
+		t.Fatalf("run error = %v, want ErrInvalid", err)
+	}
+	if batch.Uploads != 0 || batch.Creates != 0 {
+		t.Fatalf("uploads = %d, creates = %d, want no provider call", batch.Uploads, batch.Creates)
+	}
 }

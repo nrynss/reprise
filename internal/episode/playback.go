@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/nrynss/keel/sqlite"
 	"github.com/nrynss/reprise/internal/analysis"
 	"github.com/nrynss/reprise/internal/transcript"
 )
@@ -30,12 +31,31 @@ func (s *Service) EditWords(ctx context.Context, ownerID, episodeID string) ([]E
 	return s.storedWords(ctx, ownerID, episodeID, transcript.SourceEdit)
 }
 
-// RenderedWords returns the words analysis transcribed from the rendered
-// file, oldest start first, on the render clock. The player loads that
-// file, so these words follow it with no cut arithmetic. An episode whose
-// analysis stored no words returns an empty slice. Unknown and foreign
-// episodes report ErrNotFound.
+// RenderedWords returns the words analysis transcribed from the newest
+// render, oldest start first, on the render clock. The player loads that
+// file, so these words follow it with no cut arithmetic. Words analysis
+// took from an older render stay out, so a new render never plays under
+// old words. An episode whose analysis stored no words for its newest
+// render returns an empty slice. Unknown and foreign episodes report
+// ErrNotFound.
 func (s *Service) RenderedWords(ctx context.Context, ownerID, episodeID string) ([]EditWord, error) {
+	if s == nil || s.db == nil || ownerID == "" || episodeID == "" {
+		return nil, fmt.Errorf("episode: rendered words %q: %w", episodeID, ErrInvalid)
+	}
+	if _, err := s.Get(ctx, ownerID, episodeID); err != nil {
+		return nil, err
+	}
+	newest, err := NewestRenderID(ctx, s.db, episodeID)
+	if err != nil {
+		return nil, err
+	}
+	source, err := analysis.RenderedSource(ctx, s.db.Reader(), episodeID)
+	if err != nil {
+		return nil, fmt.Errorf("episode: rendered words %q: %w", episodeID, err)
+	}
+	if newest == "" || source != newest {
+		return make([]EditWord, 0), nil
+	}
 	return s.storedWords(ctx, ownerID, episodeID, analysis.SourceRendered)
 }
 
@@ -144,9 +164,38 @@ func (s *Service) RenderMediaID(ctx context.Context, ownerID, episodeID string) 
 	return mediaID, nil
 }
 
+// NewestRenderID returns the id of the newest render row that holds a
+// playable file, or empty when the episode has none. Newest is the
+// highest row id, the same row RenderMediaID plays.
+func NewestRenderID(ctx context.Context, db *sqlite.DB, episodeID string) (string, error) {
+	if db == nil || episodeID == "" {
+		return "", fmt.Errorf("episode: newest render %q: %w", episodeID, ErrInvalid)
+	}
+	var renderID string
+	err := db.Reader().QueryRowContext(ctx,
+		`SELECT id FROM renders WHERE episode_id = ? AND opus_media_id != ''
+		 ORDER BY rowid DESC LIMIT 1`, episodeID).Scan(&renderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("episode: newest render %q: %w", episodeID, err)
+	}
+	return renderID, nil
+}
+
 // EditorialKind is the job kind the editorial pass runs under. The binary
 // starts that pass under this same name, and the detail reads it back.
 const EditorialKind = "editorial"
+
+// AnalysisKind is the job kind the analysis pass runs under. The binary
+// starts that pass under this same name, and the detail reads it back.
+const AnalysisKind = "analysis"
+
+// MemoryKind is the job kind the commitment marking pass runs under. The
+// binary starts that pass under this same name, and the detail reads it
+// back.
+const MemoryKind = "memory"
 
 // EditorialOutcome returns the latest editorial pass outcome for an
 // episode the owner holds. The transcript pass starts the editorial pass
@@ -167,4 +216,44 @@ func (s *Service) EditorialOutcome(ctx context.Context, ownerID, episodeID strin
 		return Outcome{}, nil
 	}
 	return LastKindJob(ctx, s.db, episodeID, EditorialKind)
+}
+
+// RenderOutcome returns the latest render pass outcome for an episode the
+// owner holds. Mark done stamps the render job with its episode before it
+// answers, so the detail names the render pass as soon as it starts.
+// Found is false when no render ever started, or when the service names
+// no render kind. Unknown and foreign episodes report ErrNotFound.
+func (s *Service) RenderOutcome(ctx context.Context, ownerID, episodeID string) (Outcome, error) {
+	return s.renderPassOutcome(ctx, ownerID, episodeID, s.renderKind)
+}
+
+// AnalysisOutcome returns the latest analysis pass outcome for an episode
+// the owner holds. A finished render starts that pass, so a service with
+// no render kind reports none. Unknown and foreign episodes report
+// ErrNotFound.
+func (s *Service) AnalysisOutcome(ctx context.Context, ownerID, episodeID string) (Outcome, error) {
+	return s.renderPassOutcome(ctx, ownerID, episodeID, AnalysisKind)
+}
+
+// MemoryOutcome returns the latest commitment marking outcome for an
+// episode the owner holds. A finished analysis starts that pass, so a
+// service with no render kind reports none. Unknown and foreign episodes
+// report ErrNotFound.
+func (s *Service) MemoryOutcome(ctx context.Context, ownerID, episodeID string) (Outcome, error) {
+	return s.renderPassOutcome(ctx, ownerID, episodeID, MemoryKind)
+}
+
+// renderPassOutcome reads the latest job of one kind the render path
+// starts, for an episode the owner holds.
+func (s *Service) renderPassOutcome(ctx context.Context, ownerID, episodeID, kind string) (Outcome, error) {
+	if s == nil || s.db == nil || ownerID == "" || episodeID == "" {
+		return Outcome{}, fmt.Errorf("episode: %s outcome %q: %w", kind, episodeID, ErrInvalid)
+	}
+	if _, err := s.Get(ctx, ownerID, episodeID); err != nil {
+		return Outcome{}, err
+	}
+	if s.renderKind == "" || kind == "" {
+		return Outcome{}, nil
+	}
+	return LastKindJob(ctx, s.db, episodeID, kind)
 }

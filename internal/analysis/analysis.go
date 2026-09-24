@@ -3,9 +3,10 @@
 //
 // The pass batch-transcribes the rendered file, never the raw take, so
 // every timestamp describes the episode people hear. Words land in the
-// words table under their own source, entities and key phrases become
-// mention rows with rendered word offsets, and chapters plus the summary
-// land in the analyses row as JSON. The provider copy is deleted once
+// words table under their own source, beside a link naming the render
+// they came from. Entities and key phrases become mention rows with
+// rendered word offsets, and chapters plus the summary land in the
+// analyses row as JSON. The provider copy is deleted once
 // stored and confirmed gone with a fresh fetch.
 //
 // The pass talks to the provider through two narrow seams. Transcriber

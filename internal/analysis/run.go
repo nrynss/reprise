@@ -49,10 +49,10 @@ type RenderedFile struct {
 	DurationSecs float64
 }
 
-// RenderLocator resolves the episode render bytes. The wiring serves it
-// from the renders row and the media store, and tests bind fixture
-// bytes behind the same seam.
-type RenderLocator func(ctx context.Context, ownerID, episodeID string) (RenderedFile, error)
+// RenderLocator resolves the bytes of one render row. The wiring serves it
+// from the renders row and the media store, and tests bind fixture bytes
+// behind the same seam.
+type RenderLocator func(ctx context.Context, ownerID, episodeID, renderID string) (RenderedFile, error)
 
 // Config carries one analysis run.
 type Config struct {
@@ -72,7 +72,10 @@ type Config struct {
 	OwnerID string
 	// EpisodeID scopes the rows written.
 	EpisodeID string
-	// Render resolves the episode render bytes.
+	// RenderID names the render row the pass transcribes. The stored
+	// words name it too, so a later render never plays under them.
+	RenderID string
+	// Render resolves the render bytes.
 	Render RenderLocator
 	// PollInterval sets the transcript poll gap. Zero polls every five seconds.
 	PollInterval time.Duration
@@ -129,13 +132,13 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if cfg.DB == nil || cfg.Batch == nil || cfg.Chapters == nil || cfg.Budgets == nil {
 		return Result{}, fmt.Errorf("analysis: run: %w: missing store, clients, or budget", ErrInvalid)
 	}
-	if cfg.OwnerID == "" || cfg.EpisodeID == "" || cfg.GatewayModel == "" {
-		return Result{}, fmt.Errorf("analysis: run: %w: empty owner, episode, or model", ErrInvalid)
+	if cfg.OwnerID == "" || cfg.EpisodeID == "" || cfg.RenderID == "" || cfg.GatewayModel == "" {
+		return Result{}, fmt.Errorf("analysis: run: %w: empty owner, episode, render, or model", ErrInvalid)
 	}
 	if cfg.Render == nil || cfg.SaveRaw == nil {
 		return Result{}, fmt.Errorf("analysis: run: %w: missing render locator or receipt store", ErrInvalid)
 	}
-	render, err := cfg.Render(ctx, cfg.OwnerID, cfg.EpisodeID)
+	render, err := cfg.Render(ctx, cfg.OwnerID, cfg.EpisodeID, cfg.RenderID)
 	if err != nil {
 		return Result{}, fmt.Errorf("analysis: run: %w", err)
 	}
@@ -172,7 +175,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			return Result{}, fmt.Errorf("analysis: run %s word %q: %w", transcriptID, w.Text, ErrOrder)
 		}
 	}
-	if err := ReplaceWords(ctx, cfg.DB, cfg.OwnerID, cfg.EpisodeID, done.Words); err != nil {
+	if err := ReplaceWords(ctx, cfg.DB, cfg.OwnerID, cfg.EpisodeID, cfg.RenderID, done.Words); err != nil {
 		return Result{}, err
 	}
 	segments := SegmentWords(done.Words)

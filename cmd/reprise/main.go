@@ -557,6 +557,9 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 	if err := memory.Migrate(ctx, db); err != nil {
 		return nil, fmt.Errorf("reprise: migrate memory schema: %w", err)
 	}
+	if err := analysis.Migrate(ctx, db); err != nil {
+		return nil, fmt.Errorf("reprise: migrate analysis schema: %w", err)
+	}
 	identitySvc, err := identity.New(ctx, identity.Config{DB: db, SigningKey: signingKey})
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open guest sessions: %w", err)
@@ -641,17 +644,16 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 		return nil, fmt.Errorf("reprise: open spend gate: %w", err)
 	}
 	events := stream.New(stream.Config{})
-	jobs, err := openJobs(ctx, db, events, loaded, keyed, mediaStore, render.StoreMedia(mediaStore, mediaIndex), sessionBroker, diary)
+	feats := features()
+	extra, err := featureKinds(feats, kindWiring{DB: db, Media: mediaStore, Settings: loaded})
 	if err != nil {
 		return nil, err
 	}
-	episodeSvc, err := episode.NewService(episode.Config{
-		DB:             db,
-		Starter:        jobs.runner,
-		RenderKind:     kindRender,
-		Render:         jobs.resolver,
-		TranscriptKind: kindEditTranscript,
-	})
+	jobs, err := openJobs(ctx, db, events, loaded, keyed, mediaStore, render.StoreMedia(mediaStore, mediaIndex), sessionBroker, diary, extra)
+	if err != nil {
+		return nil, err
+	}
+	episodeSvc, err := episode.NewService(episodeConfig(db, jobs))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open episode service: %w", err)
 	}
@@ -710,10 +712,47 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 		return nil, fmt.Errorf("reprise: share stem completion budget: %w", err)
 	}
 	mux.Handle("POST /api/episodes/{id}/stems/complete", stemsProtected)
+	if err := mountFeatures(ctx, feats, routeWiring{
+		Mux:      mux,
+		Gate:     spendGate,
+		Outer:    outer,
+		Guests:   identitySvc.Middleware,
+		DB:       db,
+		Runner:   jobs.runner,
+		Media:    mediaStore,
+		Settings: loaded,
+	}); err != nil {
+		return nil, err
+	}
 	uploadHandler.Start()
 	go jobs.runSweepLoop(ctx)
+	go jobs.runAdvanceLoop(ctx)
 	wired = true
 	return sessionBroker.Leases(), nil
+}
+
+// episodeConfig wires the episode service over the scheduler. Mark done
+// starts the chained render through it, stamped with its episode, and the
+// detail reads every pass back under the kind names the scheduler starts.
+func episodeConfig(db *sqlite.DB, j *jobs) episode.Config {
+	return episode.Config{
+		DB:             db,
+		Starter:        j,
+		RenderKind:     kindRender,
+		Render:         renderChain{jobs: j},
+		TranscriptKind: kindEditTranscript,
+	}
+}
+
+// features lists every self-wiring feature the boot calls. Each entry
+// names both hooks of one file, and the boot calls each hook once: the
+// kinds before the runner opens, the mount after the core routes.
+func features() []feature {
+	return []feature{
+		{name: "privacy", kinds: privacyKinds, mount: mountPrivacy},
+		{name: "seed", kinds: seedKinds, mount: mountSeed},
+		{name: "export", kinds: exportKinds, mount: mountExport},
+	}
 }
 
 // Pipeline kind names. The phase packages set limits and resumption
@@ -722,16 +761,19 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 const (
 	// kindEditTranscript runs the user stem batch transcription.
 	kindEditTranscript = "edit_transcript"
-	// kindEditorial runs the Gemini editorial pass.
-	kindEditorial = "editorial"
+	// kindEditorial runs the Gemini editorial pass. The episode detail
+	// reads the pass back under this name.
+	kindEditorial = episode.EditorialKind
 	// kindRender runs the ffmpeg render.
 	kindRender = "render"
-	// kindAnalysis runs the render batch pass with chapters.
-	kindAnalysis = "analysis"
+	// kindAnalysis runs the render batch pass with chapters. The episode
+	// detail reads the pass back under this name.
+	kindAnalysis = episode.AnalysisKind
 	// kindCover draws the episode cover.
 	kindCover = "cover"
-	// kindMemory marks commitments in the rendered transcript.
-	kindMemory = "memory"
+	// kindMemory marks commitments in the rendered transcript. The
+	// episode detail reads the pass back under this name.
+	kindMemory = episode.MemoryKind
 )
 
 // sweepInterval spaces abandoned sweep runs. Five minutes bounds the
@@ -759,8 +801,8 @@ const (
 const memoryMaxOutputTokens = 2000
 
 // paidKinds names the job kinds that call paid APIs. A restart marks
-// them interrupted and fails their episodes, so no paid call reruns
-// silently. Idempotent kinds resume instead and keep their episodes.
+// them interrupted and never reruns them, so no paid call runs twice.
+// Idempotent kinds resume instead and keep their episodes.
 var paidKinds = map[string]bool{
 	kindEditTranscript: true,
 	kindEditorial:      true,
@@ -991,6 +1033,9 @@ type episodeDescriptor struct {
 	OwnerID string `json:"owner_id"`
 	// EpisodeID scopes the episode the job worked.
 	EpisodeID string `json:"episode_id"`
+	// RenderID names the render a pass after the render worked on. The
+	// passes before the render leave it empty.
+	RenderID string `json:"render_id,omitempty"`
 }
 
 // reportEpisode publishes the episode linkage first, so an
@@ -1024,7 +1069,7 @@ type pipeline struct {
 	chapters       geminiChapters
 	coverModel     geminiCover
 	memoryModel    geminiMemory
-	transcriber    batchTranscriber
+	transcriber    analysis.Transcriber
 	media          *mediastore.Store
 	mediaDir       string
 	coverDir       string
@@ -1091,13 +1136,14 @@ func (p *pipeline) receiptSink(ownerID, episodeID string) func(ctx context.Conte
 
 // kinds registers every pipeline and settle kind on the runner. Paid
 // kinds stay non-idempotent with no resume, so a restart marks them
-// interrupted and fails their episodes instead of paying twice. The
-// render, reconcile, and sweep kinds resume through their resolvers.
-func (p *pipeline) kinds(resolver *render.Resolver, rec *broker.Reconciler, sweeper *broker.Sweeper) map[string]job.Kind {
+// interrupted instead of paying twice. The render, reconcile, and sweep
+// kinds resume. The render kind arrives built, because its resume rebuilds
+// the chain that moves the episode on.
+func (p *pipeline) kinds(renderKind job.Kind, rec *broker.Reconciler, sweeper *broker.Sweeper) map[string]job.Kind {
 	return map[string]job.Kind{
 		kindEditTranscript:   transcript.Kind,
 		kindEditorial:        editorial.Kind,
-		kindRender:           render.KindOf(resolver),
+		kindRender:           renderKind,
 		kindAnalysis:         analysis.Kind,
 		kindCover:            cover.Kind,
 		kindMemory:           job.Kind{Limit: 1},
@@ -1155,9 +1201,9 @@ func (p *pipeline) editorialFunc(ownerID, episodeID string, userStem, hostStem [
 	}
 }
 
-// analysisFunc builds the analysis work for one rendered episode. The
-// run locates the render itself, so the schedule carries ids only.
-func (p *pipeline) analysisFunc(ownerID, episodeID string) job.Func {
+// analysisFunc builds the analysis work for one render of an episode. The
+// run locates that render itself, so the schedule carries ids only.
+func (p *pipeline) analysisFunc(ownerID, episodeID, renderID string) job.Func {
 	return func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
 		reportEpisode(progress, ownerID, episodeID)
 		res, err := analysis.Run(ctx, analysis.Config{
@@ -1169,6 +1215,7 @@ func (p *pipeline) analysisFunc(ownerID, episodeID string) job.Func {
 			Rates:        p.chapterRates,
 			OwnerID:      ownerID,
 			EpisodeID:    episodeID,
+			RenderID:     renderID,
 			Render:       p.locateRender,
 			SaveRaw: func(ctx context.Context, name string, raw []byte) error {
 				return p.receiptSink(ownerID, episodeID)(ctx, raw)
@@ -1393,14 +1440,14 @@ func (p *pipeline) locateStems(ctx context.Context, ownerID, episodeID string) (
 	return userPath, hostPath, userOffsetMs, hostOffsetMs, nil
 }
 
-// locateRender resolves one episode render for the analysis pass. It
-// reads the latest stored render row and serves the streaming bytes
-// with the probed length, so chapters land on the episode people hear.
-func (p *pipeline) locateRender(ctx context.Context, ownerID, episodeID string) (analysis.RenderedFile, error) {
+// locateRender resolves one render row for the analysis pass. It serves
+// the streaming bytes with the probed length, so chapters land on the
+// episode people hear.
+func (p *pipeline) locateRender(ctx context.Context, ownerID, episodeID, renderID string) (analysis.RenderedFile, error) {
 	var mediaID string
 	err := p.db.Reader().QueryRowContext(ctx,
-		`SELECT opus_media_id FROM renders WHERE owner_id = ? AND episode_id = ? ORDER BY rowid DESC LIMIT 1`,
-		ownerID, episodeID).Scan(&mediaID)
+		`SELECT opus_media_id FROM renders WHERE id = ? AND owner_id = ? AND episode_id = ?`,
+		renderID, ownerID, episodeID).Scan(&mediaID)
 	if err != nil {
 		return analysis.RenderedFile{}, fmt.Errorf("reprise: locate render: %w", err)
 	}
@@ -1428,18 +1475,25 @@ type jobs struct {
 	pipe     *pipeline
 	broker   *broker.Broker
 	store    job.Store
-	// schedMu serializes the draft ensures, so a repeat completion racing
-	// the transcript chain still schedules one editorial job. StartKind
-	// never blocks for a slot, so holding this across a schedule is short.
+	// ready closes once runner is set, or once opening it failed. Work
+	// the runner resumes while it opens reads runner only after this.
+	// Nil means runner was set before any work could run.
+	ready chan struct{}
+	// schedMu serializes the draft ensures and the finish advances, so a
+	// repeat completion racing a chain still schedules one job per pass.
+	// StartKind never blocks for a slot, so holding this across a
+	// schedule is short.
 	schedMu sync.Mutex
+	// settled holds the outcome of each pass after the render whose work
+	// returned before its record finished. schedMu guards it.
+	settled map[passKey]job.Status
 }
 
 // openJobs builds the shared clients once and registers every kind on
 // one durable runner. Paid kinds stay non-idempotent with no resume,
-// so a restart marks them interrupted instead of paying twice. Opening
-// the runner runs recovery first: interrupted paid jobs fail their
-// episodes here, before any new work starts.
-func openJobs(ctx context.Context, db *sqlite.DB, events *stream.Broker, loaded settings.Settings, keyed *costsqlitestore.KeyedBudget, media *mediastore.Store, renderMedia render.Media, sessionBroker *broker.Broker, diary *broker.SQLiteDiary) (*jobs, error) {
+// so a restart marks them interrupted instead of paying twice. The
+// feature kinds join the core kinds before the runner opens.
+func openJobs(ctx context.Context, db *sqlite.DB, events *stream.Broker, loaded settings.Settings, keyed *costsqlitestore.KeyedBudget, media *mediastore.Store, renderMedia render.Media, sessionBroker *broker.Broker, diary *broker.SQLiteDiary, extra []map[string]job.Kind) (*jobs, error) {
 	ceiling, err := spendCeiling(loaded.DailySpendCents)
 	if err != nil {
 		return nil, err
@@ -1517,7 +1571,39 @@ func openJobs(ctx context.Context, db *sqlite.DB, events *stream.Broker, loaded 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open sweeper: %w", err)
 	}
-	store, err := jobsqlitestore.Open(ctx, jobsqlitestore.Config{DB: db})
+	return startJobs(ctx, jobsConfig{
+		db:       db,
+		events:   events,
+		pipe:     pipe,
+		resolver: resolver,
+		rec:      rec,
+		sweeper:  sweeper,
+		broker:   sessionBroker,
+		extra:    extra,
+	})
+}
+
+// jobsConfig carries what startJobs opens the runner over. The clients
+// behind the pipeline are already built, so the boot and the tests share
+// every step after them.
+type jobsConfig struct {
+	db       *sqlite.DB
+	events   *stream.Broker
+	pipe     *pipeline
+	resolver *render.Resolver
+	rec      *broker.Reconciler
+	sweeper  *broker.Sweeper
+	broker   *broker.Broker
+	extra    []map[string]job.Kind
+}
+
+// startJobs merges the core and feature kinds, opens the durable runner,
+// and settles what a restart left. A kind name that appears twice refuses
+// before the runner opens. Opening the runner runs recovery first:
+// interrupted paid jobs stay interrupted and never rerun, and resumed
+// renders continue their chains once the runner is in place.
+func startJobs(ctx context.Context, cfg jobsConfig) (*jobs, error) {
+	store, err := jobsqlitestore.Open(ctx, jobsqlitestore.Config{DB: cfg.db})
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open job store: %w", err)
 	}
@@ -1525,17 +1611,34 @@ func openJobs(ctx context.Context, db *sqlite.DB, events *stream.Broker, loaded 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: list unfinished jobs: %w", err)
 	}
+	out := &jobs{
+		resolver: cfg.resolver,
+		rec:      cfg.rec,
+		sweeper:  cfg.sweeper,
+		pipe:     cfg.pipe,
+		broker:   cfg.broker,
+		store:    store,
+		ready:    make(chan struct{}),
+	}
+	kinds, err := mergeKinds(cfg.pipe.kinds(out.renderKind(), cfg.rec, cfg.sweeper), cfg.extra...)
+	if err != nil {
+		close(out.ready)
+		return nil, err
+	}
 	runner, err := job.Open(ctx, job.Config{
-		Broker: events,
+		Broker: cfg.events,
 		Store:  store,
-		Kinds:  pipe.kinds(resolver, rec, sweeper),
+		Kinds:  kinds,
 	})
 	if err != nil {
+		close(out.ready)
 		return nil, fmt.Errorf("reprise: open job runner: %w", err)
 	}
-	failInterruptedEpisodes(ctx, db, store, unfinished)
-	out := &jobs{runner: runner, resolver: resolver, rec: rec, sweeper: sweeper, pipe: pipe, broker: sessionBroker, store: store}
+	out.runner = runner
+	close(out.ready)
+	out.settleInterrupted(ctx, unfinished)
 	out.recoverDraftPipeline(ctx)
+	out.recoverFinish(ctx)
 	return out, nil
 }
 
@@ -1543,7 +1646,7 @@ func openJobs(ctx context.Context, db *sqlite.DB, events *stream.Broker, loaded 
 // starts one reconcile job for the recorded close, the mint hold
 // settles to the real connected seconds.
 func (j *jobs) settleEnd(inner http.Handler) http.Handler {
-	return &settleOnEnd{inner: inner, banks: j.broker, starter: j.runner, rec: j.rec}
+	return &settleOnEnd{inner: inner, banks: j.broker, starter: j, rec: j.rec}
 }
 
 // settleOnEnd wraps the session end handler: after the inner handler
@@ -1625,24 +1728,26 @@ func (j *jobs) runSweepLoop(ctx context.Context) {
 // startSweep starts one sweep job. A start failure logs, and the next
 // tick retries, so a full runner never stops the schedule.
 func (j *jobs) startSweep(ctx context.Context) {
-	if _, err := j.runner.StartKind(ctx, broker.SweepKindName,
+	if _, err := j.StartKind(ctx, broker.SweepKindName,
 		j.sweeper.RunFunc(broker.SweepInput{MarginSeconds: -1})); err != nil {
 		log.Printf("reprise sweep: start: %v", err)
 	}
 }
 
-// failInterruptedEpisodes fails the episodes a restart left with
-// unfinished paid jobs. Recovery already marked those jobs
-// interrupted; the episode waits in failed for an explicit retry, so
-// no paid call reruns silently. Idempotent kinds resume instead and
-// keep their episodes. Records without an episode linkage log for
-// review instead of failing blindly.
-func failInterruptedEpisodes(ctx context.Context, db *sqlite.DB, store job.Store, unfinished []job.Record) {
+// settleInterrupted settles the episodes a restart left with unfinished
+// paid jobs. Recovery already marked those jobs interrupted, and none of
+// them reruns. An interrupted transcript pass fails its episode, because
+// no word timeline landed. An interrupted editorial pass leaves the draft
+// in place, so it still ships with a plain title. An interrupted cover
+// stores the plain cover. Interrupted analysis and marking passes leave
+// the episode to the finish recovery, which ships it with what landed.
+// Records without an episode linkage log for review instead.
+func (j *jobs) settleInterrupted(ctx context.Context, unfinished []job.Record) {
 	for _, rec := range unfinished {
 		if !paidKinds[rec.Kind] {
 			continue
 		}
-		current, err := store.Get(ctx, rec.ID)
+		current, err := j.store.Get(ctx, rec.ID)
 		if err != nil {
 			log.Printf("reprise restart: read job %s: %v", rec.ID, err)
 			continue
@@ -1655,8 +1760,15 @@ func failInterruptedEpisodes(ctx context.Context, db *sqlite.DB, store job.Store
 			log.Printf("reprise restart: job %s carries no episode, leaving it for review", rec.ID)
 			continue
 		}
-		if err := episode.MarkInterrupted(ctx, db, desc.EpisodeID); err != nil {
-			log.Printf("reprise restart: fail episode %s: %v", desc.EpisodeID, err)
+		switch rec.Kind {
+		case kindEditTranscript:
+			if err := episode.MarkInterrupted(ctx, j.pipe.db, desc.EpisodeID); err != nil {
+				log.Printf("reprise restart: fail episode %s: %v", desc.EpisodeID, err)
+			}
+		case kindCover:
+			if err := j.plainCover(ctx, desc.OwnerID, desc.EpisodeID); err != nil {
+				log.Printf("reprise restart: plain cover for %s: %v", desc.EpisodeID, err)
+			}
 		}
 	}
 }
@@ -1983,13 +2095,13 @@ func hasProposals(ctx context.Context, db *sqlite.DB, episodeID string) (bool, e
 	return count > 0, nil
 }
 
-// stampEpisode records the episode linkage on a freshly started job while
-// the caller still holds the schedule lock. A later schedule then matches
-// the job back to its episode instead of meeting a silent job. The run
-// reports the same linkage again when it starts, so a restart keeps the
-// mapping the stamp wrote first.
-func stampEpisode(ctx context.Context, store job.Store, jobID, ownerID, episodeID string) error {
-	raw, err := json.Marshal(episodeDescriptor{OwnerID: ownerID, EpisodeID: episodeID})
+// stampJob records the linkage on a freshly started job while the caller
+// still holds the schedule lock. A later schedule then matches the job
+// back to its episode, and its render when it works on one, instead of
+// meeting a silent job. The run reports the same linkage again when it
+// starts, so a restart keeps the mapping the stamp wrote first.
+func stampJob(ctx context.Context, store job.Store, jobID string, desc episodeDescriptor) error {
+	raw, err := json.Marshal(desc)
 	if err != nil {
 		return fmt.Errorf("reprise: describe job %s: %w", jobID, err)
 	}
@@ -2215,12 +2327,8 @@ func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (
 		out, runErr := inner(ctx, progress)
 		return j.settleTranscript(ctx, ownerID, episodeID, out, runErr)
 	}
-	jobID, err := j.runner.StartKind(ctx, kindEditTranscript, chained)
+	jobID, err := j.StartEpisodeKind(ctx, kindEditTranscript, ownerID, episodeID, chained)
 	if err != nil {
-		return "", false, err
-	}
-	if err := stampEpisode(ctx, j.store, jobID, ownerID, episodeID); err != nil {
-		_ = j.runner.Cancel(jobID)
 		return "", false, err
 	}
 	return jobID, true, nil
@@ -2268,13 +2376,9 @@ func (j *jobs) startEditorial(ctx context.Context, ownerID, episodeID string) (s
 	if err != nil {
 		return "", false, err
 	}
-	jobID, err := j.runner.StartKind(ctx, kindEditorial,
+	jobID, err := j.StartEpisodeKind(ctx, kindEditorial, ownerID, episodeID,
 		j.pipe.editorialFunc(ownerID, episodeID, userAudio, hostAudio, durationSecs))
 	if err != nil {
-		return "", false, err
-	}
-	if err := stampEpisode(ctx, j.store, jobID, ownerID, episodeID); err != nil {
-		_ = j.runner.Cancel(jobID)
 		return "", false, err
 	}
 	return jobID, true, nil

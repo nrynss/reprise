@@ -27,14 +27,13 @@ import (
 	"github.com/nrynss/keel/gate"
 	keelid "github.com/nrynss/keel/id"
 	"github.com/nrynss/keel/job"
-	jobsqlitestore "github.com/nrynss/keel/job/sqlitestore"
 	"github.com/nrynss/keel/lease"
 	leasesqlitestore "github.com/nrynss/keel/lease/sqlitestore"
 	"github.com/nrynss/keel/mediastore"
 	mediasqlitestore "github.com/nrynss/keel/mediastore/sqlitestore"
 	keelsqlite "github.com/nrynss/keel/sqlite"
-	"github.com/nrynss/keel/stream"
 	"github.com/nrynss/keel/upload"
+	"github.com/nrynss/reprise/internal/analysis"
 	"github.com/nrynss/reprise/internal/api"
 	"github.com/nrynss/reprise/internal/assemblyai"
 	"github.com/nrynss/reprise/internal/broker"
@@ -350,6 +349,7 @@ type wireFixture struct {
 	costs   *costsqlitestore.Store
 	budgets *costsqlitestore.KeyedBudget
 	media   *mediastore.Store
+	index   *mediasqlitestore.Store
 	pipe    *pipeline
 	ceiling cost.Price
 }
@@ -408,6 +408,12 @@ func openWireFixture(t *testing.T) *wireFixture {
 	if _, err := reprisestore.Open(ctx, db); err != nil {
 		t.Fatalf("migrate diary schema: %v", err)
 	}
+	if err := memory.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate memory schema: %v", err)
+	}
+	if err := analysis.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrate analysis schema: %v", err)
+	}
 	ceiling, err := spendCeiling(2000)
 	if err != nil {
 		t.Fatalf("spend ceiling: %v", err)
@@ -436,7 +442,7 @@ func openWireFixture(t *testing.T) *wireFixture {
 	}
 	pipe := newPipeline(db, scriptedGemini(), batch, budgets, ceiling, "test-editorial",
 		media, mediaDir, t.TempDir(), t.TempDir())
-	return &wireFixture{db: db, costs: costs, budgets: budgets, media: media, pipe: pipe, ceiling: ceiling}
+	return &wireFixture{db: db, costs: costs, budgets: budgets, media: media, index: mediaIndex, pipe: pipe, ceiling: ceiling}
 }
 
 // fakeLeaseSettler stands in for the lease manager where the wiring
@@ -526,7 +532,7 @@ func TestPipelineKindsShareOneClientWithSettingsModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sweeper: %v", err)
 	}
-	kinds := fx.pipe.kinds(resolver, rec, sweeper)
+	kinds := fx.pipe.kinds((&jobs{resolver: resolver}).renderKind(), rec, sweeper)
 	if len(kinds) != 8 {
 		t.Fatalf("kinds = %d, want 8 pipeline and settle kinds", len(kinds))
 	}
@@ -547,6 +553,9 @@ func TestPipelineKindsShareOneClientWithSettingsModels(t *testing.T) {
 		if !kind.Idempotent || kind.Resume == nil {
 			t.Fatalf("kind %q does not resume, want the idempotent path", name)
 		}
+	}
+	if kinds[kindRender].MaxAttempts < 2 {
+		t.Fatalf("render attempts = %d, want room for a resumed attempt", kinds[kindRender].MaxAttempts)
 	}
 	if fx.pipe.editorialModel != "test-editorial" {
 		t.Fatalf("editorial model = %q, want the settings value", fx.pipe.editorialModel)
@@ -782,10 +791,11 @@ func TestSettleEndSettlesExactlyOnce(t *testing.T) {
 	}
 }
 
-// TestRestartFailsInterruptedPaidJobs leaves a paid job running, then
-// reopens the runner the way a restart does. Recovery marks the job
-// interrupted, and the restart pass fails its episode for an explicit
-// retry instead of rerunning the paid call.
+// TestRestartFailsInterruptedPaidJobs leaves a transcript job running,
+// then boots the job wiring the way a restart does. Recovery marks the
+// job interrupted, and the restart pass fails its episode for an explicit
+// retry instead of rerunning the paid call. No word timeline landed, so
+// the episode has nothing to ship.
 func TestRestartFailsInterruptedPaidJobs(t *testing.T) {
 	fx := openWireFixture(t)
 	const owner = "owner-restart-fail"
@@ -798,59 +808,21 @@ func TestRestartFailsInterruptedPaidJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create episode: %v", err)
 	}
-	jobStore, err := jobsqlitestore.Open(t.Context(), jobsqlitestore.Config{DB: fx.db})
-	if err != nil {
-		t.Fatalf("open job store: %v", err)
-	}
-	detail, err := json.Marshal(episodeDescriptor{OwnerID: owner, EpisodeID: episodeID})
-	if err != nil {
-		t.Fatalf("encode descriptor: %v", err)
-	}
-	running := job.Record{
-		ID: "job-interrupted-editorial", Kind: kindEditorial, Status: job.StatusRunning,
-		Attempt: 1, RootID: "job-interrupted-editorial",
-		Progress:  job.Progress{Stage: "start", Detail: detail},
-		UpdatedAt: time.Now(),
-	}
-	if err := jobStore.Create(t.Context(), running); err != nil {
-		t.Fatalf("create running job: %v", err)
-	}
-	unfinished, err := jobStore.Unfinished(t.Context())
-	if err != nil {
-		t.Fatalf("list unfinished: %v", err)
-	}
-	events := stream.New(stream.Config{})
-	resolver := &render.Resolver{DB: fx.db.Writer(), WorkDir: t.TempDir(), Locate: fx.pipe.locateStems}
-	rec := openTestReconciler(t, fx, fakeDiary{db: fx.db}, fakeLeaseSettler{})
-	sweeper, err := broker.NewSweeper(broker.SweeperConfig{
-		DB: fx.db, Source: stubSource{}, Statuses: fakeStatuses{},
-		Ender: fakeEnder{}, Reconciler: rec,
-	})
-	if err != nil {
-		t.Fatalf("open sweeper: %v", err)
-	}
-	runner, err := job.Open(t.Context(), job.Config{
-		Broker: events, Store: jobStore, Kinds: fx.pipe.kinds(resolver, rec, sweeper),
-	})
-	if err != nil {
-		t.Fatalf("open runner: %v", err)
-	}
-	_ = runner
-	failInterruptedEpisodes(t.Context(), fx.db, jobStore, unfinished)
-	done, err := jobStore.Get(t.Context(), running.ID)
+	plantRunningJob(t, fx, "job-interrupted-transcript", kindEditTranscript,
+		episodeDescriptor{OwnerID: owner, EpisodeID: episodeID})
+	j := bootFinishJobs(t, fx)
+	done, err := j.store.Get(t.Context(), "job-interrupted-transcript")
 	if err != nil {
 		t.Fatalf("read job: %v", err)
 	}
 	if done.Status != job.StatusInterrupted {
 		t.Fatalf("job status = %q, want interrupted", done.Status)
 	}
-	var state string
-	if err := fx.db.Reader().QueryRowContext(t.Context(),
-		`SELECT state FROM episodes WHERE id = ?`, episodeID).Scan(&state); err != nil {
-		t.Fatalf("read episode state: %v", err)
+	if got := finishState(t, fx, episodeID); got != episode.StateFailed {
+		t.Fatalf("episode state = %q, want failed", got)
 	}
-	if state != string(episode.StateFailed) {
-		t.Fatalf("episode state = %q, want failed", state)
+	if n := kindJobsFor(t, fx, kindEditTranscript, episodeID); n != 1 {
+		t.Fatalf("transcript jobs = %d, want the interrupted one alone", n)
 	}
 }
 
@@ -866,7 +838,7 @@ func TestPipelineFactoriesConstructJobs(t *testing.T) {
 	funcs := map[string]job.Func{
 		kindEditTranscript: fx.pipe.editTranscriptFunc(owner, episodeID, []byte{0x4f, 0x67}, 60, nil, transcript.Offsets{}),
 		kindEditorial:      fx.pipe.editorialFunc(owner, episodeID, []byte{0x4f}, []byte{0x67}, 60),
-		kindAnalysis:       fx.pipe.analysisFunc(owner, episodeID),
+		kindAnalysis:       fx.pipe.analysisFunc(owner, episodeID, "render-factories"),
 		kindCover:          fx.pipe.coverFunc(owner, episodeID),
 		kindMemory:         fx.pipe.memoryFunc(owner, episodeID),
 	}
@@ -896,7 +868,7 @@ func TestPipelineFactoriesConstructJobs(t *testing.T) {
 	if got := wireHeld(t, fx); got != 0 {
 		t.Fatalf("held = %s, want no hold after release", got)
 	}
-	if _, err := fx.pipe.locateRender(t.Context(), owner, "no-such-episode"); err == nil {
+	if _, err := fx.pipe.locateRender(t.Context(), owner, "no-such-episode", "no-such-render"); err == nil {
 		t.Fatal("locate render succeeded with no render rows")
 	}
 }

@@ -31,6 +31,15 @@ type episodeStore interface {
 	// EditorialOutcome returns the latest editorial pass outcome for an
 	// episode the owner holds.
 	EditorialOutcome(ctx context.Context, ownerID, episodeID string) (episode.Outcome, error)
+	// RenderOutcome returns the latest render pass outcome for an
+	// episode the owner holds.
+	RenderOutcome(ctx context.Context, ownerID, episodeID string) (episode.Outcome, error)
+	// AnalysisOutcome returns the latest analysis pass outcome for an
+	// episode the owner holds.
+	AnalysisOutcome(ctx context.Context, ownerID, episodeID string) (episode.Outcome, error)
+	// MemoryOutcome returns the latest commitment marking outcome for an
+	// episode the owner holds.
+	MemoryOutcome(ctx context.Context, ownerID, episodeID string) (episode.Outcome, error)
 	// EditWords returns edit-source words for an episode the owner holds,
 	// oldest first, with times in seconds.
 	EditWords(ctx context.Context, ownerID, episodeID string) ([]episode.EditWord, error)
@@ -118,9 +127,8 @@ type wordJSON struct {
 // episodeDetailJSON carries one episode with its proposals, edit words,
 // and playable addresses. The editor reads the words and the stem
 // address. The episode view plays the render address when one exists,
-// and follows it with the rendered words.
-// The transcript outcome rides beside them, so the detail agrees with
-// the completion answer on what the last pass did.
+// and follows it with the rendered words. Each pass outcome rides beside
+// them, so the gallery names the pass an episode waits on.
 type episodeDetailJSON struct {
 	// Episode is the episode row.
 	Episode episodeJSON `json:"episode"`
@@ -134,6 +142,16 @@ type episodeDetailJSON struct {
 	// done before the editorial pass stores its proposals, so a draft
 	// waits on this pass too.
 	EditorialOutcome *transcriptOutcomeJSON `json:"editorial_outcome,omitempty"`
+	// RenderOutcome names the latest render pass and its state, or nil
+	// when no render ever started. Mark done starts it.
+	RenderOutcome *transcriptOutcomeJSON `json:"render_outcome,omitempty"`
+	// AnalysisOutcome names the latest analysis pass and its state, or
+	// nil when no analysis ever started. A finished render starts it.
+	AnalysisOutcome *transcriptOutcomeJSON `json:"analysis_outcome,omitempty"`
+	// MemoryOutcome names the latest commitment marking pass and its
+	// state, or nil when none ever started. A finished analysis starts
+	// it, and the episode reads ready once it stops.
+	MemoryOutcome *transcriptOutcomeJSON `json:"memory_outcome,omitempty"`
 	// Words holds edit-source words, oldest first.
 	Words []wordJSON `json:"words"`
 	// AudioURL is /media/{id} for the user stem, otherwise the host
@@ -255,6 +273,21 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the editorial outcome could not be read", nil)
 		return
 	}
+	rendered, err := h.store.RenderOutcome(r.Context(), owner, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the render outcome could not be read", nil)
+		return
+	}
+	analysed, err := h.store.AnalysisOutcome(r.Context(), owner, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the analysis outcome could not be read", nil)
+		return
+	}
+	marked, err := h.store.MemoryOutcome(r.Context(), owner, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the marking outcome could not be read", nil)
+		return
+	}
 	out := make([]proposalJSON, 0, len(props))
 	for _, p := range props {
 		out = append(out, proposalJSON{
@@ -281,9 +314,9 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the render could not be read", nil)
 		return
 	}
-	var rendered []episode.EditWord
+	var renderWords []episode.EditWord
 	if renderID != "" {
-		rendered, err = h.store.RenderedWords(r.Context(), owner, episodeID)
+		renderWords, err = h.store.RenderedWords(r.Context(), owner, episodeID)
 		if err != nil {
 			_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the rendered words could not be read", nil)
 			return
@@ -295,23 +328,23 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		Words:          wordsOf(stored),
 		AudioURL:       mediaPath(stemID),
 		RenderAudioURL: mediaPath(renderID),
-		RenderWords:    wordsOf(rendered),
+		RenderWords:    wordsOf(renderWords),
 	}
-	if outcome.Found {
-		detail.TranscriptOutcome = &transcriptOutcomeJSON{
-			JobID:  outcome.JobID,
-			Status: outcome.Status,
-			Error:  outcome.Error,
-		}
-	}
-	if editorial.Found {
-		detail.EditorialOutcome = &transcriptOutcomeJSON{
-			JobID:  editorial.JobID,
-			Status: editorial.Status,
-			Error:  editorial.Error,
-		}
-	}
+	detail.TranscriptOutcome = outcomeOf(outcome)
+	detail.EditorialOutcome = outcomeOf(editorial)
+	detail.RenderOutcome = outcomeOf(rendered)
+	detail.AnalysisOutcome = outcomeOf(analysed)
+	detail.MemoryOutcome = outcomeOf(marked)
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// outcomeOf converts one pass outcome to its wire shape, or nil when no
+// pass ever started, so the field stays out of the body.
+func outcomeOf(out episode.Outcome) *transcriptOutcomeJSON {
+	if !out.Found {
+		return nil
+	}
+	return &transcriptOutcomeJSON{JobID: out.JobID, Status: out.Status, Error: out.Error}
 }
 
 // wordsOf converts stored words to their wire shape. It never returns

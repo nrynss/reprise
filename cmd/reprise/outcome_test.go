@@ -214,7 +214,7 @@ func TestCoveredRepeatReportsRunningOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start covering pass: %v", err)
 	}
-	if err := stampEpisode(ctx, drafts.store, covering, owner, episodeID); err != nil {
+	if err := stampJob(ctx, drafts.store, covering, episodeDescriptor{OwnerID: owner, EpisodeID: episodeID}); err != nil {
 		t.Fatalf("stamp covering pass: %v", err)
 	}
 	if again, covered, err := drafts.ensureTranscript(ctx, owner, episodeID); err != nil || covered || again != "" {

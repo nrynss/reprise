@@ -21,7 +21,7 @@ func TestReplaceStoresRenderedWords(t *testing.T) {
 		{Text: "harbour", StartMs: 200, EndMs: 430, Confidence: 0.97},
 		{Text: "lantern.", StartMs: 450, EndMs: 700, Confidence: 0.99},
 	}
-	if err := analysis.ReplaceWords(t.Context(), db, "owner-a", "ep-1", words); err != nil {
+	if err := analysis.ReplaceWords(t.Context(), db, "owner-a", "ep-1", renderOf("ep-1"), words); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	var source string
@@ -61,7 +61,7 @@ func TestReplaceIsRepeatable(t *testing.T) {
 	addEpisode(t, db, "ep-1", "owner-a", 1, "draft")
 	words := []analysis.Word{{Text: "one", StartMs: 0, EndMs: 100}}
 	for range 2 {
-		if err := analysis.ReplaceWords(t.Context(), db, "owner-a", "ep-1", words); err != nil {
+		if err := analysis.ReplaceWords(t.Context(), db, "owner-a", "ep-1", renderOf("ep-1"), words); err != nil {
 			t.Fatalf("replace: %v", err)
 		}
 	}
@@ -82,7 +82,7 @@ func TestReplaceRejectsInvertedSpan(t *testing.T) {
 	addOwner(t, db, "owner-a")
 	addEpisode(t, db, "ep-1", "owner-a", 1, "draft")
 	words := []analysis.Word{{Text: "bad", StartMs: 300, EndMs: 100}}
-	if err := analysis.ReplaceWords(t.Context(), db, "owner-a", "ep-1", words); !errors.Is(err, analysis.ErrOrder) {
+	if err := analysis.ReplaceWords(t.Context(), db, "owner-a", "ep-1", renderOf("ep-1"), words); !errors.Is(err, analysis.ErrOrder) {
 		t.Fatalf("replace error = %v, want the order sentinel", err)
 	}
 }
@@ -199,5 +199,55 @@ func TestStoreAnalysisReplacesOnRetry(t *testing.T) {
 	}
 	if transcriptID != "tx-2" {
 		t.Fatalf("transcript id = %q, want the retry row", transcriptID)
+	}
+}
+
+// TestReplaceNamesTheRender pins the render link beside the stored words.
+// A later analysis of a newer render moves the link with the words, and a
+// replace that names no render refuses before touching a row.
+func TestReplaceNamesTheRender(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "ep-1", "owner-a", 1, "analysing")
+	before, err := analysis.RenderedSource(t.Context(), db, "ep-1")
+	if err != nil {
+		t.Fatalf("source before: %v", err)
+	}
+	if before != "" {
+		t.Fatalf("source = %q before any analysis, want empty", before)
+	}
+	words := []analysis.Word{{Text: "one", StartMs: 0, EndMs: 100}}
+	if err := analysis.ReplaceWords(t.Context(), db, "owner-a", "ep-1", renderOf("ep-1"), words); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	first, err := analysis.RenderedSource(t.Context(), db, "ep-1")
+	if err != nil {
+		t.Fatalf("source: %v", err)
+	}
+	if first != renderOf("ep-1") {
+		t.Fatalf("source = %q, want %q", first, renderOf("ep-1"))
+	}
+	addRender(t, db, "render-newer", "owner-a", "ep-1")
+	if err := analysis.ReplaceWords(t.Context(), db, "owner-a", "ep-1", "render-newer",
+		[]analysis.Word{{Text: "two", StartMs: 0, EndMs: 100}}); err != nil {
+		t.Fatalf("replace newer: %v", err)
+	}
+	second, err := analysis.RenderedSource(t.Context(), db, "ep-1")
+	if err != nil {
+		t.Fatalf("source newer: %v", err)
+	}
+	if second != "render-newer" {
+		t.Fatalf("source = %q, want the newer render", second)
+	}
+	if err := analysis.ReplaceWords(t.Context(), db, "owner-a", "ep-1", "", words); !errors.Is(err, analysis.ErrInvalid) {
+		t.Fatalf("replace with no render error = %v, want ErrInvalid", err)
+	}
+	stored, err := analysis.LoadWords(t.Context(), db, "ep-1")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(stored) != 1 || stored[0].Text != "two" {
+		t.Fatalf("stored = %+v, want the newer words untouched by the refused replace", stored)
 	}
 }

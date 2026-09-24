@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -161,5 +162,71 @@ func TestEpisodeDetailCarriesEditorialOutcome(t *testing.T) {
 	got := body.EditorialOutcome
 	if got == nil || got.JobID != "job-edit" || got.Status != string(job.StatusError) || got.Error != "budget refused" {
 		t.Fatalf("editorial outcome = %+v, want the failed job-edit with its text", got)
+	}
+}
+
+// seedKindRow stores one job of a named kind stamped for an episode and
+// fails the test on error.
+func seedKindRow(t *testing.T, store *jobsqlitestore.Store, id, kind, owner, episodeID string, status job.Status, errText string, updatedAt time.Time) {
+	t.Helper()
+	detail, err := json.Marshal(map[string]string{"owner_id": owner, "episode_id": episodeID, "render_id": "render-1"})
+	if err != nil {
+		t.Fatalf("encode linkage: %v", err)
+	}
+	rec := job.Record{
+		ID: id, Kind: kind, Status: status, Attempt: 1, RootID: id,
+		Progress:  job.Progress{Stage: "start", Detail: detail},
+		UpdatedAt: updatedAt,
+	}
+	if errText != "" {
+		rec.Err = errors.New(errText)
+	}
+	if err := store.Create(t.Context(), rec); err != nil {
+		t.Fatalf("create job %s: %v", id, err)
+	}
+}
+
+// TestEpisodeDetailCarriesRenderPassOutcomes stores a done render, a
+// failed analysis, and a running marking pass for an analysing episode.
+// The detail names each pass with its state, and the failure text rides
+// on the analysis pass alone. Another owner reads 404 and none of it.
+func TestEpisodeDetailCarriesRenderPassOutcomes(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "analysing")
+	store := openJobRows(t, db)
+	now := time.Now()
+	seedKindRow(t, store, "job-render", "render", owner.ID, "ep-1", job.StatusDone, "", now.Add(-2*time.Minute))
+	seedKindRow(t, store, "job-analysis", episode.AnalysisKind, owner.ID, "ep-1", job.StatusError, "batch refused", now.Add(-time.Minute))
+	seedKindRow(t, store, "job-memory", episode.MemoryKind, owner.ID, "ep-1", job.StatusRunning, "", now)
+	handler := NewEpisodes(newEpisodeService(t, db, nil).svc)
+
+	rec := serve(guests, handler, cookie, httptest.NewRequest(http.MethodGet, "/api/episodes/ep-1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, want 200", rec.Code)
+	}
+	var body episodeDetailJSON
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if body.RenderOutcome == nil || body.RenderOutcome.JobID != "job-render" || body.RenderOutcome.Status != "done" {
+		t.Fatalf("render outcome = %+v, want the done job-render", body.RenderOutcome)
+	}
+	if body.AnalysisOutcome == nil || body.AnalysisOutcome.JobID != "job-analysis" ||
+		body.AnalysisOutcome.Status != "error" || body.AnalysisOutcome.Error != "batch refused" {
+		t.Fatalf("analysis outcome = %+v, want the failed job-analysis with its text", body.AnalysisOutcome)
+	}
+	if body.MemoryOutcome == nil || body.MemoryOutcome.JobID != "job-memory" || body.MemoryOutcome.Status != "running" {
+		t.Fatalf("memory outcome = %+v, want the running job-memory", body.MemoryOutcome)
+	}
+
+	strangerCookie, _ := mintGuest(t, guests)
+	foreign := serve(guests, handler, strangerCookie, httptest.NewRequest(http.MethodGet, "/api/episodes/ep-1", nil))
+	if foreign.Code != http.StatusNotFound {
+		t.Fatalf("stranger status = %d, want 404", foreign.Code)
+	}
+	if strings.Contains(foreign.Body.String(), "job-render") || strings.Contains(foreign.Body.String(), "batch refused") {
+		t.Fatalf("stranger body leaks the passes: %s", foreign.Body.String())
 	}
 }

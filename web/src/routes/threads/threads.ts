@@ -797,22 +797,78 @@ function stoppedPassNote(pass: string, outcome: LiveOutcome): string {
 // The episode may have failed later, in the render or the analysis.
 const FAILED_EPISODE_NOTE = 'The episode failed, and no pass stored a reason.';
 
+// The live row states whose card reads the detail again once its pass
+// stops, because the next pass or the ready state follows from there.
+const RECHECKED_STATES = new Set(['draft', 'rendering', 'analysing']);
+
+// The lines a rendering or analysing card shows once the pass it follows
+// is done. The episode reads ready only once marking stops, so none of
+// them says ready.
+const RENDERED_NOTE = 'The render is done. The analysis starts next.';
+const ANALYSED_NOTE = 'The analysis is done. Marking commitments comes next.';
+const MARKED_NOTE = 'Commitments are marked. The episode is nearly ready.';
+
+// The lines a rendering or analysing card shows while the detail names no
+// pass for that step yet. The card then follows the last pass it can name.
+const RENDER_WAITING_NOTE = 'The episode is rendering. The render pass has not reported yet.';
+const ANALYSIS_WAITING_NOTE = 'The render is done. The analysis pass has not reported yet.';
+
+// The pass a rendering or analysing card follows, and the line it shows
+// once that pass stops. A running pass carries the line its done state
+// shows, because the card reads the note the moment the stream ends. A
+// failed analysis says the episode still ships, because the render
+// already plays. With no pass to name, the card follows the transcript
+// pass with a waiting line. It returns null when the detail names no
+// pass at all.
+function finishPass(detail: LiveDetail, proposed: boolean): GalleryPass | null {
+	const follow = (outcome: LiveOutcome, note: string): GalleryPass => ({
+		jobId: outcome.jobId,
+		status: outcome.status,
+		note,
+		proposed
+	});
+	if (detail.episode.state === 'rendering') {
+		const render = detail.renderOutcome;
+		if (render) return follow(render, stoppedPassNote('render', render) || RENDERED_NOTE);
+		return detail.outcome ? follow(detail.outcome, RENDER_WAITING_NOTE) : null;
+	}
+	const analysis = detail.analysisOutcome;
+	const marking = detail.memoryOutcome;
+	if (analysis?.status === 'done' && marking) {
+		return follow(marking, stoppedPassNote('marking', marking) || MARKED_NOTE);
+	}
+	if (analysis) {
+		const stopped = stoppedPassNote('analysis', analysis);
+		return follow(analysis, stopped ? `${stopped} The episode still ships without chapters.` : ANALYSED_NOTE);
+	}
+	const waiting = detail.renderOutcome ?? detail.outcome;
+	return waiting ? follow(waiting, ANALYSIS_WAITING_NOTE) : null;
+}
+
 // Which pass one gallery card follows, read from the episode detail. The
 // transcript pass reads done as soon as it starts the editorial pass.
 // Every finished editorial pass stores a title proposal. So a draft with
 // a done transcript and no title still waits on the editorial pass, and
 // its card follows that pass instead. A failed editorial pass says so,
-// and so does one that never started. A failed episode always shows why
-// it failed, never a done pass. It returns null when the detail names no
-// transcript pass.
+// and so does one that never started. A rendering or analysing episode
+// follows the pass it waits on and never reads ready. A failed episode
+// always shows why it failed, never a done pass. It returns null when
+// the detail names no pass the card can follow.
 export function galleryPass(detail: LiveDetail): GalleryPass | null {
+	const proposed = detail.proposals.some((proposal) => proposal.kind === 'title');
+	const state = detail.episode.state;
+	if (state === 'rendering' || state === 'analysing') return finishPass(detail, proposed);
 	const transcript = detail.outcome;
 	if (!transcript) return null;
-	const proposed = detail.proposals.some((proposal) => proposal.kind === 'title');
-	const failed = detail.episode.state === 'failed';
+	const failed = state === 'failed';
 	const base = { jobId: transcript.jobId, status: transcript.status, note: '', proposed };
 	if (failed && transcript.status !== 'done') {
 		return { ...base, note: stoppedPassNote('transcript', transcript) || FAILED_EPISODE_NOTE };
+	}
+	const render = detail.renderOutcome;
+	if (failed && render && render.status !== 'done') {
+		const note = stoppedPassNote('render', render) || FAILED_EPISODE_NOTE;
+		return { jobId: render.jobId, status: render.status, note, proposed };
 	}
 	if (!failed && (detail.episode.state !== 'draft' || proposed || transcript.status !== 'done')) return base;
 	const editorial = detail.editorialOutcome;
@@ -1080,41 +1136,48 @@ export class GalleryController {
 		if (changed) this.emit();
 	}
 
-	// Read one episode detail and follow the pass its card shows. It
-	// reports whether the row changed. A refused detail leaves the row
-	// as it was.
+	// Read one episode detail and follow the pass its card shows. The row
+	// takes the state the detail reads, so a card moves from rendering to
+	// analysing to ready. It reports whether the row changed. A refused
+	// detail leaves the row as it was.
 	private async followPass(episodeId: string): Promise<boolean> {
 		const found = await this.passOf(episodeId);
 		if (!found) return false;
-		this.notes[found.jobId] = found.note;
+		const { pass, state } = found;
+		this.notes[pass.jobId] = pass.note;
 		const row = this.snap.rows.find((candidate) => candidate.id === episodeId);
-		if (!this.streams.some((entry) => entry.jobId === found.jobId)) {
-			this.statuses[found.jobId] = outcomeJobStatus(found.status);
-			this.followJob(found.jobId);
+		if (!this.streams.some((entry) => entry.jobId === pass.jobId)) {
+			this.statuses[pass.jobId] = outcomeJobStatus(pass.status);
+			this.followJob(pass.jobId);
 		}
-		if (!row || (row.jobId === found.jobId && row.proposed === found.proposed)) return false;
-		row.jobId = found.jobId;
-		row.proposed = found.proposed;
+		if (!row || (row.jobId === pass.jobId && row.proposed === pass.proposed && row.state === state)) return false;
+		row.jobId = pass.jobId;
+		row.proposed = pass.proposed;
+		row.state = state;
 		return true;
 	}
 
-	// The pass behind one unfinished episode, or null when the detail
-	// refuses or names none.
-	private async passOf(episodeId: string): Promise<GalleryPass | null> {
+	// The pass behind one unfinished episode with the state the detail
+	// reads, or null when the detail refuses or names no pass.
+	private async passOf(episodeId: string): Promise<{ pass: GalleryPass; state: string } | null> {
 		try {
-			return galleryPass(await fetchEpisodeDetail(window.fetch, episodeId));
+			const detail = await fetchEpisodeDetail(window.fetch, episodeId);
+			const pass = galleryPass(detail);
+			return pass ? { pass, state: detail.episode.state } : null;
 		} catch {
 			return null;
 		}
 	}
 
-	// A live draft whose job just stopped reads its detail once more. The
+	// A live row whose job just stopped reads its detail once more. The
 	// editorial pass may have stored its proposals, or failed with a
-	// reason the stream does not carry.
+	// reason the stream does not carry. A finished render or analysis
+	// starts the next pass, and a finished marking pass makes the episode
+	// ready, so those rows follow the detail too.
 	private recheck(jobId: string): void {
 		if (this.rechecked.has(jobId)) return;
 		const row = this.snap.rows.find((candidate) => candidate.jobId === jobId);
-		if (!row || row.fixture || row.state !== 'draft') return;
+		if (!row || row.fixture || !RECHECKED_STATES.has(row.state)) return;
 		this.rechecked.add(jobId);
 		void this.followPass(row.id).then((changed) => {
 			if (changed) this.emit();
@@ -1689,7 +1752,7 @@ export interface LiveProposal {
 	decision: string;
 }
 
-// The latest transcript pass outcome, as detail answers it.
+// One pass outcome, as detail answers it.
 export interface LiveOutcome {
 	jobId: string;
 	status: string;
@@ -1706,7 +1769,9 @@ export interface LiveWord {
 // One episode with its proposals, edit words, and playable addresses.
 // Render words come from the rendered file itself, and stay empty until
 // analysis stores them. The editorial outcome names the pass that stores
-// the proposals, or stays null until that pass starts.
+// the proposals, or stays null until that pass starts. The render,
+// analysis and marking outcomes name the passes after mark done, each
+// null until its pass starts.
 export interface LiveDetail {
 	episode: LiveEpisode;
 	proposals: LiveProposal[];
@@ -1716,6 +1781,9 @@ export interface LiveDetail {
 	renderAudioUrl: string;
 	renderWords: LiveWord[];
 	editorialOutcome: LiveOutcome | null;
+	renderOutcome: LiveOutcome | null;
+	analysisOutcome: LiveOutcome | null;
+	memoryOutcome: LiveOutcome | null;
 }
 
 // The silence the render lays between the cold open and the episode, and
@@ -2016,7 +2084,10 @@ export function parseEpisodeDetail(raw: string): LiveDetail {
 		audioUrl: textField(decoded, 'audio_url'),
 		renderAudioUrl: textField(decoded, 'render_audio_url'),
 		renderWords,
-		editorialOutcome: parseLiveOutcome(decoded['editorial_outcome'])
+		editorialOutcome: parseLiveOutcome(decoded['editorial_outcome']),
+		renderOutcome: parseLiveOutcome(decoded['render_outcome']),
+		analysisOutcome: parseLiveOutcome(decoded['analysis_outcome']),
+		memoryOutcome: parseLiveOutcome(decoded['memory_outcome'])
 	};
 }
 

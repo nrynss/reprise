@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/reprise/internal/analysis"
 	"github.com/nrynss/reprise/internal/episode"
 	"github.com/nrynss/reprise/internal/store"
 )
@@ -46,6 +47,9 @@ func openDatabase(t *testing.T) *sqlite.DB {
 	t.Cleanup(func() { _ = db.Close() }) // the handle is discarded here, so a close failure cannot fail the test
 	if _, err := store.Open(t.Context(), db); err != nil {
 		t.Fatalf("migrate store: %v", err)
+	}
+	if err := analysis.Migrate(t.Context(), db); err != nil {
+		t.Fatalf("migrate analysis: %v", err)
 	}
 	if _, err := db.Writer().ExecContext(t.Context(),
 		"INSERT INTO users (id, kind, created_at, last_seen_at) VALUES ('owner-1', 'owner', 1, 2)"); err != nil {

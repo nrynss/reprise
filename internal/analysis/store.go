@@ -3,11 +3,39 @@ package analysis
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 
 	"github.com/nrynss/keel/id"
+	"github.com/nrynss/keel/sqlite"
 )
+
+// schemaNamespace is the migration ledger namespace this package owns. It
+// shares the database file with the diary tables and the Keel stores
+// without colliding, because each namespace keeps its own ledger.
+const schemaNamespace = "analysis"
+
+//go:embed migrations/*.sql
+var migrations embed.FS
+
+// Migrate applies the analysis schema to db. Call it after the diary
+// schema at boot, because the render link references the diary tables. A
+// second run changes nothing.
+func Migrate(ctx context.Context, db *sqlite.DB) error {
+	if db == nil {
+		return fmt.Errorf("analysis: migrate: %w: database must not be nil", ErrInvalid)
+	}
+	schema, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		return fmt.Errorf("analysis: migrate: %w", err)
+	}
+	if err := sqlite.Migrate(ctx, db, schemaNamespace, schema); err != nil {
+		return fmt.Errorf("analysis: migrate: %w", err)
+	}
+	return nil
+}
 
 // StoredWord is one persisted rendered word.
 type StoredWord struct {
@@ -22,11 +50,13 @@ type StoredWord struct {
 }
 
 // ReplaceWords swaps the episode rendered words for words in one
-// transaction. A rerun writes the same rows again instead of doubling
-// them, so a repeated call stays safe. Every row carries
-// SourceRendered, and the edit timeline stays untouched.
-func ReplaceWords(ctx context.Context, db *sql.DB, ownerID, episodeID string, words []Word) error {
-	if db == nil || ownerID == "" || episodeID == "" {
+// transaction, and names renderID as the render they came from. A rerun
+// writes the same rows again instead of doubling them, so a repeated call
+// stays safe. Every row carries SourceRendered, and the edit timeline
+// stays untouched. The words and their render land together, so a reader
+// never pairs new words with an old render or old words with a new one.
+func ReplaceWords(ctx context.Context, db *sql.DB, ownerID, episodeID, renderID string, words []Word) error {
+	if db == nil || ownerID == "" || episodeID == "" || renderID == "" {
 		return fmt.Errorf("analysis: replace words: %w", ErrInvalid)
 	}
 	for _, w := range words {
@@ -54,10 +84,34 @@ func ReplaceWords(ctx context.Context, db *sql.DB, ownerID, episodeID string, wo
 			return fmt.Errorf("analysis: replace words: %w", err)
 		}
 	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO rendered_sources (episode_id, owner_id, render_id) VALUES (?, ?, ?)
+		 ON CONFLICT(episode_id) DO UPDATE SET owner_id = excluded.owner_id, render_id = excluded.render_id`,
+		episodeID, ownerID, renderID); err != nil {
+		return fmt.Errorf("analysis: replace words: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("analysis: replace words: %w", err)
 	}
 	return nil
+}
+
+// RenderedSource returns the render the stored rendered words came from,
+// or empty when no analysis stored words for the episode.
+func RenderedSource(ctx context.Context, db *sql.DB, episodeID string) (string, error) {
+	if db == nil || episodeID == "" {
+		return "", fmt.Errorf("analysis: rendered source: %w", ErrInvalid)
+	}
+	var renderID string
+	err := db.QueryRowContext(ctx,
+		"SELECT render_id FROM rendered_sources WHERE episode_id = ?", episodeID).Scan(&renderID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("analysis: rendered source: %w", err)
+	}
+	return renderID, nil
 }
 
 // LoadWords reads the episode rendered words ordered by start. Chapter

@@ -34,14 +34,17 @@ type progressSnap struct {
 	Detail json.RawMessage `json:"detail"`
 }
 
-// linkage describes the episode stamp every draft schedule writes on its
-// job before returning, so a later schedule maps the job back to its
+// linkage describes the episode stamp every schedule writes on its job
+// before returning, so a later schedule maps the job back to its
 // episode. It matches the shape the binary stamps, read here only.
 type linkage struct {
 	// OwnerID scopes the episode the job worked.
 	OwnerID string `json:"owner_id"`
 	// EpisodeID scopes the episode the job worked.
 	EpisodeID string `json:"episode_id"`
+	// RenderID names the render a pass after the render worked on. The
+	// passes before the render leave it empty.
+	RenderID string `json:"render_id,omitempty"`
 }
 
 // likeEscape escapes the LIKE wildcards in one id, so the outcome query
@@ -57,6 +60,24 @@ func likeEscape(id string) string {
 // outcome must survive a restart. A job without linkage names no episode
 // and never matches. It reports Found false when no pass ever started.
 func LastKindJob(ctx context.Context, db *sqlite.DB, episodeID, kind string) (Outcome, error) {
+	return lastJob(ctx, db, episodeID, kind, func(linkage) bool { return true })
+}
+
+// LastRenderKindJob returns the latest job of one kind whose stamped
+// linkage names both the episode and one render. The passes after a
+// render stamp the render they work on, so a pass that ran on an older
+// render never counts for a newer one. It reports Found false when no
+// pass ever started on that render.
+func LastRenderKindJob(ctx context.Context, db *sqlite.DB, episodeID, renderID, kind string) (Outcome, error) {
+	if renderID == "" {
+		return Outcome{}, fmt.Errorf("episode: last job %q: %w: empty render", episodeID, ErrInvalid)
+	}
+	return lastJob(ctx, db, episodeID, kind, func(link linkage) bool { return link.RenderID == renderID })
+}
+
+// lastJob returns the latest job of one kind whose linkage names the
+// episode and passes match.
+func lastJob(ctx context.Context, db *sqlite.DB, episodeID, kind string, match func(linkage) bool) (Outcome, error) {
 	if db == nil || episodeID == "" || kind == "" {
 		return Outcome{}, fmt.Errorf("episode: last job %q: %w", episodeID, ErrInvalid)
 	}
@@ -82,7 +103,7 @@ func LastKindJob(ctx context.Context, db *sqlite.DB, episodeID, kind string) (Ou
 		if err := json.Unmarshal(snap.Detail, &link); err != nil || link.EpisodeID == "" {
 			continue
 		}
-		if link.EpisodeID != episodeID {
+		if link.EpisodeID != episodeID || !match(link) {
 			continue
 		}
 		return Outcome{Found: true, JobID: id, Status: status, Error: errText}, nil

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/reprise/internal/analysis"
 )
 
 // seedWordRow writes one word and fails the test on error.
@@ -53,7 +54,8 @@ func secondsNear(got, want float64) bool {
 // seconds, the user stem address, and the newest render address. A
 // second episode with only a host stem and no render omits the render
 // address and serves the host stem. Rendered words ride beside the
-// render they came from, and never beside an episode with no render.
+// render they came from, never beside a newer render, and never beside an
+// episode with no render.
 func TestEpisodeDetailServesWordsStemAndRender(t *testing.T) {
 	t.Parallel()
 	db, guests := openDiary(t)
@@ -62,11 +64,14 @@ func TestEpisodeDetailServesWordsStemAndRender(t *testing.T) {
 	seedProposalRow(t, db, "cut-1", owner.ID, "ep-1")
 	seedWordRow(t, db, "word-late", owner.ID, "ep-1", "Later", "edit", 2000, 2500)
 	seedWordRow(t, db, "word-early", owner.ID, "ep-1", "Hello", "edit", 400, 900)
-	seedWordRow(t, db, "word-other", owner.ID, "ep-1", "Nope", "rendered", 100, 200)
 	seedStemRow(t, db, "stem-host", owner.ID, "ep-1", "host-blob", "host")
 	seedStemRow(t, db, "stem-user", owner.ID, "ep-1", "user-blob", "user")
 	seedRenderRow(t, db, "render-old", owner.ID, "ep-1", "opus-old")
 	seedRenderRow(t, db, "render-new", owner.ID, "ep-1", "opus-new")
+	if err := analysis.ReplaceWords(t.Context(), db.Writer(), owner.ID, "ep-1", "render-new",
+		[]analysis.Word{{Text: "Nope", StartMs: 100, EndMs: 200}}); err != nil {
+		t.Fatalf("seed rendered words: %v", err)
+	}
 
 	seedEpisodeRow(t, db, "ep-2", owner.ID, 2, "ready")
 	seedStemRow(t, db, "stem-host-only", owner.ID, "ep-2", "host-only", "host")
@@ -108,6 +113,15 @@ func TestEpisodeDetailServesWordsStemAndRender(t *testing.T) {
 	if len(got.RenderWords) != 1 || got.RenderWords[0].Text != "Nope" ||
 		!secondsNear(got.RenderWords[0].Start, 0.1) || !secondsNear(got.RenderWords[0].End, 0.2) {
 		t.Fatalf("render words = %+v, want Nope from 0.1 to 0.2", got.RenderWords)
+	}
+
+	seedRenderRow(t, db, "render-newest", owner.ID, "ep-1", "opus-newest")
+	rerendered := detail("ep-1")
+	if rerendered.RenderAudioURL != "/media/opus-newest" {
+		t.Fatalf("render address = %q, want the newest render", rerendered.RenderAudioURL)
+	}
+	if rerendered.RenderWords == nil || len(rerendered.RenderWords) != 0 {
+		t.Fatalf("render words = %+v, want none under a render analysis never read", rerendered.RenderWords)
 	}
 
 	bare := detail("ep-2")
