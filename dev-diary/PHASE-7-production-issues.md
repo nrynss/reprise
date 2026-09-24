@@ -698,7 +698,7 @@ requires:   T7.26, T7.1
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/episode/, web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts, internal/api/episodes.go, internal/episode/playback.go
-status:     in-progress:land:t7.28-impl@53877f4417fb65b3632b6bb6b186ecb6ec341a1f
+status:     done:02e5823d4b4dd4acb6cf2a6bf62d4b89a604e828
 ```
 A real take reached draft. The transcript pass is done and the
 proposals are stored. The gallery opens that card on the episode
@@ -726,7 +726,7 @@ plays that file.
 requires:   T7.26, T7.28
 fixture-ok: yes
 size:       L · frontier
-owns:       cmd/reprise/, internal/episode/, internal/analysis/
+owns:       cmd/reprise/, internal/episode/, internal/analysis/, internal/api/episodes.go, web/src/routes/threads/threads.ts
 status:     in-progress:implement:t7.29-impl
 ```
 Mark done starts the render job and nothing after it. No caller
@@ -744,6 +744,9 @@ no stored mention to call back to, which is the beat the demo sells.
   with a plain title.
 * Each paid kind reserves budget first. A restart marks an
   interrupted paid job `interrupted` and never reruns it.
+* The render job carries its episode, and the detail reports the
+  render and analysis outcome. A rendering or analysing gallery card
+  shows that pass, never "Ready", until the episode is `ready`.
 * The stored rendered words name the render they came from. The
   detail endpoint sends them only when they match the newest render,
   so a new render never plays under old words.
@@ -873,6 +876,12 @@ fail, and a fresh worktree passes the gate three times in a row.
 
 ### What exists now
 
+T7.28 landed at 02e5823 after round 4 APPROVE with zero in-scope
+findings and zero residue. A live draft opens the editor once its
+editorial pass stores proposals. The editor plays the stored user stem
+and posts decisions against stored proposal ids. The episode page
+plays the newest render on a clock that follows its cuts and 10 ms
+crossfades. A failed episode card names the pass that stopped.
 T7.26 landed at 8947687 after round 1 APPROVE with zero findings.
 Raw PCM stems now open as `audio/pcm` through the real upload
 handler. A type outside the set still refuses with
@@ -966,7 +975,14 @@ T7.2 lands, so dogfood sparingly.
 
 ### What surprised us
 
-Nothing yet.
+T7.28 took four rounds. Each round found another state the gallery
+card had never met: a pending editorial pass, a restart mid pass, and
+a render the detail cannot see. The binary still spells the editorial
+kind twice. T7.29 owns both fixes.
+
+On this workstation ffmpeg is 9.0.2 against the 9.0.1 pin, so
+`tools/check.sh` stops at its tool check. The owner accepted running
+every later step by hand, with each exit code recorded.
 
 ### Notes for the next developer
 
