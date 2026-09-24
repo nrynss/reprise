@@ -28,6 +28,15 @@ type episodeStore interface {
 	// TranscriptOutcome returns the latest transcript pass outcome for
 	// an episode the owner holds.
 	TranscriptOutcome(ctx context.Context, ownerID, episodeID string) (episode.Outcome, error)
+	// EditWords returns edit-source words for an episode the owner holds,
+	// oldest first, with times in seconds.
+	EditWords(ctx context.Context, ownerID, episodeID string) ([]episode.EditWord, error)
+	// StemMediaID returns the user stem media id, or the host stem when
+	// no user stem is stored, or empty when neither is stored.
+	StemMediaID(ctx context.Context, ownerID, episodeID string) (string, error)
+	// RenderMediaID returns the newest render opus media id, or empty
+	// when no render exists.
+	RenderMediaID(ctx context.Context, ownerID, episodeID string) (string, error)
 }
 
 var _ episodeStore = (*episode.Service)(nil)
@@ -90,10 +99,21 @@ type proposalJSON struct {
 	Decision string `json:"decision"`
 }
 
-// episodeDetailJSON carries one episode with its proposals, so the editor
-// reads the draft and its revertible record in one round trip. The
-// transcript outcome rides beside them, so the detail agrees with the
-// completion answer on what the last pass did.
+// wordJSON is one edit word on the wire. Start and End are seconds.
+type wordJSON struct {
+	// Text is the word as stored.
+	Text string `json:"text"`
+	// Start is the word start in seconds.
+	Start float64 `json:"start"`
+	// End is the word end in seconds.
+	End float64 `json:"end"`
+}
+
+// episodeDetailJSON carries one episode with its proposals, edit words,
+// and playable addresses. The editor reads the words and the stem
+// address. The episode view plays the render address when one exists.
+// The transcript outcome rides beside them, so the detail agrees with
+// the completion answer on what the last pass did.
 type episodeDetailJSON struct {
 	// Episode is the episode row.
 	Episode episodeJSON `json:"episode"`
@@ -102,6 +122,14 @@ type episodeDetailJSON struct {
 	// TranscriptOutcome names the latest transcript pass and its state,
 	// or nil when no pass ever started.
 	TranscriptOutcome *transcriptOutcomeJSON `json:"transcript_outcome,omitempty"`
+	// Words holds edit-source words, oldest first.
+	Words []wordJSON `json:"words"`
+	// AudioURL is /media/{id} for the user stem, otherwise the host
+	// stem, otherwise empty.
+	AudioURL string `json:"audio_url"`
+	// RenderAudioURL is /media/{id} for the newest render, or empty
+	// when no render exists.
+	RenderAudioURL string `json:"render_audio_url"`
 }
 
 // transcriptOutcomeJSON carries one pass outcome on the wire. Error stays
@@ -217,7 +245,32 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 			Decision:  p.Decision,
 		})
 	}
-	detail := episodeDetailJSON{Episode: episodeOf(ep), Proposals: out}
+	stored, err := h.store.EditWords(r.Context(), owner, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the words could not be read", nil)
+		return
+	}
+	stemID, err := h.store.StemMediaID(r.Context(), owner, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the stem could not be read", nil)
+		return
+	}
+	renderID, err := h.store.RenderMediaID(r.Context(), owner, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the render could not be read", nil)
+		return
+	}
+	words := make([]wordJSON, 0, len(stored))
+	for _, word := range stored {
+		words = append(words, wordJSON{Text: word.Text, Start: word.Start, End: word.End})
+	}
+	detail := episodeDetailJSON{
+		Episode:        episodeOf(ep),
+		Proposals:      out,
+		Words:          words,
+		AudioURL:       mediaPath(stemID),
+		RenderAudioURL: mediaPath(renderID),
+	}
 	if outcome.Found {
 		detail.TranscriptOutcome = &transcriptOutcomeJSON{
 			JobID:  outcome.JobID,
@@ -226,6 +279,15 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// mediaPath is the owner media route for one blob, or empty when no
+// blob is stored.
+func mediaPath(id string) string {
+	if id == "" {
+		return ""
+	}
+	return "/media/" + id
 }
 
 // decide answers POST /api/episodes/{id}/decisions by appending one

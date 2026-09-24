@@ -3,7 +3,13 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { pageTitle } from '$lib/shell';
-	import { emptyScreen, EpisodeController, formatClock, formatEpisodeNumber } from '../../threads/threads';
+	import {
+		draftEditHref,
+		emptyScreen,
+		EpisodeController,
+		formatClock,
+		formatEpisodeNumber
+	} from '../../threads/threads';
 
 	let snap = $state(emptyScreen('missing'));
 	let controller = $state<EpisodeController | null>(null);
@@ -49,8 +55,12 @@
 		<p role="status">{snap.notice}</p>
 		<nav aria-label="Season">
 			{#if snap.live}
+				{@const editHref = draftEditHref(snap)}
 				<a href={resolve('/')}>Gallery</a>
 				<a href={resolve('/threads')}>Threads</a>
+				{#if editHref}
+					<a href={resolve(editHref)}>Edit</a>
+				{/if}
 			{:else}
 				<a href={resolve('/?fixture=1')}>Gallery</a>
 				<a href={resolve('/threads?fixture=1')}>Threads</a>

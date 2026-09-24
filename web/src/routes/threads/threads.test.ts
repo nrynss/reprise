@@ -1,13 +1,16 @@
 // Pins for the season fixtures and helpers. Quotes must name real
 // turns, the season must run newest first, and the job mark must
 // never move backwards.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { activeWordAt } from '@nrynss/chaaya/transcript';
 import {
 	browserStore,
 	buildTone,
 	buildWords,
+	draftEditHref,
+	emptyScreen,
 	encodeWavBytes,
+	EpisodeController,
 	episodeById,
 	episodeNumber,
 	formatClock,
@@ -21,8 +24,10 @@ import {
 	quoteHref,
 	quoteInTranscript,
 	readHighWater,
+	seasonHref,
 	transcriptText,
 	writeHighWater,
+	type SeasonRow,
 	type WaterStore
 } from './threads';
 
@@ -285,5 +290,135 @@ describe('live season', () => {
 		);
 		expect(season).toHaveLength(1);
 		await expect(fetchSeason(async () => new Response('no', { status: 500 }))).rejects.toThrow();
+	});
+
+	it('keeps words and both audio addresses on a detail', async () => {
+		const { parseEpisodeDetail } = await import('./threads');
+		const detail = parseEpisodeDetail(
+			JSON.stringify({
+				episode: { id: 'e1', number: 1, title: 'First', state: 'draft', visibility: 'private' },
+				proposals: [],
+				words: [
+					{ text: 'Hello', start: 0, end: 0.4 },
+					{ text: 'there', start: 0.4, end: 0.9 }
+				],
+				audio_url: '/media/user-blob',
+				render_audio_url: '/media/opus-new'
+			})
+		);
+		expect(detail.words.map((word) => word.text)).toEqual(['Hello', 'there']);
+		expect(detail.audioUrl).toBe('/media/user-blob');
+		expect(detail.renderAudioUrl).toBe('/media/opus-new');
+		expect(detail.words[1]?.end).toBe(0.9);
+	});
+});
+
+function galleryRow(partial: Partial<SeasonRow>): SeasonRow {
+	return {
+		id: 'e1',
+		number: 1,
+		title: 'Take',
+		state: 'ready',
+		visibility: 'private',
+		meta: 'Private',
+		duration: null,
+		jobId: '',
+		fixture: false,
+		...partial
+	};
+}
+
+describe('gallery links', () => {
+	it('opens a live draft in the editor and keeps the other rows', () => {
+		expect(seasonHref(galleryRow({ state: 'draft' }))).toBe('/episode/e1/edit');
+		expect(seasonHref(galleryRow({ state: 'draft', jobId: 'job-7' }))).toBe('/episode/e1/edit');
+		expect(seasonHref(galleryRow({ id: 'ep-5', state: 'draft', fixture: true }))).toBe(
+			'/episode/ep-5/edit?fixture=1'
+		);
+		expect(seasonHref(galleryRow({ state: 'ready' }))).toBe('/episode/e1');
+		expect(seasonHref(galleryRow({ id: 'ep-4', state: 'ready', fixture: true }))).toBe(
+			'/episode/ep-4?fixture=1'
+		);
+		expect(
+			seasonHref(galleryRow({ id: 'ep-5', state: 'rendering', fixture: true, jobId: 'job-r' }))
+		).toBe('/processing?episode=ep-5');
+	});
+});
+
+describe('episode playback', () => {
+	it('keeps the editor link on a live draft while playback waits', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'ep-live', number: 2, title: 'Quiet take', state: 'draft', visibility: 'private' },
+					proposals: [],
+					words: [],
+					audio_url: '/media/user-blob',
+					render_audio_url: ''
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('ep-live', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			const snap = snaps.at(-1);
+			expect(snap?.audioUrl).toBe('');
+			expect(snap?.duration).toBeNull();
+			expect(snap?.state).toBe('draft');
+			expect(draftEditHref(snap ?? emptyScreen('ep-live'))).toBe('/episode/ep-live/edit');
+			const exposed = window as unknown as { __episode?: { source: () => string | null } };
+			expect(exposed.__episode?.source() ?? null).toBeNull();
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('plays the render address from the detail', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'ep-9', number: 3, title: 'Heard', state: 'ready', visibility: 'private' },
+					proposals: [],
+					words: [
+						{ text: 'One', start: 0, end: 1.2 },
+						{ text: 'Two', start: 1.2, end: 3.5 }
+					],
+					audio_url: '/media/stem',
+					render_audio_url: '/media/opus-9'
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('ep-9', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.audioUrl).toBe('/media/opus-9');
+			});
+			const snap = snaps.at(-1);
+			expect(snap?.duration).toBe(3.5);
+			expect(snap?.words.map((word) => word.text)).toEqual(['One', 'Two']);
+			const exposed = window as unknown as { __episode?: { source: () => string | null } };
+			expect(exposed.__episode?.source()).toBe('/media/opus-9');
+			expect(draftEditHref(snap ?? emptyScreen('ep-9'))).toBeNull();
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

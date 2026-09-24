@@ -177,4 +177,89 @@ describe('draft controller', () => {
 		expect(controller.snapshot.notice).toContain('scripted draft');
 		vi.unstubAllGlobals();
 	});
+
+	it('loads stored words and the stem address instead of the scripted sample', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				Response.json({
+					episode: {
+						id: 'live-1',
+						number: 2,
+						title: 'Live take',
+						state: 'draft',
+						visibility: 'private'
+					},
+					proposals: [
+						{
+							id: 'cut-a',
+							kind: 'cut',
+							start_word: 0,
+							end_word: 1,
+							reason: 'Trim the open.',
+							decision: ''
+						}
+					],
+					words: [
+						{ text: 'Hello', start: 0, end: 0.4 },
+						{ text: 'there', start: 0.4, end: 0.9 }
+					],
+					audio_url: '/media/user-stem',
+					render_audio_url: '/media/opus-ignored'
+				})
+			)
+		);
+		try {
+			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.ready).toBe(true);
+			});
+			expect(controller.snapshot.title).toBe('Live take');
+			expect(controller.snapshot.words.map((word) => word.text)).toEqual(['Hello', 'there']);
+			expect(controller.snapshot.appliedCount).toBe(1);
+			expect(controller.snapshot.cutCards[0]?.reason).toBe('Trim the open.');
+			expect(controller.snapshot.notice).not.toContain('scripted');
+			expect(controller.player.source).toBe('/media/user-stem');
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('stays an empty live draft when the detail has no words', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				Response.json({
+					episode: {
+						id: 'live-1',
+						number: 1,
+						title: 'Quiet take',
+						state: 'draft',
+						visibility: 'private'
+					},
+					proposals: [],
+					words: [],
+					audio_url: '',
+					render_audio_url: ''
+				})
+			)
+		);
+		try {
+			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.ready).toBe(true);
+			});
+			expect(controller.snapshot.title).toBe('Quiet take');
+			expect(controller.snapshot.words).toEqual([]);
+			expect(controller.snapshot.appliedCount).toBe(0);
+			expect(controller.snapshot.notice).not.toContain('scripted');
+			expect(controller.player.source).toBeNull();
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
 });

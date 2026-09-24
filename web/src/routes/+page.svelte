@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { pageTitle } from '$lib/shell';
-	import { emptyGallery, formatEpisodeNumber, GalleryController } from './threads/threads';
+	import { emptyGallery, formatEpisodeNumber, GalleryController, seasonHref } from './threads/threads';
 
 	let snap = $state(emptyGallery());
 	let controller = $state<GalleryController | null>(null);
@@ -58,7 +58,23 @@
 		<ol aria-label="Episodes, newest first">
 			{#each snap.rows as row (row.id)}
 				<li>
-					{#if row.jobId}
+					{#if row.state === 'draft'}
+						<a
+							class="card"
+							href={resolve(seasonHref(row))}
+							aria-label={`${row.title}, draft. Open in the editor.`}
+						>
+							<div class="cover" role="img" aria-label={`Cover of episode ${row.number}`}>
+								<span>{formatEpisodeNumber(row.number)}</span>
+							</div>
+							<p class="state">Draft</p>
+							<h2>{row.title}</h2>
+							<p class="dur">{row.meta}</p>
+							{#if row.fixture}
+								<p class="job">In the editor · proposals waiting</p>
+							{/if}
+						</a>
+					{:else if row.jobId}
 						<article aria-label={`${row.title}, ${row.state}`}>
 							<div class="cover" role="img" aria-label={`Cover of episode ${row.number}`}>
 								<span>{formatEpisodeNumber(row.number)}</span>
@@ -80,31 +96,15 @@
 							</div>
 							<p class="job">{controller ? controller.cardFor(row.jobId).detail : ''}</p>
 							{#if row.fixture && row.state === 'rendering'}
-								<a href={resolve(`/processing?episode=${row.id}`)}>Open the processing screen</a>
-							{:else if row.fixture}
-								<a href={resolve(`/episode/${row.id}?fixture=1`)}>Open the episode</a>
+								<a href={resolve(seasonHref(row))}>Open the processing screen</a>
 							{:else}
-								<a href={resolve(`/episode/${row.id}`)}>Open the episode</a>
+								<a href={resolve(seasonHref(row))}>Open the episode</a>
 							{/if}
 						</article>
-					{:else if row.fixture && row.state === 'draft'}
-						<a
-							class="card"
-							href={resolve(`/episode/${row.id}/edit?fixture=1`)}
-							aria-label={`${row.title}, draft. Open in the editor.`}
-						>
-							<div class="cover" role="img" aria-label={`Cover of episode ${row.number}`}>
-								<span>{formatEpisodeNumber(row.number)}</span>
-							</div>
-							<p class="state">Draft</p>
-							<h2>{row.title}</h2>
-							<p class="dur">{row.meta}</p>
-							<p class="job">In the editor · proposals waiting</p>
-						</a>
 					{:else}
 						<a
 							class="card"
-							href={row.fixture ? resolve(`/episode/${row.id}?fixture=1`) : resolve(`/episode/${row.id}`)}
+							href={resolve(seasonHref(row))}
 							aria-label={`${row.title}, ${row.state}. Open the episode.`}
 						>
 							<div class="cover" role="img" aria-label={`Cover of episode ${row.number}`}>

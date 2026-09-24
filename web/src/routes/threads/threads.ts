@@ -786,7 +786,8 @@ export function fixtureRow(episode: EpisodeFixture): SeasonRow {
 }
 
 // A listed episode as a gallery row. The detail fills the job id later
-// for rows that still run, so every card links to its episode view.
+// for rows that still run. Drafts open the editor. Other rows open
+// the episode view.
 export function liveRow(episode: LiveEpisode, jobId: string): SeasonRow {
 	return {
 		id: episode.id,
@@ -800,6 +801,28 @@ export function liveRow(episode: LiveEpisode, jobId: string): SeasonRow {
 		fixture: false
 	};
 }
+
+// Where one gallery row opens. A draft opens the editor. A fixture
+// draft keeps the fixture query. A fixture render opens the processing
+// screen. Every other row opens the episode.
+export function seasonHref(row: SeasonRow): SeasonHref {
+	if (row.state === 'draft') {
+		if (row.fixture) return `/episode/${row.id}/edit?fixture=1`;
+		return `/episode/${row.id}/edit`;
+	}
+	if (row.fixture && row.jobId && row.state === 'rendering') {
+		return `/processing?episode=${row.id}`;
+	}
+	if (row.fixture) return `/episode/${row.id}?fixture=1`;
+	return `/episode/${row.id}`;
+}
+
+export type SeasonHref =
+	| `/episode/${string}/edit`
+	| `/episode/${string}/edit?${string}`
+	| `/processing?${string}`
+	| `/episode/${string}?${string}`
+	| `/episode/${string}`;
 
 // Everything the gallery renders.
 export interface GallerySnapshot {
@@ -1092,9 +1115,9 @@ export class GalleryController {
 
 // Everything the episode view renders. Fixture rows carry generated
 // audio, chapters, notes, and timed words. Live rows carry what the
-// detail answers: metadata, proposals, and the latest pass outcome,
-// plus quoted moments from the thread index. Audio stays empty until
-// the detail exposes a stream address, and the view says so.
+// detail answers: metadata, proposals, the latest pass outcome, and
+// quoted moments from the thread index. A render address plays that
+// file. Without one, the view says playback waits.
 export interface EpisodeScreen {
 	ready: boolean;
 	notice: string;
@@ -1162,8 +1185,9 @@ export function emptyScreen(id: string): EpisodeScreen {
 // The episode behind its view. The fixture flag keeps the scripted
 // episode with generated audio. Otherwise the view reads the wired
 // detail: proposals with their word ranges and decisions, the latest
-// pass outcome, and quoted moments from the thread index. A moment
-// word parks on its covering proposal and names its quote.
+// pass outcome, and quoted moments from the thread index. A render
+// address loads the player. A moment word parks on its covering
+// proposal and names its quote.
 export class EpisodeController {
 	readonly episodeId: string;
 	private snap: EpisodeScreen;
@@ -1388,6 +1412,15 @@ export class EpisodeController {
 				: momentQuote === null
 					? `Quoted moment at word ${momentWord}. No stored quote names it.`
 					: `Quoted moment at word ${momentWord}. “${momentQuote}”`;
+		const renderUrl = detail.renderAudioUrl;
+		const last = detail.words.length > 0 ? detail.words[detail.words.length - 1] : undefined;
+		const duration = renderUrl ? (last?.end ?? null) : null;
+		this.player?.pause();
+		this.player = null;
+		if (renderUrl) {
+			this.player = new AudioPlayer();
+			this.player.load(renderUrl);
+		}
 		this.snap = {
 			...emptyScreen(this.episodeId),
 			ready: true,
@@ -1398,8 +1431,14 @@ export class EpisodeController {
 			title: detail.episode.title,
 			state: detail.episode.state,
 			visibility: detail.episode.visibility,
-			audioUrl: '',
-			duration: null,
+			audioUrl: renderUrl,
+			duration,
+			words: detail.words.map((word) => ({
+				start: word.start,
+				end: word.end,
+				text: word.text,
+				speaker: ''
+			})),
 			proposals: detail.proposals,
 			outcome: detail.outcome,
 			moments,
@@ -1492,11 +1531,34 @@ export interface LiveOutcome {
 	error: string;
 }
 
-// One episode with its proposals and pass outcome.
+// One edit word as the detail answers it. Start and end are seconds.
+export interface LiveWord {
+	text: string;
+	start: number;
+	end: number;
+}
+
+// One episode with its proposals, edit words, and playable addresses.
 export interface LiveDetail {
 	episode: LiveEpisode;
 	proposals: LiveProposal[];
 	outcome: LiveOutcome | null;
+	words: LiveWord[];
+	audioUrl: string;
+	renderAudioUrl: string;
+}
+
+// The editor link for a live draft, or null for every other episode.
+// An empty audio address does not hide it. Playback can wait and the
+// draft still opens in the editor.
+export function draftEditHref(screen: {
+	live: boolean;
+	state: string;
+	id: string;
+	audioUrl: string;
+}): `/episode/${string}/edit` | null {
+	if (!screen.live || screen.state !== 'draft' || screen.id === '') return null;
+	return `/episode/${screen.id}/edit`;
 }
 
 // One appearance of a thread in one episode. Offset counts rendered
@@ -1614,7 +1676,17 @@ function parseLiveOutcome(value: unknown): LiveOutcome | null {
 	return { jobId, status: textField(value, 'status'), error: textField(value, 'error') };
 }
 
-// One episode detail with its proposals and pass outcome.
+// One edit word, or null when the row is not an object.
+function parseLiveWord(value: unknown): LiveWord | null {
+	if (!isRecord(value)) return null;
+	return {
+		text: textField(value, 'text'),
+		start: numberField(value, 'start'),
+		end: numberField(value, 'end')
+	};
+}
+
+// One episode detail with its proposals, words, and playable addresses.
 export function parseEpisodeDetail(raw: string): LiveDetail {
 	let decoded: unknown;
 	try {
@@ -1631,7 +1703,20 @@ export function parseEpisodeDetail(raw: string): LiveDetail {
 		const proposal = parseLiveProposal(value);
 		if (proposal) proposals.push(proposal);
 	}
-	return { episode, proposals, outcome: parseLiveOutcome(decoded['transcript_outcome']) };
+	const rawWords = Array.isArray(decoded['words']) ? (decoded['words'] as unknown[]) : [];
+	const words: LiveWord[] = [];
+	for (const value of rawWords) {
+		const word = parseLiveWord(value);
+		if (word) words.push(word);
+	}
+	return {
+		episode,
+		proposals,
+		outcome: parseLiveOutcome(decoded['transcript_outcome']),
+		words,
+		audioUrl: textField(decoded, 'audio_url'),
+		renderAudioUrl: textField(decoded, 'render_audio_url')
+	};
 }
 
 // One thread appearance, or null when the hit drifts.

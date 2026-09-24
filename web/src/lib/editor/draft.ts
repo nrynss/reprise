@@ -145,6 +145,69 @@ function proposalIdForCut(cutId: string): string {
 	return `prop-${cutId}`;
 }
 
+interface StoredProposal {
+	id: string;
+	kind: string;
+	start: number;
+	end: number;
+	reason: string;
+}
+
+interface StoredDraft {
+	title: string;
+	words: EditWord[];
+	proposals: StoredProposal[];
+	audioUrl: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+function textOf(body: Record<string, unknown>, name: string): string {
+	const value = body[name];
+	return typeof value === 'string' ? value : '';
+}
+
+function numberOf(body: Record<string, unknown>, name: string): number {
+	const value = body[name];
+	return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+// Read one detail body. Words and cut ranges use the stored indexes.
+// A body with no episode is not a detail. A detail with no words is
+// still a draft, and the caller keeps it empty.
+function readStoredDraft(value: unknown, episodeId: string): StoredDraft {
+	if (!isRecord(value)) throw new Error('detail is not an object');
+	const episode = value['episode'];
+	if (!isRecord(episode)) throw new Error('detail holds no episode');
+	const rawWords = Array.isArray(value['words']) ? value['words'] : [];
+	const words: EditWord[] = [];
+	for (const item of rawWords) {
+		if (!isRecord(item)) continue;
+		words.push({
+			start: numberOf(item, 'start'),
+			end: numberOf(item, 'end'),
+			text: textOf(item, 'text'),
+			speaker: textOf(item, 'speaker') || 'you'
+		});
+	}
+	const rawProposals = Array.isArray(value['proposals']) ? value['proposals'] : [];
+	const proposals: StoredProposal[] = [];
+	for (const item of rawProposals) {
+		if (!isRecord(item)) continue;
+		proposals.push({
+			id: textOf(item, 'id'),
+			kind: textOf(item, 'kind'),
+			start: numberOf(item, 'start_word'),
+			end: numberOf(item, 'end_word'),
+			reason: textOf(item, 'reason')
+		});
+	}
+	const title = textOf(episode, 'title') || `Episode ${episodeId}`;
+	return { title, words, proposals, audioUrl: textOf(value, 'audio_url') };
+}
+
 export class DraftController {
 	readonly episodeId: string;
 	readonly player = new AudioPlayer();
@@ -209,54 +272,45 @@ export class DraftController {
 	}
 
 	private async loadFromBackend(): Promise<void> {
+		let stored: StoredDraft;
 		try {
 			const response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`);
 			if (!response.ok) throw new Error(`episode ${response.status}`);
-			const body = (await response.json()) as {
-				title?: string;
-				words?: Array<{ start: number; end: number; text: string; speaker?: string }>;
-				proposals?: Array<{ id: string; kind: string; start: number; end: number; reason: string }>;
-				audioUrl?: string;
-			};
-			if (!Array.isArray(body.words) || body.words.length === 0) throw new Error('no words');
-			const words: EditWord[] = body.words.map((word) => ({
-				start: word.start,
-				end: word.end,
-				text: word.text,
-				speaker: word.speaker ?? 'you'
-			}));
-			const cuts: EditCut[] = (body.proposals ?? [])
-				.filter((proposal) => proposal.kind === 'cut')
-				.map((proposal, index) => ({
-					id: proposal.id || `cut-${index + 1}`,
-					range: { start: proposal.start, end: proposal.end },
-					reason: proposal.reason
-				}));
-			const cold = (body.proposals ?? []).find((proposal) => proposal.kind === 'cold_open');
-			const callback = (body.proposals ?? []).find((proposal) => proposal.kind === 'callback');
-			const notes = (body.proposals ?? []).find((proposal) => proposal.kind === 'show_notes');
-			this.fixtureMode = false;
-			this.installDraft({
-				title: body.title ?? `Episode ${this.episodeId}`,
-				words,
-				cuts,
-				duration: words.length > 0 ? (words[words.length - 1]?.end ?? 0) : 0,
-				coldStart: cold?.start ?? 0,
-				coldEnd: cold?.end ?? 0,
-				coldReason: cold?.reason ?? '',
-				callback: callback?.reason ?? '',
-				callbackQuote:
-					callback && words.length > 0
-						? quoteRange(words, callback.start, Math.min(callback.end, words.length - 1))
-						: '',
-				notes: notes?.reason ?? '',
-				audioUrl: body.audioUrl ?? '',
-				channels: null,
-				notice: 'Draft loaded.'
-			});
+			stored = readStoredDraft(await response.json(), this.episodeId);
 		} catch {
 			this.loadFromFixture('The episode endpoint refused, so this is the scripted draft.');
+			return;
 		}
+		const words = stored.words;
+		const cuts: EditCut[] = stored.proposals
+			.filter((proposal) => proposal.kind === 'cut')
+			.map((proposal, index) => ({
+				id: proposal.id || `cut-${index + 1}`,
+				range: { start: proposal.start, end: proposal.end },
+				reason: proposal.reason
+			}));
+		const cold = stored.proposals.find((proposal) => proposal.kind === 'cold_open');
+		const callback = stored.proposals.find((proposal) => proposal.kind === 'callback');
+		const notes = stored.proposals.find((proposal) => proposal.kind === 'show_notes');
+		this.fixtureMode = false;
+		this.installDraft({
+			title: stored.title,
+			words,
+			cuts,
+			duration: words.length > 0 ? (words[words.length - 1]?.end ?? 0) : 0,
+			coldStart: cold?.start ?? 0,
+			coldEnd: cold?.end ?? 0,
+			coldReason: cold?.reason ?? '',
+			callback: callback?.reason ?? '',
+			callbackQuote:
+				callback && words.length > 0
+					? quoteRange(words, callback.start, Math.min(callback.end, words.length - 1))
+					: '',
+			notes: notes?.reason ?? '',
+			audioUrl: stored.audioUrl,
+			channels: null,
+			notice: words.length > 0 ? 'Draft loaded.' : 'Draft loaded. No words stored yet.'
+		});
 	}
 
 	private installDraft(args: {
