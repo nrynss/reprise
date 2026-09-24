@@ -13,6 +13,7 @@ import {
 	EpisodeController,
 	episodeById,
 	episodeNumber,
+	eraseJob,
 	formatClock,
 	formatEpisodeNumber,
 	installMockJob,
@@ -20,6 +21,7 @@ import {
 	listThreads,
 	progressFrame,
 	progressPercent,
+	publishLink,
 	queryValue,
 	quoteHref,
 	quoteInTranscript,
@@ -417,6 +419,168 @@ describe('episode playback', () => {
 			const exposed = window as unknown as { __episode?: { source: () => string | null } };
 			expect(exposed.__episode?.source()).toBe('/media/opus-9');
 			expect(draftEditHref(snap ?? emptyScreen('ep-9'))).toBeNull();
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('release controls', () => {
+	it('reads the share path and the erasure job behind the controls', () => {
+		expect(publishLink(JSON.stringify({ share_token: 'tok', share_path: '/share/tok' }))).toBe(
+			'/share/tok'
+		);
+		expect(publishLink('{"share_path":"/episode/x"}')).toBe('');
+		expect(publishLink('not json')).toBe('');
+		expect(eraseJob(JSON.stringify({ job_id: 'job-erase-1' }))).toBe('job-erase-1');
+		expect(eraseJob('{}')).toBe('');
+	});
+
+	it('keeps the fixture publish flip with no fetch', () => {
+		const fetchSpy = vi.fn(async () => Response.json({}));
+		vi.stubGlobal('fetch', fetchSpy);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('ep-4', (snap) => snaps.push(snap));
+			controller.mount('?fixture=1');
+			controller.publishState();
+			expect(snaps.at(-1)?.published).toBe(true);
+			expect(snaps.at(-1)?.notice).toContain('Fixture link public');
+			expect(fetchSpy).not.toHaveBeenCalled();
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('publishes and revokes a live episode through the routes', async () => {
+		const calls: Array<{ url: string; method: string }> = [];
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				const method = init?.method ?? 'GET';
+				calls.push({ url, method });
+				if (url.endsWith('/publish') && method === 'POST') {
+					return Response.json({ share_token: 'tok-1', share_path: '/share/tok-1' });
+				}
+				if (url.endsWith('/publish') && method === 'DELETE') {
+					return Response.json({ share_token: 'tok-2' });
+				}
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'ep-live', number: 2, title: 'Quiet take', state: 'ready', visibility: 'private' },
+					proposals: [],
+					words: [],
+					audio_url: '',
+					render_audio_url: ''
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('ep-live', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			controller.publishState();
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.published).toBe(true);
+			});
+			expect(snaps.at(-1)?.notice).toContain('/share/tok-1');
+			expect(snaps.at(-1)?.visibility).toBe('public');
+			controller.publishState();
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.published).toBe(false);
+			});
+			expect(snaps.at(-1)?.notice).toContain('revoked');
+			const publishCalls = calls.filter((call) => call.url.endsWith('/publish'));
+			expect(publishCalls.map((call) => call.method)).toEqual(['POST', 'DELETE']);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('names the erasure job a live erase starts', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				const method = init?.method ?? 'GET';
+				if (url === '/api/episodes/ep-live' && method === 'DELETE') {
+					return Response.json({ job_id: 'job-erase-9' });
+				}
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'ep-live', number: 2, title: 'Quiet take', state: 'ready', visibility: 'private' },
+					proposals: [],
+					words: [],
+					audio_url: '',
+					render_audio_url: ''
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('ep-live', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			await controller.erase();
+			expect(snaps.at(-1)?.eraseArmed).toBe(true);
+			await controller.erase();
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.notice).toContain('job-erase-9');
+			});
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('reports a refused live publish instead of flipping the flag', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				if (url.endsWith('/publish')) {
+					return new Response('{"error":{"code":"no_render","message":"no render"}}', {
+						status: 409,
+						headers: { 'content-type': 'application/json' }
+					});
+				}
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'ep-live', number: 2, title: 'Quiet take', state: 'ready', visibility: 'private' },
+					proposals: [],
+					words: [],
+					audio_url: '',
+					render_audio_url: ''
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('ep-live', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			controller.publishState();
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.notice).toContain('stays private');
+			});
+			expect(snaps.at(-1)?.published).toBe(false);
 			controller.destroy();
 		} finally {
 			vi.unstubAllGlobals();

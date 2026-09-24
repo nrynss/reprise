@@ -88,6 +88,17 @@ func Register(mux *http.ServeMux) {
 	}
 }
 
+// privacyPatterns names the publish, revoke, and erase routes the
+// privacy feature mounts with its real handlers. Mount leaves them
+// alone, so the feature hook registers them without a duplicate
+// pattern panic. The table still lists them, so the goldens and the
+// browser mirror keep matching the served surface.
+var privacyPatterns = map[string]bool{
+	"POST /api/episodes/{id}/publish":   true,
+	"DELETE /api/episodes/{id}/publish": true,
+	"DELETE /api/episodes/{id}":         true,
+}
+
 // GuestSessions resolves the guest behind each request. The identity
 // service implements it. Mount wraps every implemented handler in it,
 // inside the spend gate.
@@ -97,8 +108,9 @@ type GuestSessions interface {
 }
 
 // Dependencies carries the implemented handlers Mount wires. A nil handler
-// leaves its route on the stub, so a process without that store still
-// serves the table. Sessions is the session broker. Episodes serves the
+// leaves its route on the stub, except the privacy routes the feature
+// hook mounts, which Mount leaves unregistered. A process without that
+// store still serves the table. Sessions is the session broker. Episodes serves the
 // episode list, detail, decisions, and mark done routes. SessionEnd
 // records the provider close the browser already sent. Threads serves the
 // cross episode index. Admin is the limits handler. Uploads is the chunked
@@ -137,7 +149,8 @@ type Dependencies struct {
 
 // Mount wires every implemented handler on mux behind the spend gate
 // outermost, then the guest session middleware, then the handler. Routes
-// with no handler stay on the stub. It returns an error when the two owner
+// with no handler stay on the stub, except the privacy routes, which
+// stay unregistered for the feature hook. It returns an error when the two owner
 // ceilings disagree, when a handler arrives without the gate or the guest
 // middleware around it, or when the rule cannot protect a route.
 func Mount(mux *http.ServeMux, deps Dependencies) error {
@@ -150,6 +163,9 @@ func Mount(mux *http.ServeMux, deps Dependencies) error {
 	for _, route := range routeTable {
 		next := deps.handlerFor(route)
 		if next == nil {
+			if privacyPatterns[route.Method+" "+route.Pattern] {
+				continue
+			}
 			pattern := route.Pattern
 			if route.Method != "" {
 				pattern = route.Method + " " + route.Pattern

@@ -1,12 +1,15 @@
 // Owner kept episodes.
 //
 // Keep moves one guest episode to the keeping owner before expiry can
-// touch it. The episode row, every content row beneath it, and every media
-// blob grouped under it change owner in one transaction, so the sweep
-// later finds no trace of the episode under the guest. The provider
-// session and batch transcripts stay named by their own ids, and the sweep
-// never inventories them once the episode belongs to the owner. A kept
-// episode is therefore the owner copy, and it survives its guest expiry.
+// touch it. The episode row, every content row beneath it, the cover
+// row, the resolution links, and every media blob grouped under it
+// change owner in one transaction, so the sweep later finds no trace
+// of the episode under the guest. The rendered source link names no
+// owner, so it follows the episode untouched. The provider session and
+// batch transcripts stay named by their own ids, and the sweep never
+// inventories them once the episode belongs to the owner. A kept
+// episode is therefore the owner copy, and it survives its guest
+// expiry.
 
 package retention
 
@@ -86,9 +89,59 @@ func (s *Service) Keep(ctx context.Context, episodeID, keeperID string) error {
 		"UPDATE media SET owner = ? WHERE media_group = ?", keeperID, episodeID); err != nil {
 		return fmt.Errorf("retention: keep %s: %w", episodeID, err)
 	}
+	if err := moveCoverRow(ctx, tx, episodeID, keeperID); err != nil {
+		return err
+	}
+	if err := moveResolutionRows(ctx, tx, episodeID, keeperID); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("retention: keep %s: %w", episodeID, err)
 	}
 	committed = true
 	return nil
+}
+
+// moveCoverRow repoints the cover row of one kept episode at the
+// keeper. The cover file already names the episode, so only the owner
+// column moves. A database that never stored a cover holds no table,
+// and Keep skips it instead of failing the move.
+func moveCoverRow(ctx context.Context, tx *sql.Tx, episodeID, keeperID string) error {
+	if !tableExists(ctx, tx, "covers") {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE covers SET owner_id = ? WHERE episode_id = ?", keeperID, episodeID); err != nil {
+		return fmt.Errorf("retention: keep %s: %w", episodeID, err)
+	}
+	return nil
+}
+
+// moveResolutionRows repoints the resolution links of one kept episode
+// at the keeper. Links carry no episode column, so the move follows
+// the commitment mentions of the episode. The evidence mention may
+// live on another episode, and the link still moves with its
+// commitment. A database with no memory index holds no table, and
+// Keep skips it instead of failing the move. The rendered source link
+// names no owner, so it needs no move.
+func moveResolutionRows(ctx context.Context, tx *sql.Tx, episodeID, keeperID string) error {
+	if !tableExists(ctx, tx, "resolutions") {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE resolutions SET owner_id = ? WHERE commitment_mention_id IN
+		 (SELECT id FROM mentions WHERE episode_id = ?)`, keeperID, episodeID); err != nil {
+		return fmt.Errorf("retention: keep %s: %w", episodeID, err)
+	}
+	return nil
+}
+
+// tableExists reports whether name holds a table in this database. The
+// cover and memory tables arrive with their own passes, so Keep skips
+// them when those passes never ran instead of failing the whole move.
+func tableExists(ctx context.Context, tx *sql.Tx, name string) bool {
+	var found string
+	err := tx.QueryRowContext(ctx,
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", name).Scan(&found)
+	return err == nil && found == name
 }

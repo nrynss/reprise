@@ -1375,6 +1375,38 @@ export interface EpisodeScreen {
 	gateResult: string;
 }
 
+// eraseJob reads the erasure job id one erase answer carries, or
+// empty when the body drifts. The screen names the job it follows,
+// and falls back to its standing accept line without one.
+export function eraseJob(raw: string): string {
+	try {
+		const decoded: unknown = JSON.parse(raw);
+		if (typeof decoded === 'object' && decoded !== null) {
+			const id = (decoded as Record<string, unknown>)['job_id'];
+			if (typeof id === 'string' && id !== '') return id;
+		}
+	} catch {
+		// An unreadable answer keeps the standing accept line.
+	}
+	return '';
+}
+
+// publishLink reads the share path one publish answer carries, or
+// empty when the body drifts. An empty answer reads as a refusal at
+// the call site, so the screen never shows a link it cannot open.
+export function publishLink(raw: string): string {
+	try {
+		const decoded: unknown = JSON.parse(raw);
+		if (typeof decoded === 'object' && decoded !== null) {
+			const path = (decoded as Record<string, unknown>)['share_path'];
+			if (typeof path === 'string' && path.startsWith('/share/')) return path;
+		}
+	} catch {
+		// An unreadable answer reads as a refusal at the call site.
+	}
+	return '';
+}
+
 export function emptyScreen(id: string): EpisodeScreen {
 	return {
 		ready: false,
@@ -1512,13 +1544,59 @@ export class EpisodeController {
 	}
 
 	publishState(): void {
-		const published = !this.snap.published;
+		void this.publish();
+	}
+
+	// Flip the release link. Fixture episodes flip a local flag with no
+	// backend behind them. Live episodes call the publish routes, so the
+	// screen shows the real link or the real refusal.
+	async publish(): Promise<void> {
+		if (!this.snap.live) {
+			const published = !this.snap.published;
+			this.snap = {
+				...this.snap,
+				published,
+				notice: published
+					? 'Fixture link public at the address below. The publish endpoint owns real links.'
+					: 'Back to private. The publish endpoint owns real links.'
+			};
+			this.emit();
+			return;
+		}
+		const endpoint = `/api/episodes/${encodeURIComponent(this.episodeId)}/publish`;
+		if (this.snap.published) {
+			let revoked: boolean;
+			try {
+				revoked = (await fetch(endpoint, { method: 'DELETE' })).ok;
+			} catch {
+				revoked = false;
+			}
+			this.snap = {
+				...this.snap,
+				published: !revoked,
+				visibility: revoked ? 'private' : this.snap.visibility,
+				notice: revoked
+					? 'The link is revoked. The episode is private again.'
+					: 'The revoke refused, so the episode stays public. Retry the control.'
+			};
+			this.emit();
+			return;
+		}
+		let link = '';
+		try {
+			const response = await fetch(endpoint, { method: 'POST' });
+			if (response.ok) link = publishLink(await response.text());
+		} catch {
+			link = '';
+		}
+		const published = link !== '';
 		this.snap = {
 			...this.snap,
 			published,
+			visibility: published ? 'public' : this.snap.visibility,
 			notice: published
-				? 'Fixture link public at the address below. The publish endpoint owns real links.'
-				: 'Back to private. The publish endpoint owns real links.'
+				? `Public at ${link}. Only the finished audio opens behind it.`
+				: 'The publish refused, so the episode stays private. Retry the control.'
 		};
 		this.emit();
 	}
@@ -1534,11 +1612,16 @@ export class EpisodeController {
 			const response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`, {
 				method: 'DELETE'
 			});
+			let started = '';
+			if (response.ok) started = eraseJob(await response.text());
 			this.snap = {
 				...this.snap,
-				notice: response.ok
-					? 'The erase endpoint accepted. The job stream carries it from here.'
-					: 'The erase endpoint refused, so the fixture episode stays.'
+				notice:
+					response.ok && started !== ''
+						? `The erase started as job ${started}. The gallery drops the episode once it lands.`
+						: response.ok
+							? 'The erase endpoint accepted. The job stream carries it from here.'
+							: 'The erase endpoint refused, so the fixture episode stays.'
 			};
 		} catch {
 			this.snap = { ...this.snap, notice: 'The erase endpoint refused, so the fixture episode stays.' };

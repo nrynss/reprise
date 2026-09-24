@@ -341,39 +341,35 @@ func TestMountStreamsJobEvents(t *testing.T) {
 	}
 }
 
-func TestMountKeepsStubsForUnmountedRoutes(t *testing.T) {
+func TestMountLeavesPrivacyPatternsForTheFeatureHook(t *testing.T) {
 	guestCalls := 0
 	handlerCalls := 0
 	mux := http.NewServeMux()
 	if err := Mount(mux, mountedDeps(t, &guestCalls, &handlerCalls)); err != nil {
 		t.Fatalf("mount: %v", err)
 	}
-	stubs := []struct {
+	privacy := []struct {
 		method string
 		path   string
+		want   int
 	}{
-		{http.MethodPost, "/api/episodes/e01/publish"},
-		{http.MethodDelete, "/api/episodes/e01/publish"},
-		{http.MethodDelete, "/api/episodes/e01"},
+		{http.MethodPost, "/api/episodes/e01/publish", http.StatusNotFound},
+		{http.MethodDelete, "/api/episodes/e01/publish", http.StatusNotFound},
+		// The episode siblings own GET and POST on this path, so an
+		// unmounted DELETE answers 405 from the mux itself.
+		{http.MethodDelete, "/api/episodes/e01", http.StatusMethodNotAllowed},
 	}
-	for _, tc := range stubs {
+	for _, tc := range privacy {
 		beforeGuests := guestCalls
 		beforeHandlers := handlerCalls
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotImplemented {
-			t.Fatalf("%s %s: status %d, want 501", tc.method, tc.path, rec.Code)
-		}
-		var body errorShape
-		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-			t.Fatalf("%s %s: decode refusal: %v", tc.method, tc.path, err)
-		}
-		if body.Error.Code != CodeNotImplemented {
-			t.Fatalf("%s %s: code %q, want %q", tc.method, tc.path, body.Error.Code, CodeNotImplemented)
+		if rec.Code != tc.want {
+			t.Fatalf("%s %s: status %d, want %d", tc.method, tc.path, rec.Code, tc.want)
 		}
 		if guestCalls != beforeGuests || handlerCalls != beforeHandlers {
-			t.Fatalf("%s %s: stub ran the chain", tc.method, tc.path)
+			t.Fatalf("%s %s: core mount claimed the privacy route", tc.method, tc.path)
 		}
 	}
 }
