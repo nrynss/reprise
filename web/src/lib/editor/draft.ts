@@ -250,7 +250,7 @@ export class DraftController {
 	private readonly onChange: (snap: DraftSnapshot) => void;
 	private fixtureMode = true;
 	// Live cut ids map to the stored proposal each decision row names.
-	private cutProposals = new Map<string, string>();
+	private cutProposals: Record<string, string> = {};
 	private storedIds: StoredIds = FIXTURE_IDS;
 
 	constructor(options: DraftOptions) {
@@ -287,7 +287,7 @@ export class DraftController {
 
 	private loadFromFixture(notice: string): void {
 		this.fixtureMode = true;
-		this.cutProposals = new Map();
+		this.cutProposals = {};
 		this.storedIds = FIXTURE_IDS;
 		const fixture = loadFixture(this.episodeId);
 		this.installDraft({
@@ -326,7 +326,7 @@ export class DraftController {
 		// so a reload shows what the render will do.
 		const cuts: EditCut[] = [];
 		const decisions: DecisionRow[] = [];
-		const cutProposals = new Map<string, string>();
+		const cutProposals: Record<string, string> = {};
 		for (const proposal of stored.proposals) {
 			if (proposal.kind !== 'cut' || !proposal.id) continue;
 			if (proposal.decision === DECISION_ACCEPTED) {
@@ -335,7 +335,7 @@ export class DraftController {
 					range: { start: proposal.start, end: proposal.end },
 					reason: proposal.reason
 				});
-				cutProposals.set(proposal.id, proposal.id);
+				cutProposals[proposal.id] = proposal.id;
 			} else if (proposal.decision === DECISION_REVERTED) {
 				decisions.push({
 					id: `dec-${proposal.id}`,
@@ -504,7 +504,7 @@ export class DraftController {
 	// when no stored proposal backs it.
 	private proposalIdForCut(cutId: string): string {
 		if (this.fixtureMode) return fixtureProposalId(cutId);
-		return this.cutProposals.get(cutId) ?? '';
+		return this.cutProposals[cutId] ?? '';
 	}
 
 	// Revert one cut with one action. The decision row is the revertible
