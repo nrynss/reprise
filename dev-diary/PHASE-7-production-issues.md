@@ -698,7 +698,7 @@ requires:   T7.26, T7.1
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/episode/, web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts, internal/api/episodes.go
-status:     not-started
+status:     in-progress:implement:t7.28-impl
 ```
 A real take reached draft. The transcript pass is done and the
 proposals are stored. The gallery opens that card on the episode
