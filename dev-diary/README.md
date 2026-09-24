@@ -13,9 +13,10 @@ P5 are done, including the seeded season copy (T5.2) and first visit screen
 repository preparation are marked done. P7 has landed the API wiring, budget
 settlement, transcript and editorial pipeline, and later browser fixes. The
 production probe confirms a live transcript, editorial proposals, and a
-settled session. T7.26 is in review for raw PCM stem uploads. T7.27 is in
-implementation for WebKit recording. T7.4 owner login is deferred. T6.4b
-real-voice checks remain open, and the final P7 exit checks are not complete.
+settled session. T7.26 landed raw PCM stem uploads, and T7.27 landed WebKit
+recording. T7.28 is in implementation so a live draft can be heard. T7.4
+owner login is deferred. T6.4b real-voice checks are blocked until a person
+reruns them, and the final P7 exit checks are not complete.
 
 The libraries carry the general work. Chaaya `0.2.0` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered
