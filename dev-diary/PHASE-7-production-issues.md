@@ -727,7 +727,7 @@ requires:   T7.26, T7.28
 fixture-ok: yes
 size:       L · frontier
 owns:       cmd/reprise/, internal/episode/, internal/analysis/, internal/api/episodes.go, web/src/routes/threads/threads.ts
-status:     in-progress:review-r1:t7.29-rev-r1@9892c64652e75b629366afac456726dd050129d9
+status:     in-progress:remediate-r1:t7.29-rem-r1
 ```
 Mark done starts the render job and nothing after it. No caller
 runs `MarkRendered` or `MarkReady`. `analysisFunc`, `coverFunc` and
@@ -794,6 +794,9 @@ after the 90 day window.
   show their real outcome.
 * Register the erasure and retention sweep kinds, and run the sweep on
   a schedule.
+* `retention.Keep` moves a kept episode to the owner but misses the
+  `covers` and `resolutions` rows and the rendered source link, so
+  the guest delete that follows fails on a foreign key.
 * `internal/api/routes.go` registers stubs on the publish and erase
   patterns. Mounting them again from the privacy hook panics, so drop
   those stubs when the real routes land.
@@ -851,7 +854,7 @@ and video, and a stranger gets 404.
 requires:   T7.28
 fixture-ok: yes
 size:       S · light
-owns:       web/playwright.config.ts, web/package.json
+owns:       web/playwright.config.ts, web/package.json, web/src/routes/record/mock.playwright.config.ts
 status:     not-started
 ```
 Several Playwright specs sit beside the page they test, each with its
@@ -862,6 +865,8 @@ test:e2e` reads only `web/tests/`, so the gate never runs them.
   WebKit where its own config asks for both.
 * The per-page configs stay usable on their own, or fold into the
   main config with no lost setting.
+* The record mock config loads only Playwright specs. Today it also
+  loads the vitest files beside it and exits 1.
 
 **Done when:** Breaking the gallery page makes `./tools/check.sh`
 fail, and a fresh worktree passes the gate three times in a row.
@@ -871,8 +876,8 @@ fail, and a fresh worktree passes the gate three times in a row.
 requires:   T7.28
 fixture-ok: yes
 size:       XS · light
-owns:       web/src/lib/editor/draft.ts
-status:     in-progress:review-r2:t7.34-rev-r2@ef473d81e3fa16236c5622981e27bed482dcc710
+owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.prototype-keys.test.ts
+status:     in-progress:review-r3:t7.34-rev-r3@ee572c9ee7dc3bc3d2647e23fb221e38337dff4a
 ```
 The svelte 4 leakage scan in `tools/check.sh` matches `get(`, and
 `draft.ts` calls `Map.get` in `proposalIdForCut`. CI fails on
