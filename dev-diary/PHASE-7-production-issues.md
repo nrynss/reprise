@@ -726,7 +726,7 @@ plays that file.
 requires:   T7.26, T7.28
 fixture-ok: yes
 size:       L · frontier
-owns:       cmd/reprise/, internal/episode/
+owns:       cmd/reprise/, internal/episode/, internal/analysis/
 status:     in-progress:implement:t7.29-impl
 ```
 Mark done starts the render job and nothing after it. No caller
@@ -744,6 +744,11 @@ no stored mention to call back to, which is the beat the demo sells.
   with a plain title.
 * Each paid kind reserves budget first. A restart marks an
   interrupted paid job `interrupted` and never reruns it.
+* The stored rendered words name the render they came from. The
+  detail endpoint sends them only when they match the newest render,
+  so a new render never plays under old words.
+* The binary takes the editorial kind name from `episode.EditorialKind`
+  instead of its own literal, so the two cannot drift.
 * Split the wiring so the next three tasks can run side by side. Add
   `cmd/reprise/privacy.go`, `cmd/reprise/seed.go` and
   `cmd/reprise/export.go`. Each file holds two empty hooks that
@@ -832,6 +837,26 @@ bundle. The episode page export control says it needs the backend.
 **Done when:** A fixture `ready` episode exports audio, video,
 captions, cover and a chapter description. `ffprobe` reads the audio
 and video, and a stranger gets 404.
+
+### T7.33: The e2e run covers specs beside their pages
+```yaml
+requires:   T7.28
+fixture-ok: yes
+size:       S · light
+owns:       web/playwright.config.ts, web/package.json
+status:     not-started
+```
+Several Playwright specs sit beside the page they test, each with its
+own config, such as `web/src/routes/gallery.spec.ts`. `npm run
+test:e2e` reads only `web/tests/`, so the gate never runs them.
+
+* `npm run test:e2e` runs every spec beside a page, in Chromium and
+  WebKit where its own config asks for both.
+* The per-page configs stay usable on their own, or fold into the
+  main config with no lost setting.
+
+**Done when:** Breaking the gallery page makes `./tools/check.sh`
+fail, and a fresh worktree passes the gate three times in a row.
 
 ---
 
