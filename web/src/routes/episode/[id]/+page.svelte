@@ -115,24 +115,26 @@
 			</section>
 		{/if}
 
-		{#if !snap.live}
-			<section aria-label="Episode controls">
-				<h2>Release</h2>
-				{#if snap.published}
+		<section aria-label="Episode controls">
+			<h2>Release</h2>
+			{#if snap.published}
+				{#if !snap.live}
 					<p>Fixture link: https://reprise.nryn.dev/e/{snap.id}-fixture</p>
-					<button onclick={() => controller?.publishState()}>Revoke link</button>
-				{:else}
-					<button onclick={() => controller?.publishState()}>Publish…</button>
 				{/if}
+				<button onclick={() => controller?.publishState()}>Revoke link</button>
+			{:else}
+				<button onclick={() => controller?.publishState()}>Publish…</button>
+			{/if}
+			{#if !snap.live}
 				<button onclick={() => controller?.exportNotes()}>Export for YouTube</button>
-				<button
-					onclick={() => void controller?.erase()}
-					aria-label={snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
-				>
-					{snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
-				</button>
-			</section>
-		{/if}
+			{/if}
+			<button
+				onclick={() => void controller?.erase()}
+				aria-label={snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
+			>
+				{snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
+			</button>
+		</section>
 
 		{#if snap.chapters.length > 0}
 			<section aria-label="Chapters">

@@ -7,6 +7,9 @@
 // provider session and every remaining batch transcript go through the
 // provider clients.
 //
+// A seeded copy erases its rows only. Its render names shared catalog
+// audio, so deleting those blobs would silence every visitor left.
+//
 // The work runs as one erasure job, so every target retries until it
 // confirms and a restart resumes what is left. The erase ref carries
 // the full inventory, because the rows are already gone when a resumed
@@ -49,9 +52,21 @@ type eraseRef struct {
 }
 
 // inventory reads every deletable thing one episode owns. It runs once,
-// before the erasure starts, while the rows still name their blobs.
+// before the erasure starts, while the rows still name their blobs. A
+// seeded copy collects no blobs, sessions, or transcripts. Copies
+// reference shared catalog audio without owning it, so only the episode
+// row goes and the catalog keeps playing for every visitor left.
 func (s *Service) inventory(ctx context.Context, ownerID, episodeID string) (eraseRef, error) {
 	ref := eraseRef{Version: 1, Episode: episodeID, Owner: ownerID}
+	var seeded int
+	err := s.db.Reader().QueryRowContext(ctx,
+		"SELECT seeded FROM episodes WHERE id = ? AND owner_id = ?", episodeID, ownerID).Scan(&seeded)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return eraseRef{}, fmt.Errorf("privacy: erase %s: read seeded flag: %w", episodeID, err)
+	}
+	if seeded == 1 {
+		return ref, nil
+	}
 	seen := map[string]bool{}
 	add := func(id string) {
 		if id != "" && !seen[id] {

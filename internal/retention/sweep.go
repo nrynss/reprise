@@ -2,7 +2,9 @@
 //
 // A sweep lists guests idle past the window, reading last seen time fresh
 // at run time, and deletes each one in turn: every episode through the
-// episode erasure, then stray media, then the session and user rows. The
+// episode erasure, then stray media, then the session and user rows. A
+// seeded copy drops its rows instead of running the erasure, so the
+// shared catalog audio survives. The
 // job snapshot records the guest list with per-episode erasure ids, so a
 // resumed run reuses stuck erasures instead of starting over. Every delete
 // repeats safely, so two runs converging on one guest still finish.
@@ -292,15 +294,20 @@ func (s *Service) sweepGuest(ctx context.Context, runner *job.Runner, guest *swe
 
 // eraseEpisode erases one episode through the episode erasure and waits
 // for it to read complete. A gone episode row reads as done, because a
-// previous run already erased it. A stuck erasure retries from its
-// recorded id, because the rows are gone and no fresh inventory could
-// rebuild the provider list.
+// previous run already erased it. A seeded copy drops its rows instead
+// of running the fan-out, because its render names shared catalog audio
+// the sweep must keep. A stuck recorded erasure retries from its id,
+// because the rows are gone and no fresh inventory could rebuild the
+// provider list.
 func (s *Service) eraseEpisode(ctx context.Context, runner *job.Runner, guest string, episode *sweptEpisode, report func()) error {
 	if episode.Done {
 		return nil
 	}
 	if !s.episodePresent(ctx, episode.Episode) {
 		return s.finishRecorded(ctx, runner, episode, report)
+	}
+	if s.seededCopy(ctx, episode.Episode) {
+		return s.dropSeeded(ctx, runner, guest, episode, report)
 	}
 	for round := 1; round <= episodeRetryRounds; round++ {
 		id, err := s.startErasure(ctx, runner, guest, episode)
@@ -323,6 +330,41 @@ func (s *Service) eraseEpisode(ctx context.Context, runner *job.Runner, guest st
 		}
 	}
 	return fmt.Errorf("retention: erase %s: %w: episode still owed", episode.Episode, ErrIncomplete)
+}
+
+// seededCopy reports whether episode carries the seeded flag. Copies
+// reference shared catalog audio without owning it, so the sweep drops
+// their rows instead of running the erasure fan-out over them.
+func (s *Service) seededCopy(ctx context.Context, episode string) bool {
+	var seeded int
+	err := s.db.Reader().QueryRowContext(ctx,
+		"SELECT seeded FROM episodes WHERE id = ?", episode).Scan(&seeded)
+	return err == nil && seeded == 1
+}
+
+// dropSeeded deletes one seeded copy row scoped to its guest. The delete
+// cascades to the copy rows beneath it and keeps the shared catalog
+// blobs, the way a visitor drop does. A row that vanished since the
+// inventory reads as done, because another flow already removed it.
+func (s *Service) dropSeeded(ctx context.Context, runner *job.Runner, guest string, episode *sweptEpisode, report func()) error {
+	res, err := s.db.Writer().ExecContext(ctx,
+		"DELETE FROM episodes WHERE id = ? AND owner_id = ?", episode.Episode, guest)
+	if err != nil {
+		return fmt.Errorf("retention: drop seeded %s: %w", episode.Episode, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("retention: drop seeded %s: %w", episode.Episode, err)
+	}
+	if affected == 0 {
+		if !s.episodePresent(ctx, episode.Episode) {
+			return s.finishRecorded(ctx, runner, episode, report)
+		}
+		return fmt.Errorf("retention: drop seeded %s for %s: %w", episode.Episode, guest, ErrNotFound)
+	}
+	episode.Done = true
+	report()
+	return nil
 }
 
 // finishRecorded finishes an episode whose row is already gone. Erasures

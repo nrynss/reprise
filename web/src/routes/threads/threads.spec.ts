@@ -262,6 +262,51 @@ test('the episode renders its release states without backend actions', async ({ 
 	await expect(page.getByText('The erase endpoint refused, so the fixture episode stays.')).toBeVisible();
 });
 
+test('a live episode walks its release controls against the routes', async ({ page }) => {
+	await stubEpisodeApi(
+		page,
+		[{ id: 'e9', number: 9, title: 'Ninth real', state: 'ready', visibility: 'private' }],
+		{ e9: { outcome: null } }
+	);
+	await page.route('**/api/episodes/e9/publish', (route: Route) => {
+		if (route.request().method() === 'DELETE') {
+			void route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+			return;
+		}
+		void route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ share_path: '/share/token-1' })
+		});
+	});
+	await page.route('**/api/episodes/e9', (route: Route) => {
+		if (route.request().method() === 'DELETE') {
+			void route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ job_id: 'erase-7' })
+			});
+			return;
+		}
+		void route.fallback();
+	});
+	await page.goto('/episode/e9');
+	await expect(page.getByRole('heading', { name: 'Ninth real' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Publish…' }).click();
+	await expect(page.getByText('Public at /share/token-1.', { exact: false })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Revoke link' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Revoke link' }).click();
+	await expect(page.getByText('The link is revoked.', { exact: false })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Publish…' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Erase this episode' }).click();
+	await expect(page.getByRole('button', { name: 'Confirm erase' })).toBeVisible();
+	await page.getByRole('button', { name: 'Confirm erase' }).click();
+	await expect(page.getByText('The erase started as job erase-7.', { exact: false })).toBeVisible();
+});
+
 test('the season screens pass both gates', async ({ page }) => {
 	for (const route of [`${GALLERY}&gate=1`, '/episode/ep-4?fixture=1&gate=1', `${THREADS}&gate=1`]) {
 		await page.goto(route);
