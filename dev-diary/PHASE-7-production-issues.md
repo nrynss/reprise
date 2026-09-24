@@ -727,7 +727,7 @@ requires:   T7.26, T7.28
 fixture-ok: yes
 size:       L · frontier
 owns:       cmd/reprise/, internal/episode/, internal/analysis/, internal/api/episodes.go, web/src/routes/threads/threads.ts
-status:     in-progress:remediate-r1:t7.29-rem-r1
+status:     in-progress:review-r2:t7.29-rev-r2@813cacae29384028190134e2050cf2d2fca33f8e
 ```
 Mark done starts the render job and nothing after it. No caller
 runs `MarkRendered` or `MarkReady`. `analysisFunc`, `coverFunc` and
