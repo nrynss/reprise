@@ -772,12 +772,15 @@ export function galleryCardKind(row: SeasonRow, card: GalleryCardProgress | null
 
 // The pass one live gallery card follows, and the line it shows once
 // that pass stops. Proposed says whether the editorial pass stored its
-// proposals.
+// proposals. Queued marks a rendering episode whose render has not
+// started, because another render holds the slot. Its card follows an
+// earlier pass until the render starts.
 export interface GalleryPass {
 	jobId: string;
 	status: string;
 	note: string;
 	proposed: boolean;
+	queued?: boolean;
 }
 
 // The line a card shows for a pass that stopped without finishing, or
@@ -797,6 +800,10 @@ function stoppedPassNote(pass: string, outcome: LiveOutcome): string {
 // The episode may have failed later, in the render or the analysis.
 const FAILED_EPISODE_NOTE = 'The episode failed, and no pass stored a reason.';
 
+// How many half second refresh ticks pass between two detail reads for a
+// row whose render is queued.
+const QUEUED_RECHECK_TICKS = 4;
+
 // The live row states whose card reads the detail again once its pass
 // stops, because the next pass or the ready state follows from there.
 const RECHECKED_STATES = new Set(['draft', 'rendering', 'analysing']);
@@ -810,7 +817,9 @@ const MARKED_NOTE = 'Commitments are marked. The episode is nearly ready.';
 
 // The lines a rendering or analysing card shows while the detail names no
 // pass for that step yet. The card then follows the last pass it can name.
-const RENDER_WAITING_NOTE = 'The episode is rendering. The render pass has not reported yet.';
+// A rendering episode with no render job waits for another render to
+// finish, and the server starts its render then.
+const RENDER_WAITING_NOTE = 'The render is queued. It starts once the render ahead of it finishes.';
 const ANALYSIS_WAITING_NOTE = 'The render is done. The analysis pass has not reported yet.';
 
 // The pass a rendering or analysing card follows, and the line it shows
@@ -830,7 +839,7 @@ function finishPass(detail: LiveDetail, proposed: boolean): GalleryPass | null {
 	if (detail.episode.state === 'rendering') {
 		const render = detail.renderOutcome;
 		if (render) return follow(render, stoppedPassNote('render', render) || RENDERED_NOTE);
-		return detail.outcome ? follow(detail.outcome, RENDER_WAITING_NOTE) : null;
+		return detail.outcome ? { ...follow(detail.outcome, RENDER_WAITING_NOTE), queued: true } : null;
 	}
 	const analysis = detail.analysisOutcome;
 	const marking = detail.memoryOutcome;
@@ -1032,6 +1041,8 @@ export class GalleryController {
 	private statuses: Record<string, JobStatus> = {};
 	private notes: Record<string, string> = {};
 	private rechecked = new Set<string>();
+	private queued = new Set<string>();
+	private ticks = 0;
 
 	constructor(onChange: (snap: GallerySnapshot) => void) {
 		this.onChange = onChange;
@@ -1145,6 +1156,8 @@ export class GalleryController {
 		if (!found) return false;
 		const { pass, state } = found;
 		this.notes[pass.jobId] = pass.note;
+		if (pass.queued) this.queued.add(episodeId);
+		else this.queued.delete(episodeId);
 		const row = this.snap.rows.find((candidate) => candidate.id === episodeId);
 		if (!this.streams.some((entry) => entry.jobId === pass.jobId)) {
 			this.statuses[pass.jobId] = outcomeJobStatus(pass.status);
@@ -1225,6 +1238,8 @@ export class GalleryController {
 		this.statuses = {};
 		this.notes = {};
 		this.rechecked = new Set<string>();
+		this.queued = new Set<string>();
+		this.ticks = 0;
 	}
 
 	private emit(): void {
@@ -1268,7 +1283,21 @@ export class GalleryController {
 		});
 	}
 
+	// A queued render starts with no event the card can see, so every few
+	// ticks a queued row reads its detail again. The row then follows its
+	// render once the detail names one.
+	private recheckQueued(): void {
+		this.ticks += 1;
+		if (this.ticks % QUEUED_RECHECK_TICKS !== 0) return;
+		for (const episodeId of this.queued) {
+			void this.followPass(episodeId).then((changed) => {
+				if (changed) this.emit();
+			});
+		}
+	}
+
 	private refresh(): void {
+		this.recheckQueued();
 		let changed = false;
 		const next: Record<string, GalleryCardProgress> = { ...this.snap.progress };
 		for (const entry of this.streams) {

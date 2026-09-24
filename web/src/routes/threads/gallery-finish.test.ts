@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GalleryController, galleryPass, parseEpisodeDetail, type GallerySnapshot } from './threads';
 
 const READY = 'Ready. Open the episode.';
+const QUEUED = 'The render is queued. It starts once the render ahead of it finishes.';
 
 const titled = [{ id: 'title-1', kind: 'title', start_word: 0, end_word: 0, reason: 'Take', decision: '' }];
 
@@ -50,12 +51,13 @@ describe('gallery pass after mark done', () => {
 		expect(pass?.note).toBe('The render pass failed: ffmpeg refused.');
 	});
 
-	it('waits on the render when the detail names none yet', () => {
+	it('says the render is queued when the detail names none yet', () => {
 		expect(galleryPass(detail('rendering'))).toEqual({
 			jobId: 'job-t',
 			status: 'done',
-			note: 'The episode is rendering. The render pass has not reported yet.',
-			proposed: true
+			note: QUEUED,
+			proposed: true,
+			queued: true
 		});
 	});
 
@@ -200,12 +202,27 @@ describe('live gallery after mark done', () => {
 		const controller = new GalleryController((snap) => snaps.push(snap));
 		controller.mount('');
 		await vi.waitFor(() => expect(snaps.at(-1)?.rows[0]?.jobId).toBe('job-t'));
-		await vi.waitFor(() =>
-			expect(controller.cardFor('job-t').detail).toBe(
-				'The episode is rendering. The render pass has not reported yet.'
-			)
-		);
+		await vi.waitFor(() => expect(controller.cardFor('job-t').detail).toBe(QUEUED));
 		expect(snaps.at(-1)?.rows[0]?.state).toBe('rendering');
 		controller.destroy();
 	});
+
+	it('moves a queued card onto its render once the render starts', async () => {
+		serveWalk([detailBody('rendering'), detailBody('rendering', { render_outcome: outcome('job-r', 'running') })]);
+		const snaps: GallerySnapshot[] = [];
+		const controller = new GalleryController((snap) => snaps.push(structuredClone(snap)));
+		controller.mount('');
+		await vi.waitFor(() => expect(controller.cardFor('job-t').detail).toBe(QUEUED));
+		await vi.waitFor(() => expect(snaps.at(-1)?.rows[0]?.jobId).toBe('job-r'), { timeout: 8000 });
+		const card = controller.cardFor('job-r');
+		expect(card.detail).not.toBe(READY);
+		expect(card.status).not.toBe('error');
+		const wrong = snaps.filter((snap) => {
+			const row = snap.rows[0];
+			const shown = row ? snap.progress[row.jobId]?.detail : undefined;
+			return shown === READY || snap.rows[0]?.state === 'failed';
+		});
+		expect(wrong).toEqual([]);
+		controller.destroy();
+	}, 10000);
 });
