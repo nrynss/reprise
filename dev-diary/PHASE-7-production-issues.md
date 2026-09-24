@@ -721,6 +721,105 @@ detail endpoint does not send, then shows a scripted sample.
 in the editor from the gallery, and a detail whose render exists
 plays that file.
 
+### T7.29: A rendered episode reaches ready
+```yaml
+requires:   T7.26
+fixture-ok: yes
+size:       L · frontier
+owns:       cmd/reprise/, internal/episode/
+status:     not-started
+```
+Mark done starts the render job and nothing after it. No caller
+runs `MarkRendered` or `MarkReady`. `analysisFunc`, `coverFunc` and
+`memoryFunc` in `cmd/reprise/main.go` build their work, but nothing
+starts them. A live episode stays `rendering` forever. It never gets
+chapters, notes, a cover or marked commitments. The host therefore has
+no stored mention to call back to, which is the beat the demo sells.
+
+* A finished render moves the episode to `analysing` and starts the
+  analysis, cover and memory jobs once each.
+* The episode moves to `ready` when analysis and memory finish. A
+  cover failure leaves a plain cover and does not hold the episode.
+* An editorial or analysis failure still ships a playable episode
+  with a plain title.
+* Each paid kind reserves budget first. A restart marks an
+  interrupted paid job `interrupted` and never reruns it.
+
+**Done when:** A fixture episode goes from mark done to `ready`
+through the wired binary with no network. Its chapters, cover and
+commitments are stored rows. A second mark done starts no second
+chain.
+
+### T7.30: Publish, erase and share reach the binary
+```yaml
+requires:   T7.28, T7.29
+fixture-ok: yes
+size:       L · frontier
+owns:       cmd/reprise/, internal/api/routes.go, internal/privacy/, internal/retention/, web/src/routes/share/, web/src/routes/threads/threads.ts
+status:     not-started
+```
+The binary never imports `internal/privacy` or `internal/retention`.
+Publish, revoke and erase still answer 501 from the stub. No route
+serves `/api/share/{token}`, so the share page receives the app shell.
+The episode page publish control only flips a fixture flag. Nothing
+schedules the guest retention sweep, so guest data never expires
+after the 90 day window.
+
+* Mount publish, revoke and erase behind the gate and the guest
+  middleware, scoped to the owner.
+* Serve the share metadata and share cover to a caller without a
+  session, only while the episode is published.
+* The episode page publish and erase controls call those routes and
+  show their real outcome.
+* Register the erasure and retention sweep kinds, and run the sweep on
+  a schedule.
+
+**Done when:** A `curl` with no cookie reads a published episode
+through its share token and gets 404 after revoke. An erased episode
+leaves no row, no media file and no provider transcript. The sweep
+removes a guest past the window in a fixture run.
+
+### T7.31: New guests receive the seeded season
+```yaml
+requires:   T7.30
+fixture-ok: yes
+size:       M · mid
+owns:       cmd/reprise/, internal/seed/, web/src/routes/welcome/
+status:     not-started
+```
+The binary never imports `internal/seed`. Nothing syncs `data/season/`
+into catalog rows, and nothing calls `EnsureCopy` for a new guest. The
+welcome page reads its teaser from a constant and picks empty or
+seeded from the query string.
+
+* Sync the catalog at boot. A validation failure refuses the boot by
+  name.
+* Copy the catalog to each new guest once, on the first season read.
+  The owner gets no copy.
+* The welcome page reads the real catalog state and teaser episode.
+
+**Done when:** A fixture catalog of one episode appears in a new
+guest's gallery once, carries the seeded flag, and its mention feeds
+the host's opening. An empty catalog still renders the record button.
+
+### T7.32: Export reaches the binary
+```yaml
+requires:   T7.31
+fixture-ok: yes
+size:       M · mid
+owns:       cmd/reprise/, internal/export/, web/src/routes/episode/, web/src/routes/threads/threads.ts
+status:     not-started
+```
+The binary never imports `internal/export`. No route serves an export
+bundle. The episode page export control says it needs the backend.
+
+* Serve the export bundle for a `ready` episode the owner holds.
+* The episode page export control downloads it.
+
+**Done when:** A fixture `ready` episode exports audio, video,
+captions, cover and a chapter description. `ffprobe` reads the audio
+and video, and a stranger gets 404.
+
 ---
 
 ## Exit criteria

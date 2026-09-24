@@ -14,7 +14,9 @@ repository preparation are marked done. P7 has landed the API wiring, budget
 settlement, transcript and editorial pipeline, and later browser fixes. The
 production probe confirms a live transcript, editorial proposals, and a
 settled session. T7.26 landed raw PCM stem uploads, and T7.27 landed WebKit
-recording. T7.28 is in implementation so a live draft can be heard. T7.4
+recording. T7.28 is in implementation so a live draft can be heard. T7.29
+to T7.32 wire the post-render chain, publish and erase, the seeded season,
+and export, which the binary never assembled. T7.4
 owner login is deferred. T6.4b real-voice checks are blocked until a person
 reruns them, and the final P7 exit checks are not complete.
 
