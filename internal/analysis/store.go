@@ -85,9 +85,9 @@ func ReplaceWords(ctx context.Context, db *sql.DB, ownerID, episodeID, renderID 
 		}
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO rendered_sources (episode_id, owner_id, render_id) VALUES (?, ?, ?)
-		 ON CONFLICT(episode_id) DO UPDATE SET owner_id = excluded.owner_id, render_id = excluded.render_id`,
-		episodeID, ownerID, renderID); err != nil {
+		`INSERT INTO rendered_sources (episode_id, render_id) VALUES (?, ?)
+		 ON CONFLICT(episode_id) DO UPDATE SET render_id = excluded.render_id`,
+		episodeID, renderID); err != nil {
 		return fmt.Errorf("analysis: replace words: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

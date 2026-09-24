@@ -22,6 +22,7 @@ import (
 	"github.com/nrynss/reprise/internal/gemini"
 	"github.com/nrynss/reprise/internal/identity"
 	"github.com/nrynss/reprise/internal/render"
+	"github.com/nrynss/reprise/internal/retention"
 	"google.golang.org/genai"
 )
 
@@ -752,5 +753,69 @@ func TestFeatureHooksAreWired(t *testing.T) {
 func TestEditorialKindHasOneSource(t *testing.T) {
 	if kindEditorial != episode.EditorialKind || kindAnalysis != episode.AnalysisKind || kindMemory != episode.MemoryKind {
 		t.Fatal("the binary names a pass kind the detail does not read")
+	}
+}
+
+// keepSessions answers the provider session calls retention may make.
+type keepSessions struct{}
+
+// TerminateSession ends nothing, because no provider session is open.
+func (keepSessions) TerminateSession(context.Context, string) (assemblyai.TerminateResult, error) {
+	return assemblyai.TerminateResult{}, nil
+}
+
+// keepTranscripts answers the provider transcript calls retention may
+// make.
+type keepTranscripts struct{}
+
+// Delete removes nothing, because no provider transcript exists.
+func (keepTranscripts) Delete(context.Context, string) error { return nil }
+
+// Get returns an empty transcript.
+func (keepTranscripts) Get(context.Context, string) (assemblyai.Transcript, error) {
+	return assemblyai.Transcript{}, nil
+}
+
+// TestKeptEpisodeLeavesTheGuestDeletable stores rendered words for a
+// guest episode, keeps the episode for another user, and then deletes
+// the guest row the way the retention sweep does. The render link
+// follows the episode, so the kept words still name their render and
+// nothing still points at the guest.
+func TestKeptEpisodeLeavesTheGuestDeletable(t *testing.T) {
+	fx := openWireFixture(t)
+	const guest = "guest-kept-link"
+	const keeper = "keeper-kept-link"
+	insertWireUser(t, fx, guest)
+	insertWireUser(t, fx, keeper)
+	episodeID := draftEpisode(t, fx, guest)
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`INSERT INTO renders (id, owner_id, episode_id, input_hash, opus_media_id, aac_media_id, loudness)
+		 VALUES ('render-kept', ?, ?, 'hash-kept', 'opus-kept', 'aac-kept', -16)`, guest, episodeID); err != nil {
+		t.Fatalf("seed render: %v", err)
+	}
+	if err := analysis.ReplaceWords(t.Context(), fx.db.Writer(), guest, episodeID, "render-kept",
+		[]analysis.Word{{Text: "hello", StartMs: 0, EndMs: 100}}); err != nil {
+		t.Fatalf("replace words: %v", err)
+	}
+	svc, err := retention.New(retention.Config{
+		DB: fx.db, Media: fx.media, CoverDir: t.TempDir(),
+		Sessions: keepSessions{}, Transcripts: keepTranscripts{}, Window: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("open retention: %v", err)
+	}
+	if err := svc.Keep(t.Context(), episodeID, keeper); err != nil {
+		t.Fatalf("keep: %v", err)
+	}
+	source, err := analysis.RenderedSource(t.Context(), fx.db.Reader(), episodeID)
+	if err != nil {
+		t.Fatalf("rendered source: %v", err)
+	}
+	if source != "render-kept" {
+		t.Fatalf("rendered source = %q after keep, want render-kept", source)
+	}
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`DELETE FROM users WHERE id = ? AND kind = 'guest'`, guest); err != nil {
+		t.Fatalf("delete the guest after keep: %v", err)
 	}
 }
