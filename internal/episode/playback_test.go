@@ -177,3 +177,23 @@ func TestEditorialOutcomeWithoutPass(t *testing.T) {
 		t.Fatalf("outcome = %+v, want no editorial pass", got)
 	}
 }
+
+// TestEditorialOutcomeWithoutTranscriptKind requires no outcome from a
+// service that starts no transcript pass, because only that pass starts
+// the editorial pass. The read also needs no job rows then.
+func TestEditorialOutcomeWithoutTranscriptKind(t *testing.T) {
+	t.Parallel()
+	db := openDatabase(t)
+	plantEpisode(t, db, "ep-1", 1, episode.StateDraft)
+	svc, err := episode.NewService(episode.Config{DB: db})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	got, err := svc.EditorialOutcome(t.Context(), "owner-1", "ep-1")
+	if err != nil {
+		t.Fatalf("editorial outcome: %v", err)
+	}
+	if got.Found {
+		t.Fatalf("outcome = %+v, want no editorial pass", got)
+	}
+}

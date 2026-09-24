@@ -153,14 +153,18 @@ const EditorialKind = "editorial"
 // and reads done before the editorial pass stores anything. So a draft
 // with a done transcript and no proposals still waits on this pass, and
 // this outcome says whether it runs or failed. Found is false when no
-// editorial pass ever started. Unknown and foreign episodes report
-// ErrNotFound.
+// editorial pass ever started. Only the transcript pass starts the
+// editorial pass, so a service with no transcript kind reports none.
+// Unknown and foreign episodes report ErrNotFound.
 func (s *Service) EditorialOutcome(ctx context.Context, ownerID, episodeID string) (Outcome, error) {
 	if s == nil || s.db == nil || ownerID == "" || episodeID == "" {
 		return Outcome{}, fmt.Errorf("episode: editorial outcome %q: %w", episodeID, ErrInvalid)
 	}
 	if _, err := s.Get(ctx, ownerID, episodeID); err != nil {
 		return Outcome{}, err
+	}
+	if s.transcriptKind == "" {
+		return Outcome{}, nil
 	}
 	return LastKindJob(ctx, s.db, episodeID, EditorialKind)
 }
