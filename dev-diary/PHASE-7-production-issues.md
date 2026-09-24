@@ -727,7 +727,7 @@ requires:   T7.26, T7.28
 fixture-ok: yes
 size:       L · frontier
 owns:       cmd/reprise/, internal/episode/, internal/analysis/, internal/api/episodes.go, web/src/routes/threads/threads.ts
-status:     in-progress:review-r2:t7.29-rev-r2@813cacae29384028190134e2050cf2d2fca33f8e
+status:     in-progress:remediate-r2:t7.29-rem-r2
 ```
 Mark done starts the render job and nothing after it. No caller
 runs `MarkRendered` or `MarkReady`. `analysisFunc`, `coverFunc` and
@@ -888,6 +888,27 @@ The svelte 4 leakage scan in `tools/check.sh` matches `get(`, and
 
 **Done when:** `git grep` with the scan's own pattern finds nothing
 under `web/src`, and the editor tests still pass.
+
+### T7.35: The render kind follows its settings
+```yaml
+requires:   T7.29
+fixture-ok: yes
+size:       S · light
+owns:       internal/render/, internal/settings/, cmd/reprise/finish.go
+status:     not-started
+```
+Both config files set `RenderConcurrency`, and nothing reads it, so
+renders run one at a time whatever the setting says. `render.KindOf`
+also sets no `MaxAttempts`, so a render never resumes after a restart
+unless the binary patches the kind.
+
+* The render kind limit comes from `RenderConcurrency`. A value below
+  one refuses the boot by name.
+* `render.KindOf` sets its own attempt cap, and the binary drops its
+  workaround.
+
+**Done when:** A test boots with a concurrency of two and runs two
+renders at once. An interrupted render resumes through the kind alone.
 
 ---
 
