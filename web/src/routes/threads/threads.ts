@@ -793,27 +793,41 @@ function stoppedPassNote(pass: string, outcome: LiveOutcome): string {
 	return '';
 }
 
+// The line a failed episode's card shows when no pass stored a reason.
+// The episode may have failed later, in the render or the analysis.
+const FAILED_EPISODE_NOTE = 'The episode failed, and no pass stored a reason.';
+
 // Which pass one gallery card follows, read from the episode detail. The
 // transcript pass reads done as soon as it starts the editorial pass.
 // Every finished editorial pass stores a title proposal. So a draft with
 // a done transcript and no title still waits on the editorial pass, and
 // its card follows that pass instead. A failed editorial pass says so,
-// and so does one that never started. It returns null when the detail
-// names no transcript pass.
+// and so does one that never started. A failed episode always shows why
+// it failed, never a done pass. It returns null when the detail names no
+// transcript pass.
 export function galleryPass(detail: LiveDetail): GalleryPass | null {
 	const transcript = detail.outcome;
 	if (!transcript) return null;
 	const proposed = detail.proposals.some((proposal) => proposal.kind === 'title');
+	const failed = detail.episode.state === 'failed';
 	const base = { jobId: transcript.jobId, status: transcript.status, note: '', proposed };
-	if (detail.episode.state !== 'draft' || proposed || transcript.status !== 'done') return base;
+	if (failed && transcript.status !== 'done') {
+		return { ...base, note: stoppedPassNote('transcript', transcript) || FAILED_EPISODE_NOTE };
+	}
+	if (!failed && (detail.episode.state !== 'draft' || proposed || transcript.status !== 'done')) return base;
 	const editorial = detail.editorialOutcome;
 	if (!editorial) {
-		return { ...base, note: 'The transcript is stored, but the editorial pass never started.' };
+		const note =
+			failed && proposed ? FAILED_EPISODE_NOTE : 'The transcript is stored, but the editorial pass never started.';
+		return { ...base, note };
 	}
-	const note =
-		editorial.status === 'done'
-			? 'The editorial pass finished but stored no proposals.'
-			: stoppedPassNote('editorial', editorial);
+	const stopped =
+		editorial.status !== 'done'
+			? stoppedPassNote('editorial', editorial)
+			: proposed
+				? ''
+				: 'The editorial pass finished but stored no proposals.';
+	const note = failed ? stopped || FAILED_EPISODE_NOTE : stopped;
 	return { jobId: editorial.jobId, status: editorial.status, note, proposed };
 }
 
