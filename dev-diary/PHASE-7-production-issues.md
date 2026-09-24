@@ -726,8 +726,8 @@ plays that file.
 requires:   T7.26, T7.28
 fixture-ok: yes
 size:       L · frontier
-owns:       cmd/reprise/, internal/episode/, internal/analysis/, internal/api/episodes.go, web/src/routes/threads/threads.ts
-status:     in-progress:remediate-r2:t7.29-rem-r2
+owns:       cmd/reprise/, internal/episode/, internal/analysis/, internal/api/episodes.go, internal/api/respond.go, web/src/routes/threads/threads.ts, web/src/lib/editor/draft.ts
+status:     in-progress:review-r3:t7.29-rev-r3@6ece425710d2e6f7be4da00ef66533de340c68f8
 ```
 Mark done starts the render job and nothing after it. No caller
 runs `MarkRendered` or `MarkReady`. `analysisFunc`, `coverFunc` and
