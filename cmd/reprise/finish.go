@@ -30,8 +30,8 @@ import (
 const renderAttempts = 3
 
 // advanceInterval spaces the passes that start waiting finish work. A
-// pass kind at its limit refuses a start, and the next tick starts it
-// once a slot frees.
+// kind at its limit refuses a start, and the next tick starts it once a
+// slot frees. That covers a render as well as the passes after it.
 const advanceInterval = 30 * time.Second
 
 // errNoRunner reports a start before the runner opened, or after it
@@ -75,8 +75,21 @@ func (j *jobs) StartKind(ctx context.Context, kind string, fn job.Func) (string,
 
 // StartEpisodeKind runs fn as a job of the named kind and stamps the
 // episode on it before returning, so the detail names the job from its
-// first read.
+// first read. A render start answers with the render already running
+// for the episode, if one is, so mark done never races the advance into
+// a second render.
 func (j *jobs) StartEpisodeKind(ctx context.Context, kind, ownerID, episodeID string, fn job.Func) (string, error) {
+	if kind == kindRender {
+		j.schedMu.Lock()
+		defer j.schedMu.Unlock()
+		last, err := episode.LastKindJob(ctx, j.pipe.db, episodeID, kindRender)
+		if err != nil {
+			return "", err
+		}
+		if last.Found && !jobTerminal(last.Status) {
+			return last.JobID, nil
+		}
+	}
 	return j.startStamped(ctx, kind, episodeDescriptor{OwnerID: ownerID, EpisodeID: episodeID}, fn)
 }
 
@@ -478,9 +491,11 @@ func listInState(ctx context.Context, db *sql.DB, state episode.State) ([]episod
 	return out, nil
 }
 
-// advanceAll moves every analysing episode on. It starts the passes a
-// full kind refused before, and ships an episode whose passes stopped.
+// advanceAll moves every waiting episode on. It starts the renders a
+// full render kind refused before. Then it starts the passes a full kind
+// refused, and ships an episode whose passes stopped.
 func (j *jobs) advanceAll(ctx context.Context) {
+	j.startWaitingRenders(ctx)
 	waiting, err := listInState(ctx, j.pipe.db.Reader(), episode.StateAnalysing)
 	if err != nil {
 		log.Printf("reprise finish: %v", err)
@@ -493,7 +508,55 @@ func (j *jobs) advanceAll(ctx context.Context) {
 	}
 }
 
-// runAdvanceLoop advances every analysing episode once per interval until
+// startWaitingRenders starts a render for each rendering episode that no
+// render job ever served, oldest first. The render kind runs one job at a
+// time, so a refused start stops the walk. The episode keeps its state,
+// and the next advance tries it again. One render therefore runs at a
+// time, and every waiting episode gets its turn.
+func (j *jobs) startWaitingRenders(ctx context.Context) {
+	waiting, err := listInState(ctx, j.pipe.db.Reader(), episode.StateRendering)
+	if err != nil {
+		log.Printf("reprise finish: %v", err)
+		return
+	}
+	for _, d := range waiting {
+		err := j.startWaitingRender(ctx, d.OwnerID, d.EpisodeID)
+		if errors.Is(err, job.ErrLimit) {
+			return
+		}
+		if err != nil {
+			log.Printf("reprise finish: render for %s: %v", d.EpisodeID, err)
+		}
+	}
+}
+
+// startWaitingRender starts the render for one rendering episode that no
+// render job ever served. It reads the state and the render job under the
+// schedule lock, so a start that raced it starts nothing twice. An
+// episode with any render job is left to that job.
+func (j *jobs) startWaitingRender(ctx context.Context, ownerID, episodeID string) error {
+	j.schedMu.Lock()
+	defer j.schedMu.Unlock()
+	state, err := episode.Current(ctx, j.pipe.db, episodeID)
+	if err != nil {
+		return err
+	}
+	if state != episode.StateRendering {
+		return nil
+	}
+	last, err := episode.LastKindJob(ctx, j.pipe.db, episodeID, kindRender)
+	if err != nil {
+		return err
+	}
+	if last.Found {
+		return nil
+	}
+	desc := episodeDescriptor{OwnerID: ownerID, EpisodeID: episodeID}
+	_, err = j.startStamped(ctx, kindRender, desc, j.renderFunc(ownerID, episodeID))
+	return err
+}
+
+// runAdvanceLoop advances every waiting episode once per interval until
 // ctx ends.
 func (j *jobs) runAdvanceLoop(ctx context.Context) {
 	tick := time.NewTicker(advanceInterval)
@@ -511,9 +574,11 @@ func (j *jobs) runAdvanceLoop(ctx context.Context) {
 // recoverFinish settles what a restart left between mark done and ready.
 // A rendering episode whose render resumes waits for it. One whose render
 // finished moves on. One whose render stopped for good fails, so the card
-// names the render. One whose render never started starts it, because a
-// render calls nothing paid. Every analysing episode then moves on, which
-// ships the episodes whose paid passes a restart interrupted.
+// names the render. The advance then starts a render for each episode
+// whose render never started, because a render calls nothing paid. A
+// render already running holds the one render slot, so the rest wait for
+// later advances. Every analysing episode then moves on, which ships the
+// episodes whose paid passes a restart interrupted.
 func (j *jobs) recoverFinish(ctx context.Context) {
 	rendering, err := listInState(ctx, j.pipe.db.Reader(), episode.StateRendering)
 	if err != nil {
@@ -527,17 +592,14 @@ func (j *jobs) recoverFinish(ctx context.Context) {
 	j.advanceAll(ctx)
 }
 
-// recoverRender settles one rendering episode after a restart.
+// recoverRender settles one rendering episode after a restart. An
+// episode whose render never started waits for the advance to start it.
 func (j *jobs) recoverRender(ctx context.Context, ownerID, episodeID string) error {
 	last, err := episode.LastKindJob(ctx, j.pipe.db, episodeID, kindRender)
 	if err != nil {
 		return err
 	}
-	if !last.Found {
-		_, err := j.StartEpisodeKind(ctx, kindRender, ownerID, episodeID, j.renderFunc(ownerID, episodeID))
-		return err
-	}
-	if !jobTerminal(last.Status) {
+	if !last.Found || !jobTerminal(last.Status) {
 		return nil
 	}
 	if last.Status != string(job.StatusDone) {

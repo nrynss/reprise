@@ -819,3 +819,88 @@ func TestKeptEpisodeLeavesTheGuestDeletable(t *testing.T) {
 		t.Fatalf("delete the guest after keep: %v", err)
 	}
 }
+
+// TestEveryStuckRenderShipsOneAtATime leaves three episodes rendering
+// with no render job behind them, the state a restart leaves. The render
+// kind runs one job at a time, so the boot starts one render and the
+// others wait. Each advance then starts the next waiting render once the
+// slot frees. Every episode ships with exactly one render, and a repeat
+// advance starts nothing more.
+func TestEveryStuckRenderShipsOneAtATime(t *testing.T) {
+	fx := openWireFixture(t)
+	useFinishModels(fx, false)
+	const owner = "owner-stuck-renders"
+	insertWireUser(t, fx, owner)
+	var stuck []string
+	for range 3 {
+		episodeID := finishDraft(t, fx, owner)
+		if _, err := fx.db.Writer().ExecContext(t.Context(),
+			`UPDATE episodes SET state = ? WHERE id = ?`, string(episode.StateRendering), episodeID); err != nil {
+			t.Fatalf("plant rendering: %v", err)
+		}
+		stuck = append(stuck, episodeID)
+	}
+	j := bootFinishJobs(t, fx)
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		shipped := 0
+		for _, episodeID := range stuck {
+			if finishState(t, fx, episodeID) == episode.StateReady {
+				shipped++
+			}
+		}
+		if shipped == len(stuck) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of %d stuck episodes shipped", shipped, len(stuck))
+		}
+		j.advanceAll(t.Context())
+		time.Sleep(10 * time.Millisecond)
+	}
+	waitIdle(t, fx)
+	j.advanceAll(t.Context())
+	waitIdle(t, fx)
+	for _, episodeID := range stuck {
+		if n := kindJobsFor(t, fx, kindRender, episodeID); n != 1 {
+			t.Fatalf("render jobs for %s = %d, want one", episodeID, n)
+		}
+		if n := kindJobsFor(t, fx, kindAnalysis, episodeID); n != 1 {
+			t.Fatalf("analysis jobs for %s = %d, want one", episodeID, n)
+		}
+	}
+}
+
+// TestMarkDoneJoinsTheWaitingRender moves a draft to rendering the way
+// mark done does, lets the advance start its render first, and then
+// starts the render the way mark done does. The second start answers with
+// the running render, so the episode carries one render.
+func TestMarkDoneJoinsTheWaitingRender(t *testing.T) {
+	fx := openWireFixture(t)
+	useFinishModels(fx, false)
+	j := bootFinishJobs(t, fx)
+	const owner = "owner-render-join"
+	insertWireUser(t, fx, owner)
+	episodeID := finishDraft(t, fx, owner)
+	if err := episode.MarkDone(t.Context(), fx.db, episodeID); err != nil {
+		t.Fatalf("mark done: %v", err)
+	}
+	if err := j.startWaitingRender(t.Context(), owner, episodeID); err != nil {
+		t.Fatalf("start waiting render: %v", err)
+	}
+	first, err := episode.LastKindJob(t.Context(), fx.db, episodeID, kindRender)
+	if err != nil || !first.Found {
+		t.Fatalf("waiting render = %+v, %v, want one", first, err)
+	}
+	jobID, err := j.StartEpisodeKind(t.Context(), kindRender, owner, episodeID, j.renderFunc(owner, episodeID))
+	if err != nil {
+		t.Fatalf("mark done start: %v", err)
+	}
+	if jobID != first.JobID {
+		t.Fatalf("mark done started %s, want the running render %s", jobID, first.JobID)
+	}
+	waitState(t, fx, episodeID, episode.StateReady)
+	if n := kindJobsFor(t, fx, kindRender, episodeID); n != 1 {
+		t.Fatalf("render jobs = %d, want one", n)
+	}
+}
