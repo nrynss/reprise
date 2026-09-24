@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -45,13 +46,29 @@ type descriptor struct {
 	EpisodeID string `json:"episode_id"`
 }
 
-// KindOf registers the render kind. One render runs at a time, because
-// two loudness passes already saturate one encoder. The kind is
-// idempotent, so a restart resumes through the resolver instead of
-// failing the episode. The output name hashes the inputs, so the resumed
-// run reuses or rebuilds the same bytes.
-func KindOf(r *Resolver) job.Kind {
-	return job.Kind{Limit: 1, Idempotent: true, Resume: r.Resume}
+// renderAttempts caps the render attempts a restart may make. The render
+// calls nothing paid and names its output by its inputs, so a resumed
+// attempt lands on the same file. The cap still stops a render that dies
+// every time from resuming forever.
+const renderAttempts = 3
+
+// ErrConcurrency reports a render concurrency that runs no render. The
+// settings file carries the value under render_concurrency, so the error
+// names that key.
+var ErrConcurrency = errors.New("render: render_concurrency must be at least 1")
+
+// KindOf registers the render kind with room for concurrency renders at
+// once. The settings file carries the value, and one is the shipped
+// default. A value below one returns ErrConcurrency instead of a kind,
+// so the boot stops before the runner opens. The kind is idempotent with
+// room for a resumed attempt, so a restart resumes through the kind
+// alone. The output name hashes the inputs, so the resumed run reuses or
+// rebuilds the same bytes.
+func KindOf(r *Resolver, concurrency int) (job.Kind, error) {
+	if concurrency < 1 {
+		return job.Kind{}, fmt.Errorf("%w, got %d", ErrConcurrency, concurrency)
+	}
+	return job.Kind{Limit: concurrency, Idempotent: true, MaxAttempts: renderAttempts, Resume: r.Resume}, nil
 }
 
 // Func builds the job work for one episode. It publishes the descriptor

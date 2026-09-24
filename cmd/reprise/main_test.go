@@ -532,7 +532,11 @@ func TestPipelineKindsShareOneClientWithSettingsModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sweeper: %v", err)
 	}
-	kinds := fx.pipe.kinds((&jobs{resolver: resolver}).renderKind(), rec, sweeper)
+	renderKind, err := (&jobs{resolver: resolver, renderConcurrency: 1}).renderKind()
+	if err != nil {
+		t.Fatalf("render kind: %v", err)
+	}
+	kinds := fx.pipe.kinds(renderKind, rec, sweeper)
 	if len(kinds) != 8 {
 		t.Fatalf("kinds = %d, want 8 pipeline and settle kinds", len(kinds))
 	}

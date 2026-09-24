@@ -109,10 +109,11 @@ func useFinishModels(fx *wireFixture, drawFails bool) *analysis.ScriptedTranscri
 
 // bootFinishJobs boots the job wiring the binary boots, over the fixture
 // stores, with the finish chain doubles and no network. extra carries
-// feature kinds the boot merges.
+// feature kinds the boot merges. The render kind runs one at a time,
+// matching the shipped default.
 func bootFinishJobs(t *testing.T, fx *wireFixture, extra ...map[string]job.Kind) *jobs {
 	t.Helper()
-	j, err := tryBootFinishJobs(t, fx, extra...)
+	j, err := tryBootFinishJobs(t, fx, 1, extra...)
 	if err != nil {
 		t.Fatalf("boot jobs: %v", err)
 	}
@@ -121,7 +122,9 @@ func bootFinishJobs(t *testing.T, fx *wireFixture, extra ...map[string]job.Kind)
 }
 
 // tryBootFinishJobs boots the job wiring and reports the boot error.
-func tryBootFinishJobs(t *testing.T, fx *wireFixture, extra ...map[string]job.Kind) (*jobs, error) {
+// concurrency sets the render kind limit, so tests pin values the
+// shipped default never exercises.
+func tryBootFinishJobs(t *testing.T, fx *wireFixture, concurrency int, extra ...map[string]job.Kind) (*jobs, error) {
 	t.Helper()
 	resolver := &render.Resolver{
 		DB:      fx.db.Writer(),
@@ -145,6 +148,9 @@ func tryBootFinishJobs(t *testing.T, fx *wireFixture, extra ...map[string]job.Ki
 		rec:      rec,
 		sweeper:  sweeper,
 		extra:    extra,
+		// renderConcurrency arrives per boot, so each test pins the
+		// limit it exercises.
+		renderConcurrency: concurrency,
 	})
 }
 
@@ -694,11 +700,11 @@ func TestRenderStampsItsEpisode(t *testing.T) {
 // Each boot refuses before the runner opens.
 func TestDuplicateKindRefusesBoot(t *testing.T) {
 	fx := openWireFixture(t)
-	_, err := tryBootFinishJobs(t, fx, map[string]job.Kind{kindRender: {Limit: 4}})
+	_, err := tryBootFinishJobs(t, fx, 1, map[string]job.Kind{kindRender: {Limit: 4}})
 	if !errors.Is(err, errDuplicateKind) {
 		t.Fatalf("core clash boot error = %v, want errDuplicateKind", err)
 	}
-	_, err = tryBootFinishJobs(t, fx,
+	_, err = tryBootFinishJobs(t, fx, 1,
 		map[string]job.Kind{"erase": {Limit: 1}},
 		map[string]job.Kind{"erase": {Limit: 2}})
 	if !errors.Is(err, errDuplicateKind) {
@@ -716,7 +722,7 @@ func TestDuplicateKindRefusesBoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("feature kinds: %v", err)
 	}
-	if _, err := tryBootFinishJobs(t, fx, extra...); !errors.Is(err, errDuplicateKind) {
+	if _, err := tryBootFinishJobs(t, fx, 1, extra...); !errors.Is(err, errDuplicateKind) {
 		t.Fatalf("hook clash boot error = %v, want errDuplicateKind", err)
 	}
 	j := bootFinishJobs(t, fx, map[string]job.Kind{"erase": {Limit: 1}})
@@ -879,6 +885,76 @@ func TestEveryStuckRenderShipsOneAtATime(t *testing.T) {
 		}
 		if n := kindJobsFor(t, fx, kindAnalysis, episodeID); n != 1 {
 			t.Fatalf("analysis jobs for %s = %d, want one", episodeID, n)
+		}
+	}
+}
+
+// TestRenderKindFollowsConcurrencySetting boots with room for two renders
+// and holds two render jobs open at once. Both read running together, so
+// the kind follows the setting instead of serializing renders.
+func TestRenderKindFollowsConcurrencySetting(t *testing.T) {
+	fx := openWireFixture(t)
+	j, err := tryBootFinishJobs(t, fx, 2)
+	if err != nil {
+		t.Fatalf("boot jobs: %v", err)
+	}
+	t.Cleanup(func() { waitIdle(t, fx) })
+	var releaseOnce sync.Once
+	release := make(chan struct{})
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	started := make(chan struct{}, 2)
+	hold := func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
+		_ = progress
+		started <- struct{}{}
+		select {
+		case <-release:
+			return []byte(`{}`), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if _, err := j.StartKind(t.Context(), kindRender, hold); err != nil {
+		t.Fatalf("start first render: %v", err)
+	}
+	if _, err := j.StartKind(t.Context(), kindRender, hold); errors.Is(err, job.ErrLimit) {
+		t.Fatalf("start second render: %v, want room for two", err)
+	} else if err != nil {
+		t.Fatalf("start second render: %v", err)
+	}
+	if n := countRows(t, fx, `SELECT COUNT(*) FROM jobs WHERE kind = ? AND status = ?`,
+		kindRender, string(job.StatusRunning)); n != 2 {
+		t.Fatalf("running renders = %d, want 2", n)
+	}
+	deadline := time.Now().Add(2 * time.Minute)
+	for entered := 0; entered < 2; {
+		select {
+		case <-started:
+			entered++
+		default:
+			if time.Now().After(deadline) {
+				t.Fatalf("only %d of 2 render jobs entered", entered)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	releaseOnce.Do(func() { close(release) })
+	waitIdle(t, fx)
+}
+
+// TestRenderConcurrencyBelowOneRefusesBoot boots with no room for a render.
+// Each boot refuses by naming the setting, before the runner opens.
+func TestRenderConcurrencyBelowOneRefusesBoot(t *testing.T) {
+	for _, concurrency := range []int{0, -1} {
+		fx := openWireFixture(t)
+		_, err := tryBootFinishJobs(t, fx, concurrency)
+		if err == nil {
+			t.Fatalf("boot with concurrency %d succeeded, want a refusal", concurrency)
+		}
+		if !errors.Is(err, render.ErrConcurrency) {
+			t.Fatalf("boot error = %v, want the concurrency refusal", err)
+		}
+		if !strings.Contains(err.Error(), "render_concurrency") {
+			t.Fatalf("boot error = %v, want the setting name", err)
 		}
 	}
 }

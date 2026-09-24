@@ -23,12 +23,6 @@ import (
 // after the render stamps the render it works on, so every start checks
 // for a pass on that render first and a repeat starts nothing.
 
-// renderAttempts caps the render attempts a restart may make. The render
-// calls nothing paid and names its output by its inputs, so a resumed
-// attempt lands on the same file. The cap still stops a render that dies
-// every time from resuming forever.
-const renderAttempts = 3
-
 // advanceInterval spaces the passes that start waiting finish work. A
 // kind at its limit refuses a start, and the next tick starts it once a
 // slot frees. That covers a render as well as the passes after it.
@@ -139,14 +133,18 @@ func withLinkage(progress func(job.Progress), desc episodeDescriptor) func(job.P
 	}
 }
 
-// renderKind registers the render with the chained resume. The render
-// package sets the limit and marks it idempotent. The resume rebuilds the
-// chained work, so a resumed render still moves its episode on.
-func (j *jobs) renderKind() job.Kind {
-	kind := render.KindOf(j.resolver)
-	kind.MaxAttempts = renderAttempts
+// renderKind registers the render with the chained resume. The limit comes
+// from the settings file through the job boot, and a value below one
+// refuses the boot by name. The render package sets the attempt cap, so a
+// restart resumes through the kind alone. The resume rebuilds the chained
+// work, so a resumed render still moves its episode on.
+func (j *jobs) renderKind() (job.Kind, error) {
+	kind, err := render.KindOf(j.resolver, j.renderConcurrency)
+	if err != nil {
+		return job.Kind{}, err
+	}
 	kind.Resume = j.resumeRender
-	return kind
+	return kind, nil
 }
 
 // resumeRender rebuilds the chained render work from the linkage the
@@ -540,10 +538,10 @@ func (j *jobs) advanceAll(ctx context.Context) {
 }
 
 // startWaitingRenders starts a render for each rendering episode that no
-// render job ever served, oldest first. The render kind runs one job at a
-// time, so a capacity refusal stops the walk. Other start failures move
-// that episode back to failed, where its owner may retry it. One render
-// therefore runs at a time, and every waiting episode gets its turn.
+// render job ever served, oldest first. Each start fills one slot of the
+// render kind limit, so a capacity refusal stops the walk. Other start
+// failures move that episode back to failed, where its owner may retry
+// it. Every waiting episode gets its turn as slots free.
 func (j *jobs) startWaitingRenders(ctx context.Context) {
 	waiting, err := listInState(ctx, j.pipe.db.Reader(), episode.StateRendering)
 	if err != nil {
@@ -623,7 +621,7 @@ func (j *jobs) runAdvanceLoop(ctx context.Context) {
 // finished moves on. One whose render stopped for good fails, so the card
 // names the render. The advance then starts a render for each episode
 // whose render never started, because a render calls nothing paid. A
-// render already running holds the one render slot, so the rest wait for
+// render already running holds one render slot, so the rest wait for
 // later advances. Every analysing episode then moves on, which ships the
 // episodes whose paid passes a restart interrupted.
 func (j *jobs) recoverFinish(ctx context.Context) {

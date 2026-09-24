@@ -422,6 +422,42 @@ func TestStartupStopsOnGroupReadableKeyFile(t *testing.T) {
 	}
 }
 
+// TestShippedFilesSetRenderConcurrency reads both shipped settings files
+// and pins that each one carries a usable render concurrency. A file that
+// drops the key boots with no room for a render.
+func TestShippedFilesSetRenderConcurrency(t *testing.T) {
+	root := repoRoot(t)
+	files := []struct {
+		file    string
+		envPath string
+		keyPath string
+	}{
+		{"config/reprise.local.toml", "/home/nryn/work/reprise/.env", "/home/nryn/.config/reprise/gemini-sa.json"},
+		{"config/reprise.box.toml", "/etc/reprise/env", "/etc/reprise/gemini-sa.json"},
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(filepath.Join(root, file.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), "render_concurrency") {
+			t.Fatalf("%s carries no render concurrency", file.file)
+		}
+		envPath := writeEnv(t, fullEnv())
+		keyPath := writeKeyFile(t)
+		doc := strings.ReplaceAll(string(raw), file.envPath, envPath)
+		doc = strings.Replace(doc, file.keyPath, keyPath, 1)
+		t.Setenv(PathVar, writeConfig(t, doc))
+		got, _, err := Load(context.Background())
+		if err != nil {
+			t.Fatalf("tracked file %s does not load: %v", file.file, err)
+		}
+		if got.RenderConcurrency < 1 {
+			t.Fatalf("%s render concurrency = %d, want room for a render", file.file, got.RenderConcurrency)
+		}
+	}
+}
+
 // repoRoot walks up from the test's directory to the module root, which is
 // the directory holding go.mod.
 func repoRoot(t *testing.T) string {

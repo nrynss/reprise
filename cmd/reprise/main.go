@@ -1505,6 +1505,9 @@ type jobs struct {
 	// advancePeriod spaces the advance loop ticks. Zero means
 	// advanceInterval. The boot sets it before the loop starts.
 	advancePeriod time.Duration
+	// renderConcurrency caps how many renders run at once. The boot sets
+	// it from the settings file before the runner opens.
+	renderConcurrency int
 }
 
 // openJobs builds the shared clients once and registers every kind on
@@ -1598,6 +1601,9 @@ func openJobs(ctx context.Context, db *sqlite.DB, events *stream.Broker, loaded 
 		sweeper:  sweeper,
 		broker:   sessionBroker,
 		extra:    extra,
+		// renderConcurrency arrives from the settings file, so the
+		// render kind follows it.
+		renderConcurrency: loaded.RenderConcurrency,
 	})
 }
 
@@ -1613,6 +1619,10 @@ type jobsConfig struct {
 	sweeper  *broker.Sweeper
 	broker   *broker.Broker
 	extra    []map[string]job.Kind
+	// renderConcurrency caps how many renders run at once. The binary
+	// passes the settings file value, and a value below one refuses the
+	// boot by name.
+	renderConcurrency int
 }
 
 // startJobs merges the core and feature kinds, opens the durable runner,
@@ -1637,8 +1647,16 @@ func startJobs(ctx context.Context, cfg jobsConfig) (*jobs, error) {
 		broker:   cfg.broker,
 		store:    store,
 		ready:    make(chan struct{}),
+		// renderConcurrency arrives with the boot, so the render kind
+		// follows the settings file.
+		renderConcurrency: cfg.renderConcurrency,
 	}
-	kinds, err := mergeKinds(cfg.pipe.kinds(out.renderKind(), cfg.rec, cfg.sweeper), cfg.extra...)
+	renderKind, err := out.renderKind()
+	if err != nil {
+		close(out.ready)
+		return nil, err
+	}
+	kinds, err := mergeKinds(cfg.pipe.kinds(renderKind, cfg.rec, cfg.sweeper), cfg.extra...)
 	if err != nil {
 		close(out.ready)
 		return nil, err
