@@ -855,7 +855,7 @@ requires:   T7.28
 fixture-ok: yes
 size:       S · light
 owns:       web/playwright.config.ts, web/package.json, web/src/routes/record/mock.playwright.config.ts
-status:     in-progress:land:t7.33-impl@edb3fa2c43a7770fa500fa2a892cce663e65c248
+status:     done:173d70eb14551af94c7a3d443a60b72cdbceef34
 ```
 Several Playwright specs sit beside the page they test, each with its
 own config, such as `web/src/routes/gallery.spec.ts`. `npm run
