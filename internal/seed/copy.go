@@ -82,6 +82,7 @@ type catalogEpisode struct {
 	words    []wordRow
 	mentions []mentionRow
 	hooks    []hookRow
+	render   *renderRow
 }
 
 // wordRow is one stored transcript word.
@@ -103,6 +104,16 @@ type mentionRow struct {
 type hookRow struct {
 	mention string
 	used    int
+}
+
+// renderRow is the stored render behind a catalog episode. Copies keep
+// the blob ids, because the bytes are shared demo material, and mint a
+// fresh render id under the new owner.
+type renderRow struct {
+	hash     string
+	opus     string
+	aac      string
+	loudness float64
 }
 
 // catalogEpisodes reads every catalog episode with its words, mentions,
@@ -134,6 +145,9 @@ func (s *Service) catalogEpisodes(ctx context.Context) ([]catalogEpisode, error)
 			return nil, err
 		}
 		if err := s.loadHooks(ctx, &out[i]); err != nil {
+			return nil, err
+		}
+		if err := s.loadRender(ctx, &out[i]); err != nil {
 			return nil, err
 		}
 	}
@@ -203,6 +217,24 @@ func (s *Service) loadHooks(ctx context.Context, item *catalogEpisode) error {
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("seed: read catalog callbacks: %w", err)
 	}
+	return nil
+}
+
+// loadRender reads the stored render behind one catalog episode. A file
+// with no audio sibling stores none, so a missing row is not an error.
+func (s *Service) loadRender(ctx context.Context, item *catalogEpisode) error {
+	var row renderRow
+	err := s.db.Reader().QueryRowContext(ctx,
+		`SELECT input_hash, opus_media_id, aac_media_id, loudness FROM renders
+		 WHERE episode_id = ? AND owner_id = ? ORDER BY rowid ASC LIMIT 1`,
+		item.id, SeedUserID).Scan(&row.hash, &row.opus, &row.aac, &row.loudness)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("seed: read catalog render: %w", err)
+	}
+	item.render = &row
 	return nil
 }
 
@@ -297,6 +329,24 @@ func copyEpisode(ctx context.Context, tx *sql.Tx, userID string, item catalogEpi
 			(id, owner_id, episode_id, mention_id, used)
 			VALUES (?, ?, ?, ?, ?)`, callbackID, userID, episodeID, target, hook.used); err != nil {
 			return fmt.Errorf("seed: copy callback in episode number %d: %w", item.number, err)
+		}
+	}
+	if item.render != nil {
+		renderID, err := id.New()
+		if err != nil {
+			return fmt.Errorf("seed: mint copy render: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO renders
+			(id, owner_id, episode_id, input_hash, opus_media_id, aac_media_id, loudness)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			renderID, userID, episodeID, item.render.hash, item.render.opus, item.render.aac,
+			item.render.loudness); err != nil {
+			return fmt.Errorf("seed: copy render in episode number %d: %w", item.number, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO rendered_sources (episode_id, render_id) VALUES (?, ?)`,
+			episodeID, renderID); err != nil {
+			return fmt.Errorf("seed: link copy render in episode number %d: %w", item.number, err)
 		}
 	}
 	return nil

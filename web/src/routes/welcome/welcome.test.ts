@@ -1,7 +1,8 @@
 // Pins for the welcome screen. The catalog state comes from the query
 // string, the teaser runs thirty seconds, and the empty catalog offers
-// one button with no player behind it.
-import { describe, expect, it } from 'vitest';
+// one button with no player behind it. The live read replaces the
+// fixtures where a backend answers and leaves them where none does.
+import { describe, expect, it, vi } from 'vitest';
 import {
 	TEASER,
 	TEASER_RATE,
@@ -9,10 +10,15 @@ import {
 	buildTone,
 	emptyWelcome,
 	encodeWavBytes,
+	fetchWelcome,
 	formatClock,
 	initialWelcome,
+	liveNotice,
 	queryValue,
+	recordLabel,
 	teaserAudioUrl,
+	teaserEyebrow,
+	teaserToneUrl,
 	welcomeMode,
 	WelcomeController
 } from './welcome';
@@ -88,5 +94,129 @@ describe('empty controller', () => {
 		await controller.togglePlay();
 		expect(current.playing).toBe(false);
 		controller.destroy();
+	});
+});
+
+describe('live labels', () => {
+	it('names the record episode after the teaser', () => {
+		expect(recordLabel('empty', 4)).toBe('Record your first episode');
+		expect(recordLabel('seeded', 4)).toBe('Record episode 5');
+		expect(recordLabel('seeded', 1)).toBe('Record episode 2');
+	});
+
+	it('pads the teaser eyebrow', () => {
+		expect(teaserEyebrow(4)).toBe('From EP.04');
+		expect(teaserEyebrow(12)).toBe('From EP.12');
+	});
+
+	it('counts the season notice', () => {
+		expect(liveNotice(0)).toMatch('One episode');
+		expect(liveNotice(1)).toMatch('One episode');
+		expect(liveNotice(4)).toMatch('4 episodes');
+	});
+
+	it('builds tone per episode number', () => {
+		expect(teaserToneUrl(TEASER.episodeNumber)).toBe(teaserAudioUrl());
+	});
+});
+
+describe('live read', () => {
+	it('reads the seeded season from the backend', async () => {
+		const live = await fetchWelcome(async () =>
+			Response.json({
+				mode: 'seeded',
+				episodes: 1,
+				teaser: {
+					episode_number: 1,
+					title: 'The dreaded conversation',
+					line_a: 'Maya',
+					line_b: 'Jonas',
+					audio_url: '/media/blob-1'
+				}
+			})
+		);
+		expect(live?.mode).toBe('seeded');
+		expect(live?.episodes).toBe(1);
+		expect(live?.teaser?.title).toBe('The dreaded conversation');
+		expect(live?.teaser?.audioUrl).toBe('/media/blob-1');
+	});
+
+	it('reads the empty season without a teaser', async () => {
+		const live = await fetchWelcome(async () => Response.json({ mode: 'empty', episodes: 0 }));
+		expect(live?.mode).toBe('empty');
+		expect(live?.teaser).toBeNull();
+	});
+
+	it('keeps the fixtures where the backend never answers', async () => {
+		expect(await fetchWelcome(async () => new Response('nope', { status: 404 }))).toBeNull();
+		expect(
+			await fetchWelcome(async () => Response.json({ mode: 'seeded', episodes: 'many' }))
+		).toBeNull();
+		expect(
+			await fetchWelcome(async () => {
+				throw new Error('no backend');
+			})
+		).toBeNull();
+	});
+});
+
+describe('live controller', () => {
+	it('replaces the fixtures with the live season', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () =>
+				Response.json({
+					mode: 'seeded',
+					episodes: 1,
+					teaser: {
+						episode_number: 1,
+						title: 'The dreaded conversation',
+						line_a: 'Maya',
+						line_b: 'Jonas',
+						audio_url: '/media/blob-1'
+					}
+				})
+			)
+		);
+		try {
+			let current = emptyWelcome();
+			const controller = new WelcomeController((fresh) => {
+				current = fresh;
+			});
+			controller.mount('');
+			expect(current.mode).toBe('empty');
+			await controller.loadLive();
+			expect(current.mode).toBe('seeded');
+			expect(current.teaser.episodeNumber).toBe(1);
+			expect(current.teaser.title).toBe('The dreaded conversation');
+			expect(current.notice).toMatch('One episode');
+			expect(current.audioUrl).toBe('/media/blob-1');
+			expect(current.capped).toBe(false);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('keeps the fixtures where the live read fails', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => {
+				throw new Error('no backend');
+			})
+		);
+		try {
+			let current = emptyWelcome();
+			const controller = new WelcomeController((fresh) => {
+				current = fresh;
+			});
+			controller.mount('?seed=1');
+			await controller.loadLive();
+			expect(current.mode).toBe('seeded');
+			expect(current.teaser).toEqual(TEASER);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 });

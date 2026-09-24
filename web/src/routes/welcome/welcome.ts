@@ -1,9 +1,11 @@
 // First visit screen behind the welcome route. An empty catalog offers
-// one button to record. A seeded catalog plays thirty seconds of the
-// latest episode first, then offers one button to record the next one.
-// Fixtures carry no backend, so the query string picks the catalog state
-// and generated audio stands in for the episode. Playback runs through
-// the shared player, so the first gesture unlocks it for the session.
+// one button to record. A seeded catalog plays the latest episode first,
+// then offers one button to record the next one. The screen reads the
+// real catalog from the first visit route and falls back to the query
+// string where no backend answers, so scripted proofs run with no
+// server. Generated audio stands in for the episode where the teaser
+// stores no render. Playback runs through the shared player, so the
+// first gesture unlocks it for the session.
 import { AudioPlayer } from '@nrynss/chaaya/audio';
 
 // Length of the seeded teaser, in seconds.
@@ -100,25 +102,32 @@ export function encodeWavBytes(channel: Float32Array, rate: number): Uint8Array 
 	return new Uint8Array(buffer);
 }
 
-let teaserUrl: string | undefined;
+const toneUrls: Record<number, string> = {};
+
+// A playable URL for generated tone behind one episode number. Built
+// once per number at the teaser length, or empty where the runtime
+// holds no blob URLs. Empty keeps logic checks DOM-free.
+export function teaserToneUrl(episodeNumber: number): string {
+	const cached = toneUrls[episodeNumber];
+	if (cached !== undefined) return cached;
+	try {
+		if (typeof Blob === 'undefined' || typeof URL.createObjectURL !== 'function') {
+			return '';
+		}
+		const bytes = encodeWavBytes(buildTone(TEASER_SECONDS, episodeNumber), TEASER_RATE);
+		const url = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: 'audio/wav' }));
+		toneUrls[episodeNumber] = url;
+		return url;
+	} catch {
+		return '';
+	}
+}
 
 // A playable URL for the thirty second teaser. Built once from the
 // generated tone at the teaser length, or empty where the runtime
 // holds no blob URLs. Empty keeps logic checks DOM-free.
 export function teaserAudioUrl(): string {
-	if (teaserUrl !== undefined) return teaserUrl;
-	try {
-		if (typeof Blob === 'undefined' || typeof URL.createObjectURL !== 'function') {
-			teaserUrl = '';
-			return teaserUrl;
-		}
-		const bytes = encodeWavBytes(buildTone(TEASER_SECONDS, TEASER.episodeNumber), TEASER_RATE);
-		teaserUrl = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: 'audio/wav' }));
-		return teaserUrl;
-	} catch {
-		teaserUrl = '';
-		return teaserUrl;
-	}
+	return teaserToneUrl(TEASER.episodeNumber);
 }
 
 // The welcome palette as data. The screen draws these values and the
@@ -159,6 +168,69 @@ export async function runWelcomeGates(root: HTMLElement): Promise<string> {
 	}
 }
 
+// The fetch seam behind the live read. Logic checks inject a stub and
+// the controller passes the browser fetch.
+export type FetchFn = (url: string) => Promise<Response>;
+
+// The teaser episode behind a live read.
+export interface WelcomeLiveTeaser {
+	episodeNumber: number;
+	title: string;
+	lineA: string;
+	lineB: string;
+	audioUrl: string;
+}
+
+// The season behind a live first visit read.
+export interface WelcomeLive {
+	mode: WelcomeMode;
+	episodes: number;
+	teaser: WelcomeLiveTeaser | null;
+}
+
+// Read the real catalog state from the first visit route. Answers null
+// where no backend answers or the body carries no usable season, so the
+// screen falls back to the query string fixtures.
+export async function fetchWelcome(fetchFn: FetchFn = fetch): Promise<WelcomeLive | null> {
+	try {
+		const response = await fetchFn('/api/welcome');
+		if (!response.ok) return null;
+		const body = (await response.json()) as {
+			mode?: unknown;
+			episodes?: unknown;
+			teaser?: {
+				episode_number?: unknown;
+				title?: unknown;
+				line_a?: unknown;
+				line_b?: unknown;
+				audio_url?: unknown;
+			} | null;
+		};
+		if (body.mode !== 'empty' && body.mode !== 'seeded') return null;
+		if (typeof body.episodes !== 'number') return null;
+		if (body.mode === 'empty' || body.teaser == null) {
+			return { mode: body.mode, episodes: 0, teaser: null };
+		}
+		const teaser = body.teaser;
+		if (typeof teaser.episode_number !== 'number' || typeof teaser.title !== 'string') return null;
+		if (typeof teaser.line_a !== 'string' || typeof teaser.line_b !== 'string') return null;
+		if (typeof teaser.audio_url !== 'string') return null;
+		return {
+			mode: 'seeded',
+			episodes: body.episodes,
+			teaser: {
+				episodeNumber: teaser.episode_number,
+				title: teaser.title,
+				lineA: teaser.line_a,
+				lineB: teaser.line_b,
+				audioUrl: teaser.audio_url
+			}
+		};
+	} catch {
+		return null;
+	}
+}
+
 // Everything the welcome screen renders.
 export interface WelcomeSnapshot {
 	ready: boolean;
@@ -167,10 +239,44 @@ export interface WelcomeSnapshot {
 	playing: boolean;
 	position: number;
 	gateResult: string;
+	teaser: WelcomeTeaser;
+	audioUrl: string;
+	capped: boolean;
+	episodes: number;
 }
 
 export function emptyWelcome(): WelcomeSnapshot {
-	return { ready: false, mode: 'empty', notice: 'Loading.', playing: false, position: 0, gateResult: '' };
+	return {
+		ready: false,
+		mode: 'empty',
+		notice: 'Loading.',
+		playing: false,
+		position: 0,
+		gateResult: '',
+		teaser: TEASER,
+		audioUrl: '',
+		capped: true,
+		episodes: 0
+	};
+}
+
+// The season notice behind a live read. Empty offers the record button
+// alone. Seeded names the count behind the teaser.
+export function liveNotice(episodes: number): string {
+	if (episodes <= 1) return 'One episode is already here. The host has been listening.';
+	return `${episodes} episodes are already here. The host has been listening.`;
+}
+
+// The record link label behind one teaser. Empty offers the first
+// episode. Seeded offers the episode after the teaser.
+export function recordLabel(mode: WelcomeMode, episodeNumber: number): string {
+	if (mode !== 'seeded') return 'Record your first episode';
+	return `Record episode ${episodeNumber + 1}`;
+}
+
+// The teaser eyebrow behind one episode number, zero padded.
+export function teaserEyebrow(episodeNumber: number): string {
+	return `From EP.${String(episodeNumber).padStart(2, '0')}`;
 }
 
 // The snapshot before any player opens. Pure, so the server render
@@ -186,14 +292,19 @@ export function initialWelcome(search = ''): WelcomeSnapshot {
 				: 'Nothing recorded yet. Your first episode starts here.',
 		playing: false,
 		position: 0,
-		gateResult: ''
+		gateResult: '',
+		teaser: TEASER,
+		audioUrl: '',
+		capped: true,
+		episodes: mode === 'seeded' ? 4 : 0
 	};
 }
 
-// The first visit behind its view. Seeded state loads the teaser into
-// the shared player, so the visitor's first gesture unlocks playback
-// for the session. The record link stays a plain link, so the empty
-// catalog reaches a live session through two plain clicks.
+// The first visit behind its view. The fixture snapshot renders first,
+// so the server markup and the scripted proofs agree. The live read then
+// replaces it where a backend answers. The record link stays a plain
+// link, so the empty catalog reaches a live session through two plain
+// clicks.
 export class WelcomeController {
 	private snap: WelcomeSnapshot;
 	private readonly onChange: (snap: WelcomeSnapshot) => void;
@@ -209,20 +320,10 @@ export class WelcomeController {
 		const initial = initialWelcome(search);
 		this.snap = { ...this.snap, ready: true, mode: initial.mode, notice: initial.notice };
 		if (initial.mode === 'seeded') {
-			this.player?.pause();
-			this.player = new AudioPlayer();
-			const url = teaserAudioUrl();
-			if (url) this.player.load(url);
+			this.loadSource(teaserToneUrl(initial.teaser.episodeNumber), true);
 		}
 		this.emit();
-		const target = window as unknown as Record<string, unknown>;
-		target['__welcome'] = {
-			mode: () => this.snap.mode,
-			playing: () => this.snap.playing,
-			position: () => this.snap.position,
-			source: () => this.player?.source ?? null,
-			failure: () => this.player?.error ?? null
-		};
+		this.expose();
 		if (queryValue(search, 'gate') === '1') {
 			const main = document.querySelector('main');
 			if (main) {
@@ -232,6 +333,71 @@ export class WelcomeController {
 				});
 			}
 		}
+		void this.loadLive();
+	}
+
+	// Replace the fixture snapshot with the live season. A backend that
+	// never answers leaves the fixtures in place.
+	async loadLive(): Promise<void> {
+		let live: WelcomeLive | null;
+		try {
+			live = await fetchWelcome(fetch);
+		} catch {
+			return;
+		}
+		if (!live) return;
+		const teaser: WelcomeTeaser = live.teaser
+			? {
+					episodeNumber: live.teaser.episodeNumber,
+					title: live.teaser.title,
+					lineA: live.teaser.lineA,
+					lineB: live.teaser.lineB
+				}
+			: TEASER;
+		const audioUrl = live.teaser?.audioUrl ? live.teaser.audioUrl : teaserToneUrl(teaser.episodeNumber);
+		this.snap = {
+			...this.snap,
+			mode: live.mode,
+			notice:
+				live.mode === 'seeded'
+					? liveNotice(live.episodes)
+					: 'Nothing recorded yet. Your first episode starts here.',
+			playing: false,
+			position: 0,
+			teaser,
+			audioUrl,
+			capped: !live.teaser?.audioUrl,
+			episodes: live.episodes
+		};
+		if (live.mode === 'seeded') {
+			this.loadSource(audioUrl, !live.teaser?.audioUrl);
+		} else {
+			this.player?.pause();
+			this.player = null;
+		}
+		this.emit();
+		this.expose();
+	}
+
+	// Point the shared player at one teaser address. A capped source is
+	// generated tone that stops at the teaser length. A live render plays
+	// to its end.
+	private loadSource(url: string, capped: boolean): void {
+		this.player?.pause();
+		this.player = new AudioPlayer();
+		this.snap = { ...this.snap, audioUrl: url, capped };
+		if (url) this.player.load(url);
+	}
+
+	private expose(): void {
+		const target = window as unknown as Record<string, unknown>;
+		target['__welcome'] = {
+			mode: () => this.snap.mode,
+			playing: () => this.snap.playing,
+			position: () => this.snap.position,
+			source: () => this.player?.source ?? null,
+			failure: () => this.player?.error ?? null
+		};
 	}
 
 	destroy(): void {
@@ -252,11 +418,14 @@ export class WelcomeController {
 			return;
 		}
 		const ok = await this.player.play();
+		const playingNotice = this.snap.capped
+			? `Playing thirty seconds of episode ${this.snap.teaser.episodeNumber}.`
+			: `Playing episode ${this.snap.teaser.episodeNumber}.`;
 		this.snap = {
 			...this.snap,
 			playing: ok,
 			position: this.player.currentTime || this.snap.position,
-			notice: ok ? `Playing thirty seconds of episode ${TEASER.episodeNumber}.` : 'Playback refused. Press play again.'
+			notice: ok ? playingNotice : 'Playback refused. Press play again.'
 		};
 		this.emit();
 		if (ok) this.startTicker();
@@ -270,8 +439,9 @@ export class WelcomeController {
 		if (this.ticker !== null) return;
 		this.ticker = window.setInterval(() => {
 			const at = this.player?.currentTime ?? this.snap.position;
-			const position = Math.min(at, TEASER_SECONDS);
-			const finished = position >= TEASER_SECONDS || this.player?.playing === false;
+			const position = this.snap.capped ? Math.min(at, TEASER_SECONDS) : at;
+			const finished =
+				this.player?.playing === false || (this.snap.capped && position >= TEASER_SECONDS);
 			if (finished) {
 				if (this.ticker !== null) {
 					window.clearInterval(this.ticker);

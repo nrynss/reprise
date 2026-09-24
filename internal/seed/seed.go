@@ -32,6 +32,7 @@ import (
 
 	"github.com/nrynss/keel/mediastore"
 	"github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/reprise/internal/analysis"
 )
 
 // SeedUserID owns every catalog row. The user is reserved at Sync time
@@ -92,7 +93,10 @@ type Service struct {
 }
 
 // New migrates the catalog tables and returns the Service. It creates no
-// rows. Sync creates the reserved user and the catalog on demand.
+// rows. Sync creates the reserved user and the catalog on demand. It also
+// migrates the render link table the analysis pass owns, because catalog
+// and copy rows name the render their words came from and the table must
+// exist wherever this package writes.
 func New(ctx context.Context, cfg Config) (*Service, error) {
 	if cfg.DB == nil {
 		return nil, wrapInvalid("database must not be nil")
@@ -108,6 +112,9 @@ func New(ctx context.Context, cfg Config) (*Service, error) {
 		now = time.Now
 	}
 	if err := migrate(ctx, cfg.DB); err != nil {
+		return nil, err
+	}
+	if err := analysis.Migrate(ctx, cfg.DB); err != nil {
 		return nil, err
 	}
 	return &Service{db: cfg.DB, media: cfg.Media, dir: cfg.CatalogDir, now: now}, nil

@@ -113,6 +113,11 @@ var audioTypes = map[string]string{
 	".wav":  "audio/wav",
 }
 
+// seedLoudness is the placeholder loudness on a catalog render row.
+// Playback reads only the blob id, and the analysis pass remeasures real
+// renders, so the catalog never needs a measured value.
+const seedLoudness = -23.0
+
 // Sync imports the catalog directory into rows. It creates the reserved
 // user on demand. New and changed files replace their catalog episode.
 // Files removed since the last run retire their catalog episode. An empty
@@ -356,6 +361,23 @@ func (s *Service) swapEpisode(ctx context.Context, file loadedFile, fresh string
 				VALUES (?, ?, ?, ?, 0)`, callbackID, SeedUserID, episodeID, mentionIDs[i]); err != nil {
 				return fmt.Errorf("seed: plant catalog callback in %s: %w", file.key, err)
 			}
+		}
+	}
+	if fresh != "" {
+		renderID, err := id.New()
+		if err != nil {
+			return fmt.Errorf("seed: mint catalog render: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO renders
+			(id, owner_id, episode_id, input_hash, opus_media_id, aac_media_id, loudness)
+			VALUES (?, ?, ?, ?, ?, '', ?)`,
+			renderID, SeedUserID, episodeID, file.hash, fresh, seedLoudness); err != nil {
+			return fmt.Errorf("seed: insert catalog render in %s: %w", file.key, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO rendered_sources (episode_id, render_id) VALUES (?, ?)`,
+			episodeID, renderID); err != nil {
+			return fmt.Errorf("seed: link catalog render in %s: %w", file.key, err)
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO seed_catalog (key, episode_id, source_hash, audio_blob_id)

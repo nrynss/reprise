@@ -50,7 +50,7 @@ test('the seeded teaser plays after the first gesture', async ({ page }) => {
 	await page.goto(SEEDED);
 	await expect(page.getByRole('heading', { name: 'Hear what remembering sounds like' })).toBeVisible();
 
-	await page.getByRole('button', { name: 'Play thirty seconds of episode four' }).click();
+	await page.getByRole('button', { name: 'Play thirty seconds of episode 4' }).click();
 	await expect
 		.poll(async () => (await welcomeState(page)).playing, { timeout: 10_000 })
 		.toBe(true);
@@ -58,7 +58,7 @@ test('the seeded teaser plays after the first gesture', async ({ page }) => {
 	expect(state.mode).toBe('seeded');
 	expect(state.source).not.toBeNull();
 	expect(state.position).toBeGreaterThanOrEqual(0);
-	await expect(page.getByRole('link', { name: 'Record episode five' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Record episode 5' })).toBeVisible();
 });
 
 test('the welcome screen passes both gates', async ({ page }) => {

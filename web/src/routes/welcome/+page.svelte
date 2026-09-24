@@ -4,10 +4,11 @@
 	import { page } from '$app/state';
 	import { pageTitle } from '$lib/shell';
 	import {
-		TEASER,
-		TEASER_SECONDS,
 		formatClock,
 		initialWelcome,
+		recordLabel,
+		teaserEyebrow,
+		TEASER_SECONDS,
 		WelcomeController
 	} from './welcome';
 
@@ -49,30 +50,38 @@
 
 	{#if snap.mode === 'seeded'}
 		<section aria-label="Hear what remembering sounds like">
-			<p class="eyebrow">From EP.04 · {TEASER.title}</p>
+			<p class="eyebrow">{teaserEyebrow(snap.teaser.episodeNumber)} · {snap.teaser.title}</p>
 			<h2>Hear what remembering sounds like</h2>
 			<button
 				id="welcome-play"
 				onclick={() => void controller?.togglePlay()}
 				aria-label={snap.playing
-					? 'Pause thirty seconds of episode four'
-					: 'Play thirty seconds of episode four'}
+					? `Pause episode ${snap.teaser.episodeNumber}`
+					: snap.capped
+						? `Play thirty seconds of episode ${snap.teaser.episodeNumber}`
+						: `Play episode ${snap.teaser.episodeNumber}`}
 			>
 				{snap.playing ? 'Pause' : 'Play'}
 			</button>
 			<p id="welcome-position" role="status" aria-label="Teaser position">
-				{formatClock(snap.position)} of {formatClock(TEASER_SECONDS)}
+				{#if snap.capped}
+					{formatClock(snap.position)} of {formatClock(TEASER_SECONDS)}
+				{:else}
+					{formatClock(snap.position)}
+				{/if}
 			</p>
-			<blockquote>
-				<p>{TEASER.lineA}</p>
-				<p>{TEASER.lineB}</p>
-			</blockquote>
+			{#if snap.teaser.lineA || snap.teaser.lineB}
+				<blockquote>
+					{#if snap.teaser.lineA}<p>{snap.teaser.lineA}</p>{/if}
+					{#if snap.teaser.lineB}<p>{snap.teaser.lineB}</p>{/if}
+				</blockquote>
+			{/if}
 		</section>
 	{/if}
 
 	<nav aria-label="Start recording">
 		<a id="welcome-record" href={resolve('/record')}>
-			{snap.mode === 'seeded' ? 'Record episode five' : 'Record your first episode'}
+			{recordLabel(snap.mode, snap.teaser.episodeNumber)}
 		</a>
 	</nav>
 
