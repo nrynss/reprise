@@ -777,7 +777,7 @@ requires:   T7.28, T7.29
 fixture-ok: yes
 size:       L · frontier
 owns:       cmd/reprise/privacy.go, internal/api/routes.go, internal/privacy/, internal/retention/, web/src/routes/share/, web/src/routes/threads/threads.ts
-status:     not-started
+status:     in-progress:implement:t7.30-impl
 ```
 The binary never imports `internal/privacy` or `internal/retention`.
 Publish, revoke and erase still answer 501 from the stub. No route
@@ -812,7 +812,7 @@ requires:   T7.29
 fixture-ok: yes
 size:       M · mid
 owns:       cmd/reprise/seed.go, internal/seed/, web/src/routes/welcome/
-status:     not-started
+status:     in-progress:implement:t7.31-impl
 ```
 The binary never imports `internal/seed`. Nothing syncs `data/season/`
 into catalog rows, and nothing calls `EnsureCopy` for a new guest. The
@@ -895,7 +895,7 @@ requires:   T7.29
 fixture-ok: yes
 size:       S · light
 owns:       internal/render/, internal/settings/, cmd/reprise/finish.go
-status:     not-started
+status:     in-progress:implement:t7.35-impl
 ```
 Both config files set `RenderConcurrency`, and nothing reads it, so
 renders run one at a time whatever the setting says. `render.KindOf`
