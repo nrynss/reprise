@@ -883,6 +883,50 @@ func TestEveryStuckRenderShipsOneAtATime(t *testing.T) {
 	}
 }
 
+// failingStampStore refuses the scheduler's first linkage write while the
+// runner keeps its real store. It models a job record that starts but cannot
+// be connected to its episode.
+type failingStampStore struct {
+	job.Store
+	err error
+}
+
+// SetProgress refuses the scheduler's linkage write.
+func (s failingStampStore) SetProgress(context.Context, job.Record) error {
+	return s.err
+}
+
+// TestRetryFailedRenderStartReturnsToFailed retries an initial render start
+// fault through the done route. A later linkage fault must fail the episode,
+// rather than leave an unbounded rendering row with no linked render.
+func TestRetryFailedRenderStartReturnsToFailed(t *testing.T) {
+	fx := openWireFixture(t)
+	useFinishModels(fx, false)
+	j := bootFinishJobs(t, fx)
+	routes, guests := finishRoutes(t, fx, j)
+	cookie, owner := finishGuest(t, guests)
+	episodeID := finishDraft(t, fx, owner)
+
+	runner := j.runner
+	j.runner = nil
+	if got := postDone(t, routes, cookie, episodeID); got != http.StatusServiceUnavailable {
+		t.Fatalf("initial done status = %d, want 503", got)
+	}
+	j.runner = runner
+	if got := finishState(t, fx, episodeID); got != episode.StateFailed {
+		t.Fatalf("initial state = %s, want failed", got)
+	}
+
+	j.store = failingStampStore{Store: j.store, err: errors.New("linkage write refused")}
+	if got := postDone(t, routes, cookie, episodeID); got != http.StatusAccepted {
+		t.Fatalf("retry done status = %d, want 202", got)
+	}
+	j.advanceAll(t.Context())
+	if got := finishState(t, fx, episodeID); got != episode.StateFailed {
+		t.Fatalf("state after failed queued start = %s, want failed", got)
+	}
+}
+
 // TestMarkDoneJoinsTheWaitingRender moves a draft to rendering the way
 // mark done does, lets the advance start its render first, and then
 // starts the render the way mark done does. The second start answers with

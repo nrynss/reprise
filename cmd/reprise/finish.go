@@ -541,9 +541,9 @@ func (j *jobs) advanceAll(ctx context.Context) {
 
 // startWaitingRenders starts a render for each rendering episode that no
 // render job ever served, oldest first. The render kind runs one job at a
-// time, so a refused start stops the walk. The episode keeps its state,
-// and the next advance tries it again. One render therefore runs at a
-// time, and every waiting episode gets its turn.
+// time, so a capacity refusal stops the walk. Other start failures move
+// that episode back to failed, where its owner may retry it. One render
+// therefore runs at a time, and every waiting episode gets its turn.
 func (j *jobs) startWaitingRenders(ctx context.Context) {
 	waiting, err := listInState(ctx, j.pipe.db.Reader(), episode.StateRendering)
 	if err != nil {
@@ -585,6 +585,12 @@ func (j *jobs) startWaitingRender(ctx context.Context, ownerID, episodeID string
 	}
 	desc := episodeDescriptor{OwnerID: ownerID, EpisodeID: episodeID}
 	_, err = j.startStamped(ctx, kindRender, desc, j.renderFunc(ownerID, episodeID))
+	if err != nil && !errors.Is(err, job.ErrLimit) {
+		if failErr := episode.Transition(ctx, j.pipe.db, episodeID,
+			episode.StateRendering, episode.StateFailed); failErr != nil {
+			return fmt.Errorf("reprise: fail render for %s after start error: %w", episodeID, failErr)
+		}
+	}
 	return err
 }
 
