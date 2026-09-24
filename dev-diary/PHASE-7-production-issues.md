@@ -777,7 +777,7 @@ requires:   T7.28, T7.29
 fixture-ok: yes
 size:       L · frontier
 owns:       cmd/reprise/privacy.go, internal/api/routes.go, internal/privacy/, internal/retention/, web/src/routes/share/, web/src/routes/threads/threads.ts
-status:     in-progress:implement:t7.30-impl
+status:     in-progress:review-r1:t7.30-rev-r1@3f37fec4428f6aa38d81e5a4c1465179b0a17dfd
 ```
 The binary never imports `internal/privacy` or `internal/retention`.
 Publish, revoke and erase still answer 501 from the stub. No route
@@ -812,7 +812,7 @@ requires:   T7.29
 fixture-ok: yes
 size:       M · mid
 owns:       cmd/reprise/seed.go, internal/seed/, web/src/routes/welcome/
-status:     in-progress:implement:t7.31-impl
+status:     in-progress:review-r1:t7.31-rev-r1@713ef9e42593fbd009d97e3991dac9d815a2069d
 ```
 The binary never imports `internal/seed`. Nothing syncs `data/season/`
 into catalog rows, and nothing calls `EnsureCopy` for a new guest. The
@@ -894,8 +894,8 @@ under `web/src`, and the editor tests still pass.
 requires:   T7.29
 fixture-ok: yes
 size:       S · light
-owns:       internal/render/, internal/settings/, cmd/reprise/finish.go
-status:     in-progress:implement:t7.35-impl
+owns:       internal/render/, internal/settings/, cmd/reprise/finish.go, cmd/reprise/main.go, cmd/reprise/main_test.go
+status:     in-progress:review-r1:t7.35-rev-r1@d0badc85bf14805c551eead739a120154400f727
 ```
 Both config files set `RenderConcurrency`, and nothing reads it, so
 renders run one at a time whatever the setting says. `render.KindOf`
