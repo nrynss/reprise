@@ -564,7 +564,8 @@ func (j *jobs) startWaitingRenders(ctx context.Context) {
 // startWaitingRender starts the render for one rendering episode that no
 // render job ever served. It reads the state and the render job under the
 // schedule lock, so a start that raced it starts nothing twice. An
-// episode with any render job is left to that job.
+// episode with a live render job is left to that job. A terminal failed
+// render starts again only after the owner explicitly retried it.
 func (j *jobs) startWaitingRender(ctx context.Context, ownerID, episodeID string) error {
 	j.schedMu.Lock()
 	defer j.schedMu.Unlock()
@@ -579,7 +580,7 @@ func (j *jobs) startWaitingRender(ctx context.Context, ownerID, episodeID string
 	if err != nil {
 		return err
 	}
-	if last.Found {
+	if last.Found && !jobTerminal(last.Status) {
 		return nil
 	}
 	desc := episodeDescriptor{OwnerID: ownerID, EpisodeID: episodeID}

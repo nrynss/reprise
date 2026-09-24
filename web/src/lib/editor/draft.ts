@@ -779,19 +779,40 @@ export class DraftController {
 			this.emit();
 			return;
 		}
-		if (this.snap.renderStage !== 'confirm') return;
+		if (this.snap.renderStage !== 'confirm' && this.snap.renderStage !== 'done') return;
 		this.snap = { ...this.snap, renderStage: 'starting', renderDetail: 'Starting the render.' };
 		this.emit();
 		void fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}/done`, { method: 'POST' })
 			.then(async (response) => {
 				if (!response.ok) throw new Error(`done ${response.status}`);
-				const body = (await response.json()) as { job_id?: string };
+				const body = (await response.json()) as { job_id?: string; queued?: boolean };
+				if (body.queued) {
+					this.onRenderQueued();
+					return;
+				}
 				this.onRenderStarted(body.job_id ?? null);
 			})
 			.catch(() => {
-				// The stub endpoint refuses. The fixture render stands in.
-				this.onRenderStarted(null);
+				if (this.fixtureMode) {
+					this.onRenderStarted(null);
+					return;
+				}
+				this.snap = {
+					...this.snap,
+					renderStage: 'done',
+					renderDetail: 'The render request was refused. Open the gallery to see its current state.'
+				};
+				this.emit();
 			});
+	}
+
+	private onRenderQueued(): void {
+		this.snap = {
+			...this.snap,
+			renderStage: 'running',
+			renderDetail: 'The render is queued. It starts once the render ahead of it finishes.'
+		};
+		this.emit();
 	}
 
 	private onRenderStarted(jobId: string | null): void {

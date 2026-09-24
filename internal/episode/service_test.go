@@ -296,8 +296,13 @@ func TestRequestRenderWaitsWhenTheRenderSlotIsBusy(t *testing.T) {
 			if got := stateOf(t, db, "ep-1"); got != tc.state {
 				t.Fatalf("state = %s, want %s", got, tc.state)
 			}
-			if _, err := svc.RequestRender(t.Context(), "owner-1", "ep-1"); !errors.Is(err, episode.ErrIllegalTransition) {
-				t.Fatalf("repeat request error = %v, want ErrIllegalTransition", err)
+			again, err := svc.RequestRender(t.Context(), "owner-1", "ep-1")
+			if tc.wait {
+				if !errors.Is(err, episode.ErrIllegalTransition) {
+					t.Fatalf("repeat request error = %v, want ErrIllegalTransition", err)
+				}
+			} else if err != nil || again != "" {
+				t.Fatalf("retry request = %q, %v, want queued", again, err)
 			}
 			if starter.calls != 1 {
 				t.Fatalf("starter calls = %d, want one", starter.calls)

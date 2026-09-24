@@ -1153,7 +1153,10 @@ export class GalleryController {
 	// detail leaves the row as it was.
 	private async followPass(episodeId: string): Promise<boolean> {
 		const found = await this.passOf(episodeId);
-		if (!found) return false;
+		if (!found) {
+			this.queued.delete(episodeId);
+			return false;
+		}
 		const { pass, state } = found;
 		this.notes[pass.jobId] = pass.note;
 		if (pass.queued) this.queued.add(episodeId);
