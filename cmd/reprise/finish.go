@@ -574,10 +574,19 @@ func (j *jobs) startWaitingRender(ctx context.Context, ownerID, episodeID string
 	return err
 }
 
+// advanceEvery returns the advance loop period, advanceInterval unless
+// the boot set another.
+func (j *jobs) advanceEvery() time.Duration {
+	if j.advancePeriod > 0 {
+		return j.advancePeriod
+	}
+	return advanceInterval
+}
+
 // runAdvanceLoop advances every waiting episode once per interval until
 // ctx ends.
 func (j *jobs) runAdvanceLoop(ctx context.Context) {
-	tick := time.NewTicker(advanceInterval)
+	tick := time.NewTicker(j.advanceEvery())
 	defer tick.Stop()
 	for {
 		select {

@@ -179,7 +179,7 @@ func main() {
 	mux.HandleFunc("GET /healthz", handleHealth)
 	sweepCtx, stopSweep := context.WithCancel(context.Background())
 	defer stopSweep()
-	leases, err := wireAPI(sweepCtx, mux, loaded)
+	leases, err := wireAPI(sweepCtx, mux, loaded, bootPlan{features: features()})
 	if err != nil {
 		log.Fatalf("wire routes: %v", err)
 	}
@@ -518,17 +518,28 @@ func protectTake(spendGate *gate.Gate, name string, burst int, next http.Handler
 	return spendGate.Protect(takeRule(name, burst), next)
 }
 
+// bootPlan carries what the boot wires beyond the settings file. The
+// process passes every feature and the default advance period. A test
+// passes its own, so it can watch the real boot call each hook.
+type bootPlan struct {
+	// features lists the self-wiring features whose hooks the boot calls.
+	features []feature
+	// advancePeriod spaces the advance loop ticks. Zero means
+	// advanceInterval.
+	advancePeriod time.Duration
+}
+
 // wireAPI opens the stores every mounted route needs and registers the
 // route table on mux. It changes nothing about boot, drain, health, or the
 // served app shell. A failure stops the process at the call site, the way
 // a missing secret does. It returns the lease registry for the drain,
-// and starts the abandoned sweep on its schedule under ctx.
+// and starts the abandoned sweep and the advance loop under ctx.
 //
 // One owner may spend up to the whole daily ceiling. The per-owner ceiling
 // still isolates accounting and lets the admin page lower one owner, while
 // the global ceiling caps the day across owners. Both constructors take
 // this one value, and the mount refuses to wire them if they ever disagree.
-func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) (*lease.Manager, error) {
+func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, boot bootPlan) (*lease.Manager, error) {
 	signingKey, err := loaded.Secrets.SessionSigningKey.Reveal()
 	if err != nil {
 		return nil, fmt.Errorf("reprise: reveal session signing key: %w", err)
@@ -644,7 +655,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 		return nil, fmt.Errorf("reprise: open spend gate: %w", err)
 	}
 	events := stream.New(stream.Config{})
-	feats := features()
+	feats := boot.features
 	extra, err := featureKinds(feats, kindWiring{DB: db, Media: mediaStore, Settings: loaded})
 	if err != nil {
 		return nil, err
@@ -653,6 +664,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings) 
 	if err != nil {
 		return nil, err
 	}
+	jobs.advancePeriod = boot.advancePeriod
 	episodeSvc, err := episode.NewService(episodeConfig(db, jobs))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open episode service: %w", err)
@@ -1487,6 +1499,9 @@ type jobs struct {
 	// settled holds the outcome of each pass after the render whose work
 	// returned before its record finished. schedMu guards it.
 	settled map[passKey]job.Status
+	// advancePeriod spaces the advance loop ticks. Zero means
+	// advanceInterval. The boot sets it before the loop starts.
+	advancePeriod time.Duration
 }
 
 // openJobs builds the shared clients once and registers every kind on
