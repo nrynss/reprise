@@ -240,6 +240,16 @@ function readStoredDraft(value: unknown, episodeId: string): StoredDraft {
 	return { title, words, proposals, audioUrl: textOf(value, 'audio_url') };
 }
 
+// CutProposals maps a cut id to the stored proposal behind it. A missing
+// id reads undefined, as a Map lookup does.
+type CutProposals = Record<string, string | undefined>;
+
+// emptyCutProposals builds a record with no prototype, so inherited keys
+// such as constructor never read as a stored proposal.
+function emptyCutProposals(): CutProposals {
+	return Object.create(null) as CutProposals;
+}
+
 export class DraftController {
 	readonly episodeId: string;
 	readonly player = new AudioPlayer();
@@ -252,7 +262,7 @@ export class DraftController {
 	// Live cut ids map to the stored proposal each decision row names. A
 	// null-prototype record keeps an id like "constructor" or "__proto__"
 	// from reading or writing an inherited member instead of its own.
-	private cutProposals: Record<string, string> = Object.create(null);
+	private cutProposals: CutProposals = emptyCutProposals();
 	private storedIds: StoredIds = FIXTURE_IDS;
 
 	constructor(options: DraftOptions) {
@@ -289,7 +299,7 @@ export class DraftController {
 
 	private loadFromFixture(notice: string): void {
 		this.fixtureMode = true;
-		this.cutProposals = Object.create(null);
+		this.cutProposals = emptyCutProposals();
 		this.storedIds = FIXTURE_IDS;
 		const fixture = loadFixture(this.episodeId);
 		this.installDraft({
@@ -328,7 +338,7 @@ export class DraftController {
 		// so a reload shows what the render will do.
 		const cuts: EditCut[] = [];
 		const decisions: DecisionRow[] = [];
-		const cutProposals: Record<string, string> = Object.create(null);
+		const cutProposals = emptyCutProposals();
 		for (const proposal of stored.proposals) {
 			if (proposal.kind !== 'cut' || !proposal.id) continue;
 			if (proposal.decision === DECISION_ACCEPTED) {
