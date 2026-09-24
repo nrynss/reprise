@@ -1,6 +1,6 @@
-// The episode page plays the render, so its words, its seek targets and
-// its length must sit on the clock of the rendered file, never on the
-// raw take the edit words came from.
+// The episode page plays the render. So its words, its seek targets and
+// its length must sit on the clock of the rendered file. They never sit
+// on the raw take the edit words came from.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AudioPlayer } from '@nrynss/chaaya/audio';
 import { EpisodeController, emptyScreen, renderClockWords, type LiveProposal } from './threads';
