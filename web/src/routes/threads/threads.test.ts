@@ -324,6 +324,7 @@ function galleryRow(partial: Partial<SeasonRow>): SeasonRow {
 		duration: null,
 		jobId: '',
 		fixture: false,
+		proposed: false,
 		...partial
 	};
 }

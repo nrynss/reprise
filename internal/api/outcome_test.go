@@ -114,4 +114,52 @@ func TestEpisodeDetailOmitsPassOutcomeWithoutPass(t *testing.T) {
 	if body.TranscriptOutcome != nil {
 		t.Fatalf("outcome = %+v, want no pass outcome", body.TranscriptOutcome)
 	}
+	if body.EditorialOutcome != nil {
+		t.Fatalf("editorial outcome = %+v, want none", body.EditorialOutcome)
+	}
+}
+
+// TestEpisodeDetailCarriesEditorialOutcome stores a done transcript pass
+// and a failed editorial pass on a draft with no proposals. The detail
+// must carry both, so the gallery can say the editorial pass failed.
+func TestEpisodeDetailCarriesEditorialOutcome(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "draft")
+	jobs := openJobRows(t, db)
+	seedPassRow(t, jobs, "job-words", owner.ID, "ep-1", job.StatusDone, "")
+	detail, err := json.Marshal(map[string]string{"owner_id": owner.ID, "episode_id": "ep-1"})
+	if err != nil {
+		t.Fatalf("encode linkage: %v", err)
+	}
+	if err := jobs.Create(t.Context(), job.Record{
+		ID:        "job-edit",
+		Kind:      episode.EditorialKind,
+		Status:    job.StatusError,
+		Attempt:   1,
+		RootID:    "job-edit",
+		Progress:  job.Progress{Stage: "start", Detail: detail},
+		UpdatedAt: time.Now(),
+		Err:       errors.New("budget refused"),
+	}); err != nil {
+		t.Fatalf("create editorial pass: %v", err)
+	}
+
+	rec := serve(guests, NewEpisodes(outcomeService(t, db)), cookie,
+		httptest.NewRequest(http.MethodGet, "/api/episodes/ep-1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, want 200", rec.Code)
+	}
+	var body episodeDetailJSON
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if body.TranscriptOutcome == nil || body.TranscriptOutcome.JobID != "job-words" {
+		t.Fatalf("transcript outcome = %+v, want the done job-words", body.TranscriptOutcome)
+	}
+	got := body.EditorialOutcome
+	if got == nil || got.JobID != "job-edit" || got.Status != string(job.StatusError) || got.Error != "budget refused" {
+		t.Fatalf("editorial outcome = %+v, want the failed job-edit with its text", got)
+	}
 }

@@ -143,3 +143,24 @@ func (s *Service) RenderMediaID(ctx context.Context, ownerID, episodeID string) 
 	}
 	return mediaID, nil
 }
+
+// EditorialKind is the job kind the editorial pass runs under. The binary
+// starts that pass under this same name, and the detail reads it back.
+const EditorialKind = "editorial"
+
+// EditorialOutcome returns the latest editorial pass outcome for an
+// episode the owner holds. The transcript pass starts the editorial pass
+// and reads done before the editorial pass stores anything. So a draft
+// with a done transcript and no proposals still waits on this pass, and
+// this outcome says whether it runs or failed. Found is false when no
+// editorial pass ever started. Unknown and foreign episodes report
+// ErrNotFound.
+func (s *Service) EditorialOutcome(ctx context.Context, ownerID, episodeID string) (Outcome, error) {
+	if s == nil || s.db == nil || ownerID == "" || episodeID == "" {
+		return Outcome{}, fmt.Errorf("episode: editorial outcome %q: %w", episodeID, ErrInvalid)
+	}
+	if _, err := s.Get(ctx, ownerID, episodeID); err != nil {
+		return Outcome{}, err
+	}
+	return LastKindJob(ctx, s.db, episodeID, EditorialKind)
+}

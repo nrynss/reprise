@@ -745,7 +745,8 @@ export async function runSeasonGates(root: HTMLElement): Promise<string> {
 }
 
 // One rendering card as the gallery draws it. Status is the latest job
-// state the card knows.
+// state the card knows. Note, when set, replaces the line a finished or
+// failed job shows.
 export interface GalleryCardProgress {
 	jobId: string;
 	percent: number;
@@ -757,14 +758,63 @@ export interface GalleryCardProgress {
 // Which card one gallery row draws. A row whose job has not finished
 // keeps its progress card, draft or not, so a running pass shows its
 // progress and a failed pass shows its text. A draft opens the editor
-// once its job is done, or when it names no job. Any other row with a
-// job keeps its progress card, and the rest open the episode.
+// when it names no job. It also opens the editor once its job is done
+// and its proposals are stored. Until then the editor has nothing to
+// show. Any other row with a job keeps its progress card, and the rest
+// open the episode.
 export type GalleryCardKind = 'job' | 'editor' | 'episode';
 
 export function galleryCardKind(row: SeasonRow, card: GalleryCardProgress | null): GalleryCardKind {
-	if (row.state === 'draft' && (!row.jobId || card?.status === 'done')) return 'editor';
+	if (row.state === 'draft' && (!row.jobId || (card?.status === 'done' && row.proposed))) return 'editor';
 	if (row.jobId) return 'job';
 	return 'episode';
+}
+
+// The pass one live gallery card follows, and the line it shows once
+// that pass stops. Proposed says whether the editorial pass stored its
+// proposals.
+export interface GalleryPass {
+	jobId: string;
+	status: string;
+	note: string;
+	proposed: boolean;
+}
+
+// The line a card shows for a pass that stopped without finishing, or
+// empty while the pass runs or once it is done.
+function stoppedPassNote(pass: string, outcome: LiveOutcome): string {
+	if (outcome.status === 'error') {
+		return `The ${pass} pass failed: ${outcome.error || 'no reason was stored'}.`;
+	}
+	if (outcome.status === 'interrupted') {
+		return `The ${pass} pass stopped when the server restarted. It does not rerun on its own.`;
+	}
+	if (outcome.status === 'cancelled') return `The ${pass} pass was cancelled.`;
+	return '';
+}
+
+// Which pass one gallery card follows, read from the episode detail. The
+// transcript pass reads done as soon as it starts the editorial pass.
+// Every finished editorial pass stores a title proposal. So a draft with
+// a done transcript and no title still waits on the editorial pass, and
+// its card follows that pass instead. A failed editorial pass says so,
+// and so does one that never started. It returns null when the detail
+// names no transcript pass.
+export function galleryPass(detail: LiveDetail): GalleryPass | null {
+	const transcript = detail.outcome;
+	if (!transcript) return null;
+	const proposed = detail.proposals.some((proposal) => proposal.kind === 'title');
+	const base = { jobId: transcript.jobId, status: transcript.status, note: '', proposed };
+	if (detail.episode.state !== 'draft' || proposed || transcript.status !== 'done') return base;
+	const editorial = detail.editorialOutcome;
+	if (!editorial) {
+		return { ...base, note: 'The transcript is stored, but the editorial pass never started.' };
+	}
+	const note =
+		editorial.status === 'done'
+			? 'The editorial pass finished but stored no proposals.'
+			: stoppedPassNote('editorial', editorial);
+	return { jobId: editorial.jobId, status: editorial.status, note, proposed };
 }
 
 // Where the link on a progress card goes. A live draft whose pass has
@@ -780,6 +830,8 @@ export function jobCardHref(row: SeasonRow): SeasonHref {
 // cover badge from the scripted season. Live rows carry what the list
 // handler answers: id, number, title, state, and visibility. Duration
 // stays null until the detail exposes it, and the card omits the line.
+// Proposed says whether the editorial pass stored its proposals. Fixture
+// rows carry scripted proposals, and live rows learn it from the detail.
 export interface SeasonRow {
 	id: string;
 	number: number;
@@ -790,6 +842,7 @@ export interface SeasonRow {
 	duration: number | null;
 	jobId: string;
 	fixture: boolean;
+	proposed: boolean;
 }
 
 // A fixture episode as a gallery row. Ready rows open the episode,
@@ -805,7 +858,8 @@ export function fixtureRow(episode: EpisodeFixture): SeasonRow {
 		meta: `${episode.date} · ${formatClock(episode.duration)}`,
 		duration: episode.duration,
 		jobId: episode.jobId,
-		fixture: true
+		fixture: true,
+		proposed: true
 	};
 }
 
@@ -822,7 +876,8 @@ export function liveRow(episode: LiveEpisode, jobId: string): SeasonRow {
 		meta: episode.visibility === 'public' ? 'Public' : 'Private',
 		duration: null,
 		jobId,
-		fixture: false
+		fixture: false,
+		proposed: false
 	};
 }
 
@@ -905,6 +960,8 @@ export class GalleryController {
 	private timer: number | null = null;
 	private search = '';
 	private statuses: Record<string, JobStatus> = {};
+	private notes: Record<string, string> = {};
+	private rechecked = new Set<string>();
 
 	constructor(onChange: (snap: GallerySnapshot) => void) {
 		this.onChange = onChange;
@@ -1004,30 +1061,50 @@ export class GalleryController {
 		let changed = false;
 		for (const episode of listed) {
 			if (episode.state === 'ready') continue;
-			const found = await this.jobOf(episode);
-			if (!found) continue;
-			this.statuses[found.jobId] = outcomeJobStatus(found.status);
-			this.followJob(found.jobId);
-			const row = this.snap.rows.find((candidate) => candidate.id === episode.id);
-			if (row && row.jobId !== found.jobId) {
-				row.jobId = found.jobId;
-				changed = true;
-			}
+			if (await this.followPass(episode.id)) changed = true;
 		}
 		if (changed) this.emit();
 	}
 
-	// The latest pass job behind one unfinished episode, or null when
-	// the detail refuses or names none.
-	private async jobOf(episode: LiveEpisode): Promise<{ jobId: string; status: string } | null> {
+	// Read one episode detail and follow the pass its card shows. It
+	// reports whether the row changed. A refused detail leaves the row
+	// as it was.
+	private async followPass(episodeId: string): Promise<boolean> {
+		const found = await this.passOf(episodeId);
+		if (!found) return false;
+		this.notes[found.jobId] = found.note;
+		const row = this.snap.rows.find((candidate) => candidate.id === episodeId);
+		if (!this.streams.some((entry) => entry.jobId === found.jobId)) {
+			this.statuses[found.jobId] = outcomeJobStatus(found.status);
+			this.followJob(found.jobId);
+		}
+		if (!row || (row.jobId === found.jobId && row.proposed === found.proposed)) return false;
+		row.jobId = found.jobId;
+		row.proposed = found.proposed;
+		return true;
+	}
+
+	// The pass behind one unfinished episode, or null when the detail
+	// refuses or names none.
+	private async passOf(episodeId: string): Promise<GalleryPass | null> {
 		try {
-			const detail = await fetchEpisodeDetail(window.fetch, episode.id);
-			const jobId = detail.outcome?.jobId ?? '';
-			if (!jobId) return null;
-			return { jobId, status: detail.outcome?.status ?? '' };
+			return galleryPass(await fetchEpisodeDetail(window.fetch, episodeId));
 		} catch {
 			return null;
 		}
+	}
+
+	// A live draft whose job just stopped reads its detail once more. The
+	// editorial pass may have stored its proposals, or failed with a
+	// reason the stream does not carry.
+	private recheck(jobId: string): void {
+		if (this.rechecked.has(jobId)) return;
+		const row = this.snap.rows.find((candidate) => candidate.jobId === jobId);
+		if (!row || row.fixture || row.state !== 'draft') return;
+		this.rechecked.add(jobId);
+		void this.followPass(row.id).then((changed) => {
+			if (changed) this.emit();
+		});
 	}
 
 	private expose(): void {
@@ -1069,6 +1146,8 @@ export class GalleryController {
 		this.restoreMock?.();
 		this.restoreMock = null;
 		this.statuses = {};
+		this.notes = {};
+		this.rechecked = new Set<string>();
 	}
 
 	private emit(): void {
@@ -1125,13 +1204,19 @@ export class GalleryController {
 			const status = known && isTerminalStatus(known) ? known : entry.stream.status;
 			this.statuses[entry.jobId] = status;
 			const running = !isTerminalStatus(status);
+			if (!running && known && !isTerminalStatus(known)) this.recheck(entry.jobId);
 			const stage = entry.stream.stage ? `${entry.stream.stage} · ` : '';
+			const note = this.notes[entry.jobId] ?? '';
 			const detail =
-				status === 'done'
-					? 'Ready. Open the episode.'
-					: entry.stream.connection === 'failed'
-						? 'The job stream failed. The mark above is kept.'
-						: `Working · ${stage}${percent}% · progress survives a reload`;
+				!running && note
+					? note
+					: status === 'done'
+						? 'Ready. Open the episode.'
+						: !running
+							? 'The pass stopped before it finished.'
+							: entry.stream.connection === 'failed'
+								? 'The job stream failed. The mark above is kept.'
+								: `Working · ${stage}${percent}% · progress survives a reload`;
 			const prior = next[entry.jobId];
 			if (!prior || prior.percent !== percent || prior.detail !== detail || prior.status !== status) {
 				next[entry.jobId] = { jobId: entry.jobId, percent, detail, running, status };
@@ -1606,7 +1691,8 @@ export interface LiveWord {
 
 // One episode with its proposals, edit words, and playable addresses.
 // Render words come from the rendered file itself, and stay empty until
-// analysis stores them.
+// analysis stores them. The editorial outcome names the pass that stores
+// the proposals, or stays null until that pass starts.
 export interface LiveDetail {
 	episode: LiveEpisode;
 	proposals: LiveProposal[];
@@ -1615,6 +1701,7 @@ export interface LiveDetail {
 	audioUrl: string;
 	renderAudioUrl: string;
 	renderWords: LiveWord[];
+	editorialOutcome: LiveOutcome | null;
 }
 
 // The silence the render lays between the cold open and the episode.
@@ -1842,7 +1929,8 @@ export function parseEpisodeDetail(raw: string): LiveDetail {
 		words,
 		audioUrl: textField(decoded, 'audio_url'),
 		renderAudioUrl: textField(decoded, 'render_audio_url'),
-		renderWords
+		renderWords,
+		editorialOutcome: parseLiveOutcome(decoded['editorial_outcome'])
 	};
 }
 

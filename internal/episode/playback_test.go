@@ -4,7 +4,9 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 
+	"github.com/nrynss/keel/job"
 	"github.com/nrynss/reprise/internal/episode"
 )
 
@@ -129,5 +131,49 @@ func TestRenderedWordsReadTheRenderClock(t *testing.T) {
 	}
 	if _, err := svc.RenderedWords(t.Context(), "owner-2", "ep-1"); !errors.Is(err, episode.ErrNotFound) {
 		t.Fatalf("foreign words error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestEditorialOutcomeReadsTheEditorialPass stores a done transcript pass
+// and a later failed editorial pass. The outcome must name the editorial
+// pass with its failure text, never the transcript pass. Another owner
+// gets not found.
+func TestEditorialOutcomeReadsTheEditorialPass(t *testing.T) {
+	t.Parallel()
+	db := openDatabase(t)
+	store := openJobStore(t, db)
+	plantEpisode(t, db, "ep-1", 1, episode.StateDraft)
+	now := time.Now()
+	seedJobRow(t, store, "job-edit", episode.EditorialKind, "owner-1", "ep-1", job.StatusError, "budget refused", now.Add(-time.Minute))
+	seedJobRow(t, store, "job-words", "edit_transcript", "owner-1", "ep-1", job.StatusDone, "", now)
+	svc := outcomeService(t, db)
+
+	got, err := svc.EditorialOutcome(t.Context(), "owner-1", "ep-1")
+	if err != nil {
+		t.Fatalf("editorial outcome: %v", err)
+	}
+	if !got.Found || got.JobID != "job-edit" || got.Status != string(job.StatusError) || got.Error != "budget refused" {
+		t.Fatalf("outcome = %+v, want the failed job-edit with its text", got)
+	}
+	if _, err := svc.EditorialOutcome(t.Context(), "owner-2", "ep-1"); !errors.Is(err, episode.ErrNotFound) {
+		t.Fatalf("foreign owner err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestEditorialOutcomeWithoutPass requires Found false while no editorial
+// pass ever started.
+func TestEditorialOutcomeWithoutPass(t *testing.T) {
+	t.Parallel()
+	db := openDatabase(t)
+	store := openJobStore(t, db)
+	plantEpisode(t, db, "ep-1", 1, episode.StateDraft)
+	seedJobRow(t, store, "job-words", "edit_transcript", "owner-1", "ep-1", job.StatusDone, "", time.Now())
+
+	got, err := outcomeService(t, db).EditorialOutcome(t.Context(), "owner-1", "ep-1")
+	if err != nil {
+		t.Fatalf("editorial outcome: %v", err)
+	}
+	if got.Found {
+		t.Fatalf("outcome = %+v, want no editorial pass", got)
 	}
 }

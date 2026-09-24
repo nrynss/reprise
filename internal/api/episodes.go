@@ -28,6 +28,9 @@ type episodeStore interface {
 	// TranscriptOutcome returns the latest transcript pass outcome for
 	// an episode the owner holds.
 	TranscriptOutcome(ctx context.Context, ownerID, episodeID string) (episode.Outcome, error)
+	// EditorialOutcome returns the latest editorial pass outcome for an
+	// episode the owner holds.
+	EditorialOutcome(ctx context.Context, ownerID, episodeID string) (episode.Outcome, error)
 	// EditWords returns edit-source words for an episode the owner holds,
 	// oldest first, with times in seconds.
 	EditWords(ctx context.Context, ownerID, episodeID string) ([]episode.EditWord, error)
@@ -126,6 +129,11 @@ type episodeDetailJSON struct {
 	// TranscriptOutcome names the latest transcript pass and its state,
 	// or nil when no pass ever started.
 	TranscriptOutcome *transcriptOutcomeJSON `json:"transcript_outcome,omitempty"`
+	// EditorialOutcome names the latest editorial pass and its state, or
+	// nil when no editorial pass ever started. The transcript pass reads
+	// done before the editorial pass stores its proposals, so a draft
+	// waits on this pass too.
+	EditorialOutcome *transcriptOutcomeJSON `json:"editorial_outcome,omitempty"`
 	// Words holds edit-source words, oldest first.
 	Words []wordJSON `json:"words"`
 	// AudioURL is /media/{id} for the user stem, otherwise the host
@@ -242,6 +250,11 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the pass outcome could not be read", nil)
 		return
 	}
+	editorial, err := h.store.EditorialOutcome(r.Context(), owner, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the editorial outcome could not be read", nil)
+		return
+	}
 	out := make([]proposalJSON, 0, len(props))
 	for _, p := range props {
 		out = append(out, proposalJSON{
@@ -289,6 +302,13 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 			JobID:  outcome.JobID,
 			Status: outcome.Status,
 			Error:  outcome.Error,
+		}
+	}
+	if editorial.Found {
+		detail.EditorialOutcome = &transcriptOutcomeJSON{
+			JobID:  editorial.JobID,
+			Status: editorial.Status,
+			Error:  editorial.Error,
 		}
 	}
 	writeJSON(w, http.StatusOK, detail)
