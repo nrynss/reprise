@@ -877,7 +877,7 @@ requires:   T7.28
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.prototype-keys.test.ts
-status:     in-progress:land:t7.34-impl@ee572c9ee7dc3bc3d2647e23fb221e38337dff4a
+status:     done:72bee67feb5b4de675de9a616245a27016b7271f
 ```
 The svelte 4 leakage scan in `tools/check.sh` matches `get(`, and
 `draft.ts` calls `Map.get` in `proposalIdForCut`. CI fails on
@@ -904,6 +904,10 @@ under `web/src`, and the editor tests still pass.
 
 ### What exists now
 
+T7.34 landed at 72bee67 after round 3 APPROVE with zero residue. CI is
+green on `main` again. Review probes under `dev-diary/probes/` now
+live in their own Go module, so `go list ./...` skips them. The editor
+draft keeps cut proposals in a record with no prototype.
 T7.28 landed at 02e5823 after round 4 APPROVE with zero in-scope
 findings and zero residue. A live draft opens the editor once its
 editorial pass stores proposals. The editor plays the stored user stem
@@ -1007,6 +1011,11 @@ T7.28 took four rounds. Each round found another state the gallery
 card had never met: a pending editorial pass, a restart mid pass, and
 a render the detail cannot see. The binary still spells the editorial
 kind twice. T7.29 owns both fixes.
+
+CI failed on ten pushes before anyone looked. Committed Go probes broke
+`go list`, then a `Map.get` tripped the svelte 4 scan. Agents had run
+the scans from `web/`, where the `web/src` pathspec matches nothing.
+Run every gate step from the worktree root, and read CI after a push.
 
 On this workstation ffmpeg is 9.0.2 against the 9.0.1 pin, so
 `tools/check.sh` stops at its tool check. The owner accepted running
