@@ -812,7 +812,7 @@ requires:   T7.29
 fixture-ok: yes
 size:       M · mid
 owns:       cmd/reprise/seed.go, internal/seed/, web/src/routes/welcome/
-status:     in-progress:land:t7.31-impl@713ef9e42593fbd009d97e3991dac9d815a2069d
+status:     done:d785b906c2b73610e625e79d862c364c80d7590f
 ```
 The binary never imports `internal/seed`. Nothing syncs `data/season/`
 into catalog rows, and nothing calls `EnsureCopy` for a new guest. The
