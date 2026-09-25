@@ -837,7 +837,7 @@ requires:   T7.28, T7.29, T7.30
 fixture-ok: yes
 size:       M · mid
 owns:       cmd/reprise/export.go, internal/export/, web/src/routes/episode/, web/src/routes/threads/threads.ts
-status:     not-started
+status:     in-progress:implement:t7.32-impl
 ```
 The binary never imports `internal/export`. No route serves an export
 bundle. The episode page export control says it needs the backend.
