@@ -777,7 +777,7 @@ requires:   T7.28, T7.29
 fixture-ok: yes
 size:       L · frontier
 owns:       cmd/reprise/privacy.go, internal/api/routes.go, internal/privacy/, internal/retention/, web/src/routes/share/, web/src/routes/threads/threads.ts, web/src/routes/episode/[id]/+page.svelte
-status:     in-progress:land:t7.30-rem-r1@9dcf009f6dcabc5367178816b4f751b8bbfc4443
+status:     done:ed0c802a71ea0c261ba56bcafb5a524b03f79793
 ```
 The binary never imports `internal/privacy` or `internal/retention`.
 Publish, revoke and erase still answer 501 from the stub. No route
