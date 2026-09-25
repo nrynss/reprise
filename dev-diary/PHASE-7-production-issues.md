@@ -895,7 +895,7 @@ requires:   T7.29
 fixture-ok: yes
 size:       S · light
 owns:       internal/render/, internal/settings/, cmd/reprise/finish.go, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.35-impl@d0badc85bf14805c551eead739a120154400f727
+status:     done:c8c2bd6f7978a1e7fb5fe4e8cf6997333828187a
 ```
 Both config files set `RenderConcurrency`, and nothing reads it, so
 renders run one at a time whatever the setting says. `render.KindOf`
