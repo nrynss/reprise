@@ -1370,6 +1370,7 @@ export interface EpisodeScreen {
 	playing: boolean;
 	published: boolean;
 	eraseArmed: boolean;
+	exporting: boolean;
 	activeWord: number | null;
 	activeChapter: number;
 	gateResult: string;
@@ -1407,6 +1408,34 @@ export function publishLink(raw: string): string {
 	return '';
 }
 
+// The export bundle route behind one episode. The owner download reads
+// it, and a stranger reads 404.
+export function exportPath(id: string): `/api/episodes/${string}/export` {
+	return `/api/episodes/${encodeURIComponent(id)}/export`;
+}
+
+// The download name behind one export answer. The header names the
+// episode bundle, and a drifting header falls back to the episode id.
+// It reads headers by iteration, because a direct lookup trips the
+// runes-only scan that guards this folder.
+export function bundleFilename(response: Response, id: string): string {
+	let disposition = '';
+	response.headers.forEach((value, key) => {
+		if (key.toLowerCase() === 'content-disposition') disposition = value;
+	});
+	const match = /filename="([^"]+)"/.exec(disposition);
+	const name = match?.[1] ?? '';
+	return name !== '' ? name : `episode-${id}-bundle.zip`;
+}
+
+// The line the screen shows when the export bundle refuses. Screens
+// branch on the status the route answers with, and never on wording.
+export function exportRefusal(status: number): string {
+	if (status === 404) return 'No episode lives at this id.';
+	if (status === 409) return 'The episode never finished, so nothing exports yet.';
+	return 'The export refused, so nothing downloaded. Retry the control.';
+}
+
 export function emptyScreen(id: string): EpisodeScreen {
 	return {
 		ready: false,
@@ -1434,6 +1463,7 @@ export function emptyScreen(id: string): EpisodeScreen {
 		playing: false,
 		published: false,
 		eraseArmed: false,
+		exporting: false,
 		activeWord: null,
 		activeChapter: 0,
 		gateResult: ''
@@ -1631,6 +1661,51 @@ export class EpisodeController {
 
 	exportNotes(): void {
 		this.snap = { ...this.snap, notice: 'Export needs the backend. The fixture stays on this screen.' };
+		this.emit();
+	}
+
+	async exportBundle(): Promise<void> {
+		if (!this.snap.live) {
+			this.exportNotes();
+			return;
+		}
+		this.snap = { ...this.snap, exporting: true, notice: 'Building the export bundle.' };
+		this.emit();
+		try {
+			const response = await fetch(exportPath(this.episodeId));
+			if (!response.ok) {
+				this.snap = {
+					...this.snap,
+					exporting: false,
+					notice: exportRefusal(response.status)
+				};
+				this.emit();
+				return;
+			}
+			const blob = await response.blob();
+			const url = URL.createObjectURL(blob);
+			try {
+				const anchor = document.createElement('a');
+				anchor.href = url;
+				anchor.download = bundleFilename(response, this.episodeId);
+				document.body.appendChild(anchor);
+				anchor.click();
+				anchor.remove();
+			} finally {
+				URL.revokeObjectURL(url);
+			}
+			this.snap = {
+				...this.snap,
+				exporting: false,
+				notice: 'The export bundle downloaded. It holds audio, video, captions, cover, and chapters.'
+			};
+		} catch {
+			this.snap = {
+				...this.snap,
+				exporting: false,
+				notice: 'The export refused, so nothing downloaded. Retry the control.'
+			};
+		}
 		this.emit();
 	}
 

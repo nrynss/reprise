@@ -66,6 +66,17 @@ var (
 	// none at all, a first chapter past zero, too few chapters, or a
 	// span under the minimum length.
 	ErrChapters = errors.New("export: unusable chapters")
+	// ErrNotFound reports an unknown episode. Handlers answer 404, which
+	// reveals nothing about what exists.
+	ErrNotFound = errors.New("export: episode not found")
+	// ErrNotOwner reports an episode owned by somebody else. Handlers
+	// answer the same 404 as an unknown id, so the response never
+	// confirms that a private episode exists.
+	ErrNotOwner = errors.New("export: episode belongs to another owner")
+	// ErrNotReady reports an episode that never finished. Only a ready
+	// episode carries the render, words, chapters, and cover a bundle
+	// needs.
+	ErrNotReady = errors.New("export: episode is not ready")
 )
 
 // Word is one rendered word with its timing on the episode clock. The

@@ -125,7 +125,16 @@
 			{:else}
 				<button onclick={() => controller?.publishState()}>Publish…</button>
 			{/if}
-			{#if !snap.live}
+			{#if snap.live}
+				{#if snap.state === 'ready'}
+					<button
+						onclick={() => void controller?.exportBundle()}
+						disabled={snap.exporting}
+					>
+						{snap.exporting ? 'Building bundle…' : 'Export bundle'}
+					</button>
+				{/if}
+			{:else}
 				<button onclick={() => controller?.exportNotes()}>Export for YouTube</button>
 			{/if}
 			<button
