@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -1414,6 +1415,14 @@ func TestCompletionUnknownIDsNameMissing(t *testing.T) {
 // scriptedTranscript answers one batch pass. The first fetch is the
 // completed guest word. The fetch after delete is the deletion marker.
 func scriptedTranscript() *httptest.Server {
+	srv, _ := scriptedTranscriptUploads()
+	return srv
+}
+
+// scriptedTranscriptUploads is scriptedTranscript with an upload count.
+// One transcript run uploads the guest audio once.
+func scriptedTranscriptUploads() (*httptest.Server, *atomic.Int32) {
+	uploads := &atomic.Int32{}
 	var mu sync.Mutex
 	gets := 0
 	completed := `{"id":"tx-host","status":"completed","text":"guest","audio_duration":1,` +
@@ -1422,6 +1431,7 @@ func scriptedTranscript() *httptest.Server {
 		`"audio_url":"http://deleted_by_user","confidence":null,"words":null}`
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
+		uploads.Add(1)
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"upload_url":"http://`+r.Host+`/audio/host"}`)
@@ -1445,7 +1455,7 @@ func scriptedTranscript() *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, body)
 	})
-	return httptest.NewServer(mux)
+	return httptest.NewServer(mux), uploads
 }
 
 // waitWireJobs waits until id is done and no job is still running.
@@ -1583,12 +1593,13 @@ func TestTranscriptStoresHostWordsAtReplyTimes(t *testing.T) {
 		t.Fatalf("load words: %v", err)
 	}
 	// Guest 100 to 250 plus the user offset of 20.
-	// Alpha Beta runs 1000 to 1600 on the host stem, two equal slices,
-	// then the host offset of 50. Gamma runs 4000 to 4800, plus 50.
+	// Alpha and Beta run 1000 to 1600 on the host stem, then the host
+	// offset of 50. Gamma runs 4000 to 4800, plus 50. Each host word
+	// uses that whole reply span. The row stores no time per word.
 	want := []transcript.Stored{
 		{Text: "guest", StartMs: 120, EndMs: 270},
-		{Text: "Alpha", StartMs: 1050, EndMs: 1350},
-		{Text: "Beta", StartMs: 1350, EndMs: 1650},
+		{Text: "Alpha", StartMs: 1050, EndMs: 1650},
+		{Text: "Beta", StartMs: 1050, EndMs: 1650},
 		{Text: "Gamma", StartMs: 4050, EndMs: 4850},
 	}
 	if len(stored) != len(want) {
@@ -1597,6 +1608,244 @@ func TestTranscriptStoresHostWordsAtReplyTimes(t *testing.T) {
 	for i := range want {
 		if stored[i].Text != want[i].Text || stored[i].StartMs != want[i].StartMs || stored[i].EndMs != want[i].EndMs {
 			t.Fatalf("word %d = %+v, want %+v", i, stored[i], want[i])
+		}
+	}
+}
+
+// reconcileClaimTable is the claim table a live process creates at boot.
+// Tests that wait on a timeline use this shape, not a missing table.
+const reconcileClaimTable = `CREATE TABLE IF NOT EXISTS reconcile_state (
+	session_id TEXT PRIMARY KEY,
+	claimed INTEGER NOT NULL DEFAULT 0,
+	settled INTEGER NOT NULL DEFAULT 0,
+	connected_seconds INTEGER NOT NULL DEFAULT 0,
+	cost_nd INTEGER NOT NULL DEFAULT 0,
+	over_cap INTEGER NOT NULL DEFAULT 0,
+	over_cap_alerted INTEGER NOT NULL DEFAULT 0,
+	recording_media_id TEXT NOT NULL DEFAULT '',
+	timeline_media_id TEXT NOT NULL DEFAULT '',
+	recording_url TEXT NOT NULL DEFAULT '',
+	timeline_url TEXT NOT NULL DEFAULT '',
+	updated_at INTEGER NOT NULL DEFAULT 0
+)`
+
+// linkOffsetStems stores both stems and their alignment shifts.
+func linkOffsetStems(t *testing.T, fx *wireFixture, owner, episodeID string, userOffset, hostOffset int64) {
+	t.Helper()
+	body := sineWAV()
+	userID := persistStemAudio(t, fx, owner, episodeID, body)
+	hostID := persistStemAudio(t, fx, owner, episodeID, body)
+	rows := []struct {
+		role   string
+		media  string
+		offset int64
+	}{
+		{transcript.RoleUser, userID, userOffset},
+		{transcript.RoleHost, hostID, hostOffset},
+	}
+	for _, row := range rows {
+		if _, err := fx.db.Writer().ExecContext(t.Context(),
+			`INSERT INTO stems (id, owner_id, episode_id, media_id, role, sample_rate, start_offset_ms)
+			 VALUES (?, ?, ?, ?, ?, 8000, ?)`,
+			"stem-"+row.role, owner, episodeID, row.media, row.role, row.offset); err != nil {
+			t.Fatalf("link %s stem: %v", row.role, err)
+		}
+	}
+}
+
+// twoReplyTimeline encodes two host replies and one guest turn.
+func twoReplyTimeline(t *testing.T) []byte {
+	t.Helper()
+	const sessionStart int64 = 5_000_000
+	raw, err := json.Marshal(map[string]any{
+		"started_at_unix_ms": sessionStart,
+		"turns": []any{
+			map[string]any{
+				"agent_text":                "Alpha Beta",
+				"agent_reply_started_at_ms": sessionStart + 1000,
+				"agent_reply_ended_at_ms":   sessionStart + 1600,
+			},
+			map[string]any{
+				"user_transcript": "not-host",
+			},
+			map[string]any{
+				"agent_text":                "Gamma",
+				"agent_reply_started_at_ms": sessionStart + 4000,
+				"agent_reply_ended_at_ms":   sessionStart + 4800,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode timeline: %v", err)
+	}
+	return raw
+}
+
+// TestLateTimelineStillStoresHostWords starts the transcript while the
+// claim row has no timeline id, then stores the two replies. The job
+// waits and merges those words. It uploads the guest audio once.
+func TestLateTimelineStillStoresHostWords(t *testing.T) {
+	fx := openWireFixture(t)
+	const owner = "owner-late-timeline"
+	insertWireUser(t, fx, owner)
+	diary, err := broker.NewSQLiteDiary(fx.db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	episodeID, sessionID, err := diary.CreateEpisodeAndSession(t.Context(), owner, 1800)
+	if err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+	linkOffsetStems(t, fx, owner, episodeID, 20, 50)
+	if _, err := fx.db.Writer().ExecContext(t.Context(), reconcileClaimTable); err != nil {
+		t.Fatalf("create claim table: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`INSERT INTO reconcile_state (session_id, settled, timeline_media_id, timeline_url)
+		 VALUES (?, 0, '', '')`, sessionID); err != nil {
+		t.Fatalf("store empty claim: %v", err)
+	}
+	server, uploads := scriptedTranscriptUploads()
+	t.Cleanup(server.Close)
+	batch, err := assemblyai.NewBatchClient(assemblyai.Config{
+		BaseURL: server.URL,
+		APIKey:  "probe-key",
+		Model:   "test-transcription",
+		Client:  server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("open batch client: %v", err)
+	}
+	fx.pipe.batch = batch
+	drafts := openDraftJobs(t, fx)
+	jobID, started, err := drafts.startTranscript(t.Context(), owner, episodeID)
+	if err != nil || !started || jobID == "" {
+		t.Fatalf("start transcript = %q %v err %v, want a job", jobID, started, err)
+	}
+	timelineID, err := fx.media.Persist(t.Context(), bytes.NewReader(twoReplyTimeline(t)), mediastore.Put{
+		ContentType: "application/json",
+		Owner:       owner,
+		Group:       episodeID,
+		Visibility:  mediastore.Private,
+	})
+	if err != nil {
+		t.Fatalf("persist timeline: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`UPDATE reconcile_state SET timeline_media_id = ? WHERE session_id = ?`,
+		timelineID, sessionID); err != nil {
+		t.Fatalf("store timeline id: %v", err)
+	}
+	waitWireJobs(t, drafts.store, jobID)
+	if uploads.Load() != 1 {
+		t.Fatalf("uploads = %d, want one batch", uploads.Load())
+	}
+	stored, err := transcript.Load(t.Context(), fx.db.Writer(), episodeID)
+	if err != nil {
+		t.Fatalf("load words: %v", err)
+	}
+	want := []transcript.Stored{
+		{Text: "guest", StartMs: 120, EndMs: 270},
+		{Text: "Alpha", StartMs: 1050, EndMs: 1650},
+		{Text: "Beta", StartMs: 1050, EndMs: 1650},
+		{Text: "Gamma", StartMs: 4050, EndMs: 4850},
+	}
+	if len(stored) != len(want) {
+		t.Fatalf("stored = %+v, want guest, Alpha, Beta, and Gamma", stored)
+	}
+	for i := range want {
+		if stored[i].Text != want[i].Text || stored[i].StartMs != want[i].StartMs || stored[i].EndMs != want[i].EndMs {
+			t.Fatalf("word %d = %+v, want %+v", i, stored[i], want[i])
+		}
+	}
+}
+
+// TestSettledClaimWithoutTimelineStoresTheGuest runs the transcript
+// after reconcile finished with no timeline. The job does not wait,
+// and the stored words are the guest batch alone.
+func TestSettledClaimWithoutTimelineStoresTheGuest(t *testing.T) {
+	fx := openWireFixture(t)
+	const owner = "owner-no-timeline"
+	insertWireUser(t, fx, owner)
+	diary, err := broker.NewSQLiteDiary(fx.db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	episodeID, sessionID, err := diary.CreateEpisodeAndSession(t.Context(), owner, 1800)
+	if err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+	linkOffsetStems(t, fx, owner, episodeID, 20, 50)
+	if _, err := fx.db.Writer().ExecContext(t.Context(), reconcileClaimTable); err != nil {
+		t.Fatalf("create claim table: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`INSERT INTO reconcile_state (session_id, settled, timeline_media_id, timeline_url)
+		 VALUES (?, 1, '', '')`, sessionID); err != nil {
+		t.Fatalf("store settled claim: %v", err)
+	}
+	server, uploads := scriptedTranscriptUploads()
+	t.Cleanup(server.Close)
+	batch, err := assemblyai.NewBatchClient(assemblyai.Config{
+		BaseURL: server.URL,
+		APIKey:  "probe-key",
+		Model:   "test-transcription",
+		Client:  server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("open batch client: %v", err)
+	}
+	fx.pipe.batch = batch
+	drafts := openDraftJobs(t, fx)
+	jobID, started, err := drafts.startTranscript(t.Context(), owner, episodeID)
+	if err != nil || !started || jobID == "" {
+		t.Fatalf("start transcript = %q %v err %v, want a job", jobID, started, err)
+	}
+	waitWireJobs(t, drafts.store, jobID)
+	if uploads.Load() != 1 {
+		t.Fatalf("uploads = %d, want one batch", uploads.Load())
+	}
+	stored, err := transcript.Load(t.Context(), fx.db.Writer(), episodeID)
+	if err != nil {
+		t.Fatalf("load words: %v", err)
+	}
+	if len(stored) != 1 || stored[0].Text != "guest" || stored[0].StartMs != 120 || stored[0].EndMs != 270 {
+		t.Fatalf("stored = %+v, want only the guest word", stored)
+	}
+}
+
+// TestHostWordBoundsComeFromTheStoredSpan reads one reply whose row
+// stores the text and the span only. Each word bound is that start or
+// that end. An interior slice is not a stored bound.
+func TestHostWordBoundsComeFromTheStoredSpan(t *testing.T) {
+	const sessionStart int64 = 5_000_000
+	const replyStart int64 = sessionStart + 1000
+	const replyEnd int64 = sessionStart + 1600
+	raw, err := json.Marshal(map[string]any{
+		"started_at_unix_ms": sessionStart,
+		"turns": []any{
+			map[string]any{
+				"agent_text":                "Alpha Beta",
+				"agent_reply_started_at_ms": replyStart,
+				"agent_reply_ended_at_ms":   replyEnd,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode timeline: %v", err)
+	}
+	replies, err := repliesFromTimeline(raw)
+	if err != nil {
+		t.Fatalf("replies: %v", err)
+	}
+	if len(replies) != 1 || len(replies[0].Words) != 2 {
+		t.Fatalf("replies = %+v, want Alpha and Beta", replies)
+	}
+	span := replyEnd - replyStart
+	allowed := map[int64]bool{0: true, span: true}
+	for _, w := range replies[0].Words {
+		if !allowed[w.StartMs] || !allowed[w.EndMs] {
+			t.Fatalf("%s end %d is not a stored reply bound", w.Text, w.EndMs)
 		}
 	}
 }

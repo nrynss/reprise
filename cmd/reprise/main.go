@@ -2348,6 +2348,11 @@ func (j *jobs) settleTranscript(ctx context.Context, ownerID, episodeID string, 
 	return out, nil
 }
 
+// timelinePoll is the gap between claim reads while a transcript job
+// waits for the provider timeline. The batch stays idle until the read
+// returns.
+const timelinePoll = 20 * time.Millisecond
+
 // timelineFile is the persisted provider timeline. Turns carry each host
 // reply as text with absolute times. Per-word offsets are not in this file.
 type timelineFile struct {
@@ -2364,39 +2369,47 @@ type timelineTurn struct {
 	InterruptedAtMs       *int64 `json:"interrupted_at_ms"`
 }
 
-// hostReplies reads the persisted provider timeline for one episode and
-// returns each host reply. No stored timeline returns no replies. A
-// timeline that cannot be read or parsed returns an error, so the job
-// does not start without the host side.
-func (j *jobs) hostReplies(ctx context.Context, ownerID, episodeID string) ([]transcript.HostReply, error) {
-	mediaID, err := j.timelineMediaID(ctx, ownerID, episodeID)
-	if err != nil {
-		return nil, err
-	}
-	if mediaID == "" {
-		return nil, nil
+// hostReplies reads the persisted provider timeline for one episode.
+// pending means the claim table exists and the blob can still land.
+// The job waits for that blob and does not start the batch yet.
+// No claim table returns no replies. A timeline that cannot be read
+// or parsed returns an error, so the batch does not start.
+func (j *jobs) hostReplies(ctx context.Context, ownerID, episodeID string) ([]transcript.HostReply, bool, error) {
+	mediaID, pending, err := j.timelineMediaID(ctx, ownerID, episodeID)
+	if err != nil || pending || mediaID == "" {
+		return nil, pending, err
 	}
 	raw, err := j.readMediaFile(mediaID)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, os.ErrNotExist) {
+			inflight, ferr := j.reconcileInFlight(ctx)
+			if ferr != nil {
+				return nil, false, ferr
+			}
+			if inflight {
+				return nil, true, nil
+			}
+		}
+		return nil, false, err
 	}
 	replies, err := repliesFromTimeline(raw)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return replies, nil
+	return replies, false, nil
 }
 
 // timelineMediaID returns the stored provider timeline blob for one
-// episode, or empty when none was kept. The claim row names that blob.
-func (j *jobs) timelineMediaID(ctx context.Context, ownerID, episodeID string) (string, error) {
+// episode. pending is true when the claim table exists and the blob
+// can still land. No claim table returns an empty id and pending false.
+func (j *jobs) timelineMediaID(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
 	var tables int
 	if err := j.pipe.db.Reader().QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'reconcile_state'`).Scan(&tables); err != nil {
-		return "", fmt.Errorf("reprise: read timeline: %w", err)
+		return "", false, fmt.Errorf("reprise: read timeline: %w", err)
 	}
 	if tables == 0 {
-		return "", nil
+		return "", false, nil
 	}
 	var mediaID string
 	err := j.pipe.db.Reader().QueryRowContext(ctx,
@@ -2404,13 +2417,134 @@ func (j *jobs) timelineMediaID(ctx context.Context, ownerID, episodeID string) (
 		 JOIN reconcile_state r ON r.session_id = s.id
 		 WHERE s.owner_id = ? AND s.episode_id = ? AND r.timeline_media_id != ''
 		 ORDER BY s.rowid DESC LIMIT 1`, ownerID, episodeID).Scan(&mediaID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", false, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	if mediaID != "" {
+		return mediaID, false, nil
+	}
+	proceed, lost, err := j.absentTimeline(ctx, ownerID, episodeID)
+	if err != nil {
+		return "", false, err
+	}
+	if lost {
+		return "", false, fmt.Errorf("reprise: host replies: timeline was not stored")
+	}
+	if proceed {
+		return "", false, nil
+	}
+	return "", true, nil
+}
+
+// absentTimeline reports what an empty claim means. proceed is a
+// finished reconcile that stored no timeline, so the batch runs with
+// no host replies. lost is a finished reconcile that named a timeline
+// and never stored the blob. Otherwise the blob can still land.
+func (j *jobs) absentTimeline(ctx context.Context, ownerID, episodeID string) (bool, bool, error) {
+	cols, err := j.claimColumns(ctx, "settled", "timeline_url")
+	if err != nil {
+		return false, false, err
+	}
+	if !cols["settled"] || !cols["timeline_url"] {
+		return false, false, nil
+	}
+	var settled sql.NullInt64
+	var timelineURL sql.NullString
+	err = j.pipe.db.Reader().QueryRowContext(ctx,
+		`SELECT r.settled, r.timeline_url
+		 FROM sessions s
+		 LEFT JOIN reconcile_state r ON r.session_id = s.id
+		 WHERE s.owner_id = ? AND s.episode_id = ?
+		 ORDER BY s.rowid DESC LIMIT 1`, ownerID, episodeID).Scan(&settled, &timelineURL)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return true, false, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("reprise: read timeline: %w", err)
+		return false, false, fmt.Errorf("reprise: read timeline: %w", err)
 	}
-	return mediaID, nil
+	if !settled.Valid || settled.Int64 == 0 {
+		return false, false, nil
+	}
+	if !timelineURL.Valid || timelineURL.String == "" {
+		return true, false, nil
+	}
+	inflight, err := j.reconcileInFlight(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	if inflight {
+		return false, false, nil
+	}
+	return false, true, nil
+}
+
+// claimColumns reports which names exist on the claim table.
+func (j *jobs) claimColumns(ctx context.Context, names ...string) (map[string]bool, error) {
+	found := make(map[string]bool, len(names))
+	for _, name := range names {
+		found[name] = false
+	}
+	rows, err := j.pipe.db.Reader().QueryContext(ctx, `PRAGMA table_info(reconcile_state)`)
+	if err != nil {
+		return nil, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, pk int
+		var column, ctype string
+		var dflt any
+		if err := rows.Scan(&cid, &column, &ctype, &notNull, &dflt, &pk); err != nil {
+			return nil, fmt.Errorf("reprise: read timeline: %w", err)
+		}
+		if _, ok := found[column]; ok {
+			found[column] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	return found, nil
+}
+
+// reconcileInFlight reports whether a reconcile job is still queued or
+// running. The timeline blob can land while that job runs. A nil store
+// keeps the wait, because this process cannot see that job.
+func (j *jobs) reconcileInFlight(ctx context.Context) (bool, error) {
+	if j.store == nil {
+		return true, nil
+	}
+	left, err := j.store.Unfinished(ctx)
+	if err != nil {
+		return false, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	for _, rec := range left {
+		if rec.Kind == broker.KindName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// awaitHostReplies waits until the provider timeline is stored, or
+// until reconcile finished with none. It returns before the batch.
+// The wait lives in the transcript job, so the completion can return.
+func (j *jobs) awaitHostReplies(ctx context.Context, ownerID, episodeID string) ([]transcript.HostReply, error) {
+	for {
+		replies, pending, err := j.hostReplies(ctx, ownerID, episodeID)
+		if err != nil {
+			return nil, err
+		}
+		if !pending {
+			return replies, nil
+		}
+		timer := time.NewTimer(timelinePoll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("reprise: host replies: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
 }
 
 // readMediaFile reads one blob from the media directory by id.
@@ -2491,17 +2625,16 @@ func replyEnd(turn timelineTurn, sessionStart, start int64) (int64, error) {
 	return end, nil
 }
 
-// wordsOnReply places words across a reply in equal slices. The stored
-// timeline records the reply text and its bounds, not a time per word.
-// The first word starts with the reply. The last word ends with it.
+// wordsOnReply places every word on the stored reply bounds. The
+// timeline records the reply text and that span, not a time per word.
+// A word starts at the reply start and ends at the reply end.
 func wordsOnReply(parts []string, span int64) []transcript.HostWord {
 	words := make([]transcript.HostWord, len(parts))
-	n := int64(len(parts))
 	for i, part := range parts {
 		words[i] = transcript.HostWord{
 			Text:    part,
-			StartMs: span * int64(i) / n,
-			EndMs:   span * int64(i+1) / n,
+			StartMs: 0,
+			EndMs:   span,
 		}
 	}
 	return words
@@ -2522,18 +2655,19 @@ func (j *jobs) stemOffsets(ctx context.Context, ownerID, episodeID string) (tran
 	return transcript.Offsets{UserMs: user.offset, HostMs: host.offset}, nil
 }
 
-// startTranscript reads both stems and starts one transcript job chained to
-// its settlement. Host replies come from the stored provider timeline.
-// Stem offsets come from the stem rows. It stamps the episode on the job
-// before returning, so a repeat completion meets a described job. A stamp
-// failure cancels the job and reports the error, so no silent job keeps
-// running.
+// startTranscript reads both stems and starts one transcript job chained
+// to its settlement. Host replies come from the stored provider timeline.
+// An empty claim waits inside that job until the blob lands, then one
+// batch runs. Stem offsets come from the stem rows. It stamps the episode
+// on the job before returning, so a repeat completion meets a described
+// job. A stamp failure cancels the job and reports the error, so no
+// silent job keeps running.
 func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
 	userAudio, _, durationSecs, err := j.editInputs(ctx, ownerID, episodeID)
 	if err != nil {
 		return "", false, err
 	}
-	replies, err := j.hostReplies(ctx, ownerID, episodeID)
+	replies, pending, err := j.hostReplies(ctx, ownerID, episodeID)
 	if err != nil {
 		return "", false, err
 	}
@@ -2541,8 +2675,16 @@ func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (
 	if err != nil {
 		return "", false, err
 	}
-	inner := j.pipe.editTranscriptFunc(ownerID, episodeID, userAudio, durationSecs, replies, offsets)
 	chained := func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
+		got := replies
+		if pending {
+			waited, waitErr := j.awaitHostReplies(ctx, ownerID, episodeID)
+			if waitErr != nil {
+				return j.settleTranscript(ctx, ownerID, episodeID, nil, waitErr)
+			}
+			got = waited
+		}
+		inner := j.pipe.editTranscriptFunc(ownerID, episodeID, userAudio, durationSecs, got, offsets)
 		out, runErr := inner(ctx, progress)
 		return j.settleTranscript(ctx, ownerID, episodeID, out, runErr)
 	}
