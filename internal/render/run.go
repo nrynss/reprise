@@ -239,17 +239,18 @@ func (r *Resolver) describe(ctx context.Context, episodeID, userPath, hostPath s
 		return Input{}, fmt.Errorf("render: probe host stem: %w", err)
 	}
 	in := Input{
-		UserSHA256:   userDigest,
-		HostSHA256:   hostDigest,
-		UserOffsetMs: userOffsetMs,
-		HostOffsetMs: hostOffsetMs,
-		Cuts:         toRanges(cuts),
-		ColdOpen:     cold,
-		DurationMs:   max(userOffsetMs+userDur.Milliseconds(), hostOffsetMs+hostDur.Milliseconds()),
-		CrossfadeMs:  Crossfade.Milliseconds(),
-		MixRateHz:    MixRate,
-		OpusBitrate:  OpusBitrate,
-		AACBitrate:   AACBitrate,
+		UserSHA256:    userDigest,
+		HostSHA256:    hostDigest,
+		UserOffsetMs:  userOffsetMs,
+		HostOffsetMs:  hostOffsetMs,
+		Cuts:          toRanges(cuts),
+		ColdOpen:      cold,
+		DurationMs:    max(userOffsetMs+userDur.Milliseconds(), hostOffsetMs+hostDur.Milliseconds()),
+		CrossfadeMs:   Crossfade.Milliseconds(),
+		MixRateHz:     MixRate,
+		UserDenoiseNR: DenoiseNR,
+		OpusBitrate:   OpusBitrate,
+		AACBitrate:    AACBitrate,
 	}
 	return in, nil
 }

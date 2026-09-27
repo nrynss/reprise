@@ -51,6 +51,10 @@ type Input struct {
 	CrossfadeMs int64
 	// MixRateHz is the sample rate of the intermediate mix.
 	MixRateHz int
+	// UserDenoiseNR is the stationary noise reduction in dB applied to
+	// the user stem before the mix. It names the render, so a tuning
+	// change rerenders instead of reusing a louder room.
+	UserDenoiseNR int
 	// OpusBitrate names the streaming encoder setting.
 	OpusBitrate string
 	// AACBitrate names the export encoder setting.
@@ -76,6 +80,7 @@ func HashInputs(in Input) string {
 	fmt.Fprintf(&b, "gap:%d\n", ColdOpenGap.Milliseconds())
 	fmt.Fprintf(&b, "crossfade:%d\n", in.CrossfadeMs)
 	fmt.Fprintf(&b, "mixrate:%d\n", in.MixRateHz)
+	fmt.Fprintf(&b, "denoise:%d\n", in.UserDenoiseNR)
 	fmt.Fprintf(&b, "opus:%s\n", in.OpusBitrate)
 	fmt.Fprintf(&b, "aac:%s\n", in.AACBitrate)
 	for _, c := range cuts {

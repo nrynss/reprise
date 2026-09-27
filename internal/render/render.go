@@ -54,6 +54,11 @@ const (
 	ColdOpenGap = 750 * time.Millisecond
 	// MixRate is the sample rate of the intermediate mix.
 	MixRate = 48000
+	// DenoiseNR is the stationary noise reduction in dB applied to the
+	// user stem before the mix. The capture leaves suppression off, so
+	// the stored stem carries the room it was recorded in, and the mix
+	// cleans its own copy while the stored bytes stay raw.
+	DenoiseNR = 25
 	// OpusBitrate is the streaming encoder setting.
 	OpusBitrate = "96k"
 	// AACBitrate is the export encoder setting.

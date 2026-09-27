@@ -128,10 +128,21 @@ func JoinTimes(kept, cold []RangeMs) []float64 {
 	return planAssembly(kept, cold).boundaries
 }
 
+// denoiseDelaySamples is the constant delay the user chain denoiser
+// adds at the mix rate, measured by cross-correlating an impulse before
+// and after the filter. The chain trims that many samples back off, so
+// both stems stay on the episode clock. Remeasure with the same probe
+// when the filter changes, because a silent drift here skews every
+// alignment offset by the new delay.
+const denoiseDelaySamples = 1200
+
 // mixStems mixes both stems to one stereo file at the mix rate. Each stem
 // resamples first, then shifts by its alignment offset, so both land on
-// the episode clock before mixing. The mix keeps every millisecond,
-// because cuts apply later on the shared clock.
+// the episode clock before mixing. The user stem passes a stationary
+// noise reducer after resampling, because the room floor would otherwise
+// ride the loudness gain up with the voice. The host stem passes
+// untouched. The mix keeps every millisecond, because cuts apply later
+// on the shared clock.
 func mixStems(ctx context.Context, tools ffmpeg.Tools, userPath string, userDelayMs int64, hostPath string, hostDelayMs int64, dst string) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("render: mix: %w", ctx.Err())
@@ -139,10 +150,10 @@ func mixStems(ctx context.Context, tools ffmpeg.Tools, userPath string, userDela
 	userDelayMs = max(userDelayMs, 0)
 	hostDelayMs = max(hostDelayMs, 0)
 	graph := fmt.Sprintf(
-		"[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo,aresample=%d,adelay=%d|%d[u];"+
+		"[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo,aresample=%d,afftdn=nr=%d,atrim=start_sample=%d,asetpts=PTS-STARTPTS,adelay=%d|%d[u];"+
 			"[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,aresample=%d,adelay=%d|%d[h];"+
 			"[u][h]amix=inputs=2:normalize=0[mix]",
-		MixRate, userDelayMs, userDelayMs, MixRate, hostDelayMs, hostDelayMs)
+		MixRate, DenoiseNR, denoiseDelaySamples, userDelayMs, userDelayMs, MixRate, hostDelayMs, hostDelayMs)
 	args := []string{"-y", "-i", userPath, "-i", hostPath,
 		"-filter_complex", graph, "-map", "[mix]",
 		"-c:a", "pcm_s16le", "-ar", strconv.Itoa(MixRate), "-ac", "2", dst}
