@@ -916,7 +916,7 @@ requires:   T7.26, T7.27
 fixture-ok: yes
 size:       L · frontier
 owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/host-stem.ts, web/src/lib/voice/host-stem.test.ts, web/src/lib/voice/session-calls.ts, web/src/lib/voice/socket.ts, web/package.json, web/package-lock.json, README.md
-status:     in-progress:implement:t7.36-impl
+status:     in-progress:review-r1:t7.36-rev-r1@19be55d5f154ee5c0569e224ce2b057b1e2ff1b3
 ```
 The host stem appends each block as it arrives, so the silence between
 replies never reaches it. A live Chrome take put host speech at 4.66,
@@ -998,7 +998,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/gemini/
-status:     in-progress:review-r1:t7.38-rev-r1@2804f0403a53edc0650da6e6144cea7d7cd92786
+status:     in-progress:land:t7.38-land@2804f0403a53edc0650da6e6144cea7d7cd92786
 ```
 A 142 second live take fell back to "Untitled episode (76 words)". The
 box logged `editorial: decode: editorial: model failed: unexpected
@@ -1098,6 +1098,33 @@ fallback title counted them.
 **Done when:** A fixture episode with two host replies stores a
 transcript whose host words sit at their reply times. A test fails
 when the host replies revert to `nil`.
+
+### T7.42: A capped model call settles what it spent
+```yaml
+requires:   T7.38
+fixture-ok: yes
+size:       S · mid
+owns:       internal/editorial/, internal/memory/
+status:     not-started
+```
+T7.38 round 1 approved the truncation sentinel. The same round
+recorded two out of scope H findings. A capped call returns
+`ErrTruncated` after Vertex has billed it. `editorial.Run` then
+releases the reservation and records price 0. `MarkEpisode` and
+`ResolveEpisode` return on that error, and their defer releases
+too. A decode or parse failure of text the model did return still
+settles the estimate.
+
+* On `ErrTruncated`, settle the same estimate a decode failure
+  settles. Do not release that reservation.
+* Leave every other model error on the release path it has today.
+* Leave `internal/analysis` alone. Chapter generation already
+  releases on an unusable body, and this sentinel does not change
+  that outcome.
+
+**Done when:** A scripted `ErrTruncated` through `editorial.Run`,
+`MarkEpisode`, and `ResolveEpisode` settles the estimate and does
+not release. Releasing and recording price 0 fails those tests.
 
 ---
 
