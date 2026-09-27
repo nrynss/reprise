@@ -916,7 +916,7 @@ requires:   T7.26, T7.27
 fixture-ok: yes
 size:       L · frontier
 owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/host-stem.ts, web/src/lib/voice/host-stem.test.ts, web/src/lib/voice/session-calls.ts, web/src/lib/voice/socket.ts, web/package.json, web/package-lock.json, README.md
-status:     in-progress:land:t7.36-land@19be55d5f154ee5c0569e224ce2b057b1e2ff1b3
+status:     done:a19b82714a08d0b74e322554798be204a6cc7470
 ```
 The host stem appends each block as it arrives, so the silence between
 replies never reaches it. A live Chrome take put host speech at 4.66,
@@ -1070,12 +1070,15 @@ none of the styling the gallery and episode pages carry.
   states, including failure.
 * The confirmation never delays `pagehide`. Closing the tab still ends
   the session.
+* The record mock spec expects the cut host stem. Stored host bytes
+  are the greeting plus the lead before it. The interrupted reply is
+  absent. Expecting both full tones fails that spec.
 
 **Done when:** A mock take ends through the confirmation and lands on
 the processing screen within one second, before a throttled upload
 finishes. Its steps follow the fixture jobs to done, then offer the
 episode link. Cancel leaves the take recording. A closed tab still
-ends the session.
+ends the session. The record mock spec passes on the cut host stem.
 
 ### T7.41: The transcript carries the host's replies
 ```yaml
@@ -1126,6 +1129,29 @@ settles the estimate.
 `MarkEpisode`, and `ResolveEpisode` settles the estimate and does
 not release. Releasing and recording price 0 fails those tests.
 
+### T7.43: The server ends a connected provider socket
+```yaml
+requires:   T7.36, T7.39
+fixture-ok: yes
+size:       M · frontier
+owns:       internal/assemblyai/, internal/broker/
+status:     not-started
+```
+T7.36 round 1 approved the client end. The same round recorded an
+out of scope H finding. A tab close whose `session.end` frame never
+leaves stays billable. `TerminateSession` deletes the provider
+record and leaves a connected socket open. Reconcile reads duration
+and settles money. It does not send `session.end`. The sweep records
+that the server did not end the socket.
+
+* Send `session.end` on the live socket before the delete.
+* A socket that is already gone still deletes, and a second end
+  does not open a new socket.
+* The sweep and the reconcile both use that end.
+
+**Done when:** A test with a live socket sees `session.end` before
+the delete. Making the end only DELETE fails that test.
+
 ---
 
 ## Exit criteria
@@ -1142,6 +1168,13 @@ not release. Releasing and recording price 0 fails those tests.
 
 ### What exists now
 
+T7.36 landed at a19b827 after round 1 APPROVE with zero in-scope
+findings. The web tree matches reviewed commit 19be55d. Main had
+moved, so the landing rebased. Voice unit tests passed, 85 tests.
+Chaaya is pinned to 0.2.1 in the package and in the planning files.
+The record mock spec still expects both full host tones. T7.40 owns
+that spec. A server delete still leaves a connected socket billable.
+T7.43 owns that end.
 T7.38 landed at 25cd697 after round 1 APPROVE with zero in-scope
 findings. The gemini diff matches reviewed commit 2804f04. Main had
 moved, so the landing rebased. The gemini race tests passed on the
@@ -1252,6 +1285,10 @@ T7.2 lands, so dogfood sparingly.
 
 ### What surprised us
 
+A pagehide beacon can carry the provider id while the call stays
+open. Delete does not end a connected socket. Reconcile does not
+send `session.end`. The client end is not enough when that frame
+never leaves.
 T7.38's truncation sentinel makes a billed call look unspent.
 `editorial.Run`, `MarkEpisode`, and `ResolveEpisode` release it.
 A decode failure of received text still settles. T7.42 owns that fix.

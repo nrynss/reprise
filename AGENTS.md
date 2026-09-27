@@ -271,7 +271,7 @@ status:     not-started
 ```
 
 - **requires** binds. Reprise task ids only. A library is a pinned version, never a task: Keel
-  `v0.3.0` and Chaaya `0.2.0` carry what this plan builds on, and how they came to carry it belongs
+  `v0.3.0` and Chaaya `0.2.1` carry what this plan builds on, and how they came to carry it belongs
   to their repositories, not to this one.
 - **A shared path is a dependency, not a scheduling hint.** Where two tasks write one path, the later
   one names the earlier in `requires`, even when their logic is unrelated.
@@ -348,7 +348,7 @@ Reprise builds on two libraries. Reprise never grows its own copy of what they p
 - **What they provide is recorded.** `dev-diary/libraries.md` lists what Keel and Chaaya carry, and
   what Reprise builds itself. Read it before writing anything general.
 - **Keel is pinned.** `github.com/nrynss/keel` at `v0.3.0`, public, fetched from the module proxy.
-- **Chaaya is `@nrynss/chaaya` from npm**, pinned to `0.2.0` exactly in `web/package.json`.
+- **Chaaya is `@nrynss/chaaya` from npm**, pinned to `0.2.1` exactly in `web/package.json`.
 - **A missing capability is written in the library**, as a task in that library's own plan, through
   its own loop. Reprise files no asks and keeps no request list. Build it here only when it is
   specific to this product, this provider or this deployment, and say which in the task.

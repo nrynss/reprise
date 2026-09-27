@@ -12,7 +12,7 @@ and an agent reading one has to decide. Writing it in the library removes the de
 library a real consumer's feedback instead of a paragraph describing one.
 
 **Versions.** Keel `v0.3.0`, public, fetched from the module proxy with no `replace` directive.
-Chaaya `0.2.0` from npm, pinned exactly in `web/package.json`. Pin both exactly. An earlier release
+Chaaya `0.2.1` from npm, pinned exactly in `web/package.json`. Pin both exactly. An earlier release
 of either carries less than this plan builds on.
 
 ---
@@ -46,7 +46,7 @@ that implements it against the one SQLite file T1.1 opens. Naming the parent pac
 process that forgets across a restart. `keel/upload` is the exception: it stages chunks on disk and
 hands the finished upload to a `mediastore`, so T2.4 wires both.
 
-## Chaaya 0.2.0
+## Chaaya 0.2.1
 
 | Need | Export | Reprise uses it in |
 |---|---|---|
