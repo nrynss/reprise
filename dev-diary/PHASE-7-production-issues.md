@@ -1086,7 +1086,7 @@ requires:   T7.36, T7.39
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:review-r1:t7.41-rev-r1@8d6800a42d7eafc7c8ad51e15fd2c3d8f81a95cd
+status:     in-progress:remediate-r1:t7.41-rem-r1
 ```
 `startTranscript` passes `nil` host replies and zero offsets to the
 transcript job. So a live transcript holds only the guest's words. The
@@ -1135,7 +1135,7 @@ requires:   T7.36, T7.39
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/assemblyai/, internal/broker/
-status:     in-progress:implement:t7.43-impl
+status:     in-progress:review-r1:t7.43-rev-r1@29b894ac7bdd1ceac8267c453ac73f17f116df21
 ```
 T7.36 round 1 approved the client end. The same round recorded an
 out of scope H finding. A tab close whose `session.end` frame never
@@ -1151,6 +1151,27 @@ that the server did not end the socket.
 
 **Done when:** A test with a live socket sees `session.end` before
 the delete. Making the end only DELETE fails that test.
+
+### T7.44: Host words keep their speaker
+```yaml
+requires:   T7.41
+fixture-ok: yes
+size:       M · mid
+owns:       internal/transcript/, internal/episode/, internal/store/migrations/, internal/editorial/validate.go, web/src/lib/editor/
+status:     not-started
+```
+T7.41 round 1 recorded an out of scope H finding. Host words share
+the edit timeline with the guest. The `words` table has no speaker
+column. Insert drops the role. The editor labels a missing speaker
+as the guest. The editorial timeline is unlabelled too.
+
+* Store the speaker with each word.
+* Playback, the editor, and editorial validation read that speaker.
+* A host word does not appear as the guest.
+
+**Done when:** A fixture with one host reply and one guest line
+shows the host words as the host. Dropping the role on insert
+fails that test.
 
 ---
 
