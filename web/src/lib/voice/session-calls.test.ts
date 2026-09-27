@@ -8,7 +8,8 @@ import {
 	describeSessionEndFailure,
 	describeUploadFailure,
 	mintSession,
-	readJobState
+	readJobState,
+	reportProviderSession
 } from './session-calls';
 
 const SESSION_BODY = {
@@ -138,6 +139,26 @@ describe('closeSession', () => {
 		expect(failure).toBeInstanceOf(ApiError);
 		expect((failure as ApiError).code).toBe('busy');
 		expect(stub).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('reportProviderSession', () => {
+	it('posts the learned id before any end', async () => {
+		const stub = stubFetchSequence([() => jsonResponse(200, { ok: true })]);
+		await expect(reportProviderSession('s1', 'prov-9')).resolves.toBe(true);
+		expect(closeBody(stub, 0)).toBe(JSON.stringify({ provider_session_id: 'prov-9' }));
+		expect(closeBody(stub, 0)).not.toBe(JSON.stringify({ provider_session_id: '' }));
+	});
+
+	it('sends nothing for an empty id', async () => {
+		const stub = stubFetchSequence([() => jsonResponse(200, { ok: true })]);
+		await expect(reportProviderSession('s1', '')).resolves.toBe(false);
+		expect(stub).not.toHaveBeenCalled();
+	});
+
+	it('reports false instead of throwing when the record refuses', async () => {
+		stubFetchSequence([() => htmlResponse(200, '<html><body>challenge</body></html>')]);
+		await expect(reportProviderSession('s1', 'prov-9')).resolves.toBe(false);
 	});
 });
 

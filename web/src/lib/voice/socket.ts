@@ -36,13 +36,16 @@ import type { SessionConfig } from './session';
 import { bytesToPcm16, decodeBase64, encodeBase64, pcm16ToFloat } from './pcm';
 
 // VoiceEvents reports what the provider said. Host audio arrives as floats
-// at the provider rate. The page plays them and stores them.
+// at the provider rate. The page plays them and stores them. The provider id
+// callback fires once with the first id the socket learns, so the page can
+// store it while the take still runs instead of only at the end.
 export interface VoiceEvents {
 	onHostAudio(samples: Float32Array): void;
 	onReplyDone(interrupted: boolean): void;
 	onUserTranscript(text: string, itemId: string): void;
 	onHostTranscript(text: string, startMs: number, endMs: number): void;
 	onEnded(): void;
+	onProviderId?(id: string): void;
 }
 
 // VoiceSocket runs one take over one handle. It sends the setup first, then
@@ -110,6 +113,7 @@ export class VoiceSocket {
 	 * End the session and wait for the provider answer. The first call sends
 	 * the close message. Every later call waits on the same answer, so the
 	 * end control, the page hide and the destroy path still send exactly once.
+	 * A send that throws did not leave, so a later call tries once more.
 	 * A call after the answer already arrived resolves at once, so ending a
 	 * take the page already closed never hangs. A call before the open sends
 	 * nothing, and its waiter settles when the open short-circuits instead of
@@ -123,18 +127,24 @@ export class VoiceSocket {
 		if (!this.endSent) {
 			this.endSent = true;
 			if (this.opened) {
-				this.handle.send(JSON.stringify({ type: 'session.end' }));
+				try {
+					this.handle.send(JSON.stringify({ type: 'session.end' }));
+				} catch {
+					this.endSent = false;
+				}
 			}
 		}
 		return waited;
 	}
 
 	// rememberProviderId keeps the first non-empty provider id. A later
-	// frame must not clear an id the socket already learned.
+	// frame must not clear an id the socket already learned. Learning it
+	// reports it at once, so the page stores it while the take still runs.
 	private rememberProviderId(value: unknown): void {
 		if (this.learnedProviderId !== '') return;
 		if (typeof value !== 'string' || value === '') return;
 		this.learnedProviderId = value;
+		this.events.onProviderId?.(value);
 	}
 
 	private settleEnd(): void {

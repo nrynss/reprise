@@ -9,7 +9,8 @@ import {
 	closeSession,
 	describeSessionEndFailure,
 	describeUploadFailure,
-	mintSession
+	mintSession,
+	reportProviderSession
 } from '$lib/voice/session-calls';
 import {
 	AudioRecorder,
@@ -32,7 +33,9 @@ import {
 	type CompletionView,
 	type StemPair
 } from '../../routes/record/stems-complete';
-import { drainHostBlock, drainUserBlock, type HostMark } from '$lib/voice/take';
+import { drainUserBlock, type HostMark } from '$lib/voice/take';
+import { HostStemWriter } from '$lib/voice/host-stem';
+import { floatToPcm16, pcm16ToBytes } from '$lib/voice/pcm';
 import { makeTestTone } from '$lib/voice/pcm';
 import { socketUrl, type SessionStart } from '$lib/voice/session';
 import { browserSocket, VoiceSocket, type SocketHandle } from '$lib/voice/socket';
@@ -90,6 +93,7 @@ export interface MockVoiceHarness {
 	clockRunning(): boolean;
 	challengeUrl(part: string): void;
 	clearChallenges(): void;
+	learnProvider(id: string): void;
 }
 
 export interface MockRecovered {
@@ -203,6 +207,12 @@ export class RecordController {
 	private flushingBlocks = false;
 	private captureReady: Promise<void> = Promise.resolve();
 	private player: PcmStreamPlayer | null = null;
+	private hostStem: HostStemWriter | null = null;
+	// stemOrigin is the context instant both stems start at. The host writer
+	// is born there, and the first user block is preceded by silence back to
+	// it, so a stored offset of zero stays truthful for both.
+	private stemOrigin = 0;
+	private userStemOpened = false;
 	private userUpload: ChunkUploader | null = null;
 	private hostUpload: ChunkUploader | null = null;
 	private voice: VoiceSocket | null = null;
@@ -221,8 +231,10 @@ export class RecordController {
 	private fedBlockCount = 0;
 	private ending: Promise<void> | null = null;
 	private hideListener: (() => void) | null = null;
+	private unloadListener: (() => void) | null = null;
 	private showListener: (() => void) | null = null;
 	private visibleListener: (() => void) | null = null;
+	private deliverProviderFrame: ((text: string) => void) | null = null;
 	private cap: SessionCap | null = null;
 	private capClock: HarnessClock | null = null;
 	private capWarning = false;
@@ -260,13 +272,18 @@ export class RecordController {
 			return;
 		}
 		this.emit();
+		// pagehide sends the provider end, and so does the unload that runs
+		// before it. A socket send that waits for pagehide can miss the wire
+		// once the browser has dropped the socket, and a bare close stays
+		// billable for the provider resume window. The first send wins.
 		this.hideListener = () => {
-			if (this.phase === 'live') {
-				this.stopCap();
-				void this.voice?.end();
-			}
+			this.endProviderSocket();
 		};
 		window.addEventListener('pagehide', this.hideListener);
+		this.unloadListener = () => {
+			this.endProviderSocket();
+		};
+		window.addEventListener('beforeunload', this.unloadListener);
 		this.showListener = () => {
 			this.cap?.wake();
 		};
@@ -284,6 +301,10 @@ export class RecordController {
 		if (this.hideListener !== null) {
 			window.removeEventListener('pagehide', this.hideListener);
 			this.hideListener = null;
+		}
+		if (this.unloadListener !== null) {
+			window.removeEventListener('beforeunload', this.unloadListener);
+			this.unloadListener = null;
 		}
 		if (this.showListener !== null) {
 			window.removeEventListener('pageshow', this.showListener);
@@ -317,6 +338,7 @@ export class RecordController {
 				await this.startRealTake();
 			}
 			this.takeStart = this.context?.currentTime ?? 0;
+			this.armStemClock();
 			this.phase = 'live';
 			this.notice = 'On air. The host hears you.';
 			this.startCap();
@@ -330,6 +352,9 @@ export class RecordController {
 		} catch (error) {
 			this.acceptBlocks = false;
 			this.earlyBlocks = [];
+			this.hostStem = null;
+			this.userStemOpened = false;
+			this.stemOrigin = 0;
 			this.abandonCapture();
 			this.phase = 'preflight';
 			this.notice = error instanceof Error ? error.message : 'The session did not open.';
@@ -366,6 +391,7 @@ export class RecordController {
 		const session = this.session;
 		this.ending = (async () => {
 			await voice.end();
+			this.flushHostStem();
 			await this.recorder?.stop();
 			if (this.userUpload !== null) await this.userUpload.finish();
 			if (this.hostUpload !== null) await this.hostUpload.finish();
@@ -586,6 +612,11 @@ export class RecordController {
 			},
 			clearChallenges: () => {
 				this.mockChallenges = [];
+			},
+			learnProvider: (id: string) => {
+				this.deliverProviderFrame?.(
+					JSON.stringify({ type: 'session.ready', session_id: id })
+				);
 			}
 		};
 	}
@@ -633,6 +664,7 @@ export class RecordController {
 		this.acceptBlocks = true;
 		const context = new AudioContext();
 		this.context = context;
+		this.armStemClock();
 		const resumed = context.resume();
 		void resumed.catch(() => undefined);
 		this.recorder = new AudioRecorder({
@@ -686,9 +718,9 @@ export class RecordController {
 		this.player = new PcmStreamPlayer({ context, streamRate: 24000 });
 		await this.openUploads();
 		this.requireUploadsOpen();
+		this.armStemClock();
 		this.voice = this.wireVoice(browserSocket(socketUrl(this.session.token)));
-		this.guard = new SessionGuard({ url: `/api/sessions/${this.session.session_id}/end` });
-		this.guard.attach();
+		this.attachGuard(this.session.session_id);
 		this.flushEarlyBlocks();
 	}
 
@@ -696,6 +728,7 @@ export class RecordController {
 		this.acceptBlocks = true;
 		this.context = new AudioContext();
 		await this.context.resume();
+		this.armStemClock();
 		this.session = {
 			session_id: 'mock-session',
 			episode_id: 'mock-episode',
@@ -715,9 +748,18 @@ export class RecordController {
 		await this.openUploads();
 		this.requireUploadsOpen();
 		this.mockHandle = new MockSocketHandle(mockScript());
-		this.voice = this.wireVoice(this.mockHandle);
-		this.guard = new SessionGuard({ url: `/api/sessions/${this.session.session_id}/end` });
-		this.guard.attach();
+		const inner = this.mockHandle;
+		this.voice = this.wireVoice({
+			send: (text) => inner.send(text),
+			close: () => inner.close(),
+			onOpen: (task) => inner.onOpen(task),
+			onMessage: (task) => {
+				this.deliverProviderFrame = task;
+				inner.onMessage(task);
+			},
+			onClose: (task) => inner.onClose(task)
+		});
+		this.attachGuard(this.session.session_id);
 		this.mockHandle.open();
 		this.pushTurn('host', this.session.config.greeting);
 		this.exposeMockHandle();
@@ -756,6 +798,34 @@ export class RecordController {
 		this.cap = null;
 	}
 
+	// endProviderSocket sends the provider end once while the take is live.
+	// pagehide and the unload before it both call this. The socket latches
+	// the send, so the second call does not put another end on the wire.
+	private endProviderSocket(): void {
+		if (this.phase !== 'live') return;
+		this.stopCap();
+		void this.voice?.end();
+	}
+
+	// armStemClock opens the host stem at the context instant both stems
+	// share. A second call does nothing, so a retry after a failed open
+	// starts clean only because the failure path drops the writer.
+	private armStemClock(): void {
+		if (this.hostStem !== null || this.context === null) return;
+		this.stemOrigin = this.context.currentTime;
+		this.hostStem = new HostStemWriter(this.stemOrigin);
+	}
+
+	// attachGuard listens for the page leaving and beacons the end route.
+	// The body is read at send time, so an id learned after attach is included.
+	private attachGuard(sessionId: string): void {
+		this.guard = new SessionGuard({
+			url: `/api/sessions/${sessionId}/end`,
+			body: () => JSON.stringify({ provider_session_id: this.voice?.providerSessionId ?? '' })
+		});
+		this.guard.attach();
+	}
+
 	private wireVoice(handle: SocketHandle): VoiceSocket {
 		if (this.session === null) throw new Error('the take opened with no session');
 		return new VoiceSocket(handle, this.session.config, {
@@ -763,8 +833,20 @@ export class RecordController {
 			onReplyDone: (interrupted) => this.handleReplyDone(interrupted),
 			onUserTranscript: (text) => this.pushTurn('user', text),
 			onHostTranscript: (text) => this.pushTurn('host', text),
-			onEnded: () => {}
+			onEnded: () => {},
+			onProviderId: (id) => {
+				void this.reportProviderId(id);
+			}
 		});
+	}
+
+	// reportProviderId stores the provider id while the take still runs. A
+	// crashed or suspended page sends no close at all, so this early record
+	// is what lets the sweep find and settle the session. It never throws,
+	// and the close body still carries the id when the page does send one.
+	private async reportProviderId(id: string): Promise<void> {
+		if (this.session === null || id === '') return;
+		await reportProviderSession(this.session.session_id, id);
 	}
 
 	private async openUploads(): Promise<void> {
@@ -808,22 +890,60 @@ export class RecordController {
 
 	private publishUserBlock(chunk: CaptureChunk): void {
 		if (this.context === null || this.userUpload === null || this.voice === null) return;
+		// Every captured block reaches the stem once, in capture order. This
+		// path drops nothing and repeats nothing. Small alignment steps
+		// against the provider copy come from the provider side, not from a
+		// lost or doubled block. Silence before the first block lines the
+		// stem up with the host origin. Later blocks are not padded again.
 		const drained = drainUserBlock(chunk.samples, this.context.sampleRate);
+		if (!this.userStemOpened) {
+			this.userStemOpened = true;
+			const lead = chunk.contextTime - this.stemOrigin;
+			if (lead > 0) {
+				const frames = Math.round(lead * this.context.sampleRate);
+				if (frames > 0) this.userUpload.append(pcm16ToBytes(new Int16Array(frames)));
+			}
+		}
 		this.userUpload.append(drained.upload);
 		this.voice.sendAudio(drained.socket);
 		this.levelDb = measureBlock(chunk.samples).rmsDb;
 	}
 
+	// Buffer one played host block with its span on the context clock. The
+	// reply renders into the stem when its done frame lands, so the stored
+	// stem carries the silence the guest heard and only what played.
 	private handleHostAudio(samples: Float32Array): void {
 		if (this.player === null || this.hostUpload === null) return;
-		this.player.push(samples);
-		this.hostUpload.append(drainHostBlock(samples));
+		const span = this.player.push(samples);
+		if (this.hostStem === null) {
+			this.hostUpload.append(pcm16ToBytes(floatToPcm16(samples)));
+			return;
+		}
+		this.hostStem.push(samples, span);
 	}
 
+	// Store one finished reply at its play time. An interrupted reply keeps
+	// only the head the flush lets through, so audio past the cut never
+	// reaches the stem even though the guest never heard it either.
 	private handleReplyDone(interrupted: boolean): void {
 		if (this.player === null) return;
 		const cut = this.player.flush();
+		const bytes = this.hostStem?.finish(cut, interrupted) ?? null;
+		if (bytes !== null && bytes.length > 0) this.hostUpload?.append(bytes);
 		this.marks.push({ reply: this.replyCount, cutTime: cut, interrupted });
+		this.replyCount += 1;
+	}
+
+	// Store the played head of a reply still open when the take ends. A
+	// reply whose done frame never arrives would otherwise vanish with its
+	// audio, while audio past the cut still stays out of the stem.
+	private flushHostStem(): void {
+		if (this.player === null || this.hostUpload === null || this.hostStem === null) return;
+		if (!this.hostStem.open) return;
+		const cut = this.player.flush();
+		const bytes = this.hostStem.finish(cut, true);
+		if (bytes !== null && bytes.length > 0) this.hostUpload.append(bytes);
+		this.marks.push({ reply: this.replyCount, cutTime: cut, interrupted: true });
 		this.replyCount += 1;
 	}
 

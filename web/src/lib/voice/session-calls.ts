@@ -46,6 +46,25 @@ export async function closeSession(sessionId: string, providerSessionId: string)
 	}
 }
 
+// reportProviderSession stores the provider id while the take still runs.
+// A crashed or suspended page sends no close at all, so this early record
+// is what lets the sweep find and settle the session. An empty id stores
+// nothing and reports false. A refused record reports false instead of
+// throwing, because the take must keep running and the end record still
+// carries the id later.
+export async function reportProviderSession(
+	sessionId: string,
+	providerSessionId: string
+): Promise<boolean> {
+	if (providerSessionId === '') return false;
+	try {
+		await closeSession(sessionId, providerSessionId);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 // readJobState reads one job row for the processing follower. A challenge
 // page throws instead of landing as an empty row, and the follower keeps its
 // last reading the way it does on any dropped poll.

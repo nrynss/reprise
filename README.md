@@ -19,7 +19,7 @@ Episodes stay private by default. Publishing is an explicit action per episode. 
 | Layer | Choice |
 |---|---|
 | Backend | Go 1.27.1, standard library first, on Keel `v0.3.0` |
-| Frontend | Svelte 5 with runes, SvelteKit with the static adapter, TypeScript strict, on Chaaya `0.2.0` |
+| Frontend | Svelte 5 with runes, SvelteKit with the static adapter, TypeScript strict, on Chaaya `0.2.1` |
 | Live voice | AssemblyAI voice agent: transcription, turn-taking, interruption, and voice |
 | Batch transcription | AssemblyAI batch models on the rendered file |
 | Editorial model | Gemini through Vertex AI: cuts, chapters, titles, notes, callbacks, cover prompts |

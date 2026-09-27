@@ -268,6 +268,59 @@ describe('VoiceSocket', () => {
 		expect(handle.closed).toBe(1);
 		await socket.end();
 	});
+
+	it('sends the provider end again when the first send throws', () => {
+		const handle = new FakeHandle();
+		let thrown = false;
+		const flaky: SocketHandle = {
+			send: (text) => {
+				const type = JSON.parse(text).type as string;
+				if (type === 'session.end' && !thrown) {
+					thrown = true;
+					throw new Error('the socket was already closing');
+				}
+				handle.send(text);
+			},
+			close: () => handle.close(),
+			onOpen: (task) => handle.onOpen(task),
+			onMessage: (task) => handle.onMessage(task),
+			onClose: (task) => handle.onClose(task)
+		};
+		const socket = new VoiceSocket(flaky, CONFIG, {
+			onHostAudio: () => {},
+			onReplyDone: () => {},
+			onUserTranscript: () => {},
+			onHostTranscript: () => {},
+			onEnded: () => {}
+		});
+		handle.open();
+		void socket.end();
+		void socket.end();
+		const ends = handle.sent.filter((text) => JSON.parse(text).type === 'session.end');
+		expect(ends).toHaveLength(1);
+	});
+
+	it('reports the learned provider id once while the take still runs', () => {
+		const { ready } = steadyProviderFrames();
+		const handle = new FakeHandle();
+		const reported: string[] = [];
+		const socket = new VoiceSocket(handle, CONFIG, {
+			onHostAudio: () => {},
+			onReplyDone: () => {},
+			onUserTranscript: () => {},
+			onHostTranscript: () => {},
+			onEnded: () => {},
+			onProviderId: (id) => reported.push(id)
+		});
+		handle.open();
+		expect(reported).toEqual([]);
+		handle.receive(JSON.stringify(ready));
+		expect(reported).toEqual([ready.session_id]);
+		expect(socket.providerSessionId).toBe(ready.session_id);
+		handle.receive(JSON.stringify(ready));
+		handle.receive(JSON.stringify({ type: 'session.ready', session_id: '' }));
+		expect(reported).toHaveLength(1);
+	});
 });
 
 describe('provider audio encoding', () => {
