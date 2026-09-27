@@ -1108,7 +1108,7 @@ requires:   T7.38
 fixture-ok: yes
 size:       S · mid
 owns:       internal/editorial/, internal/memory/
-status:     in-progress:land:t7.42-land@6d0d648feff69ef6aa465dc5fb3b1efff4d2c768
+status:     done:96dacf0ce3f3ddbc8f3220029778ea8dbc727af5
 ```
 T7.38 round 1 approved the truncation sentinel. The same round
 recorded two out of scope H findings. A capped call returns
@@ -1168,6 +1168,12 @@ the delete. Making the end only DELETE fails that test.
 
 ### What exists now
 
+T7.42 landed at 96dacf0 after round 1 APPROVE with zero findings.
+The editorial and memory diff matches reviewed commit 6d0d648.
+Main had moved, so the landing rebased. Race tests on both packages
+passed on the rebased commit. A capped call settles the same
+estimate as a bad decode in `editorial.Run`, `MarkEpisode`, and
+`ResolveEpisode`. Any other model error still releases.
 T7.36 landed at a19b827 after round 1 APPROVE with zero in-scope
 findings. The web tree matches reviewed commit 19be55d. Main had
 moved, so the landing rebased. Voice unit tests passed, 85 tests.
@@ -1179,9 +1185,7 @@ T7.38 landed at 25cd697 after round 1 APPROVE with zero in-scope
 findings. The gemini diff matches reviewed commit 2804f04. Main had
 moved, so the landing rebased. The gemini race tests passed on the
 rebased commit. The full gate still stops because ffmpeg is 9.0.2
-and the pin is 9.0.1. A capped call returns `ErrTruncated`.
-Editorial and memory still release that billed call. T7.42 owns
-the settlement.
+and the pin is 9.0.1. A capped call returns `ErrTruncated`. T7.42 landed the settlement.
 T7.34 landed at 72bee67 after round 3 APPROVE with zero residue. CI is
 green on `main` again. Review probes under `dev-diary/probes/` now
 live in their own Go module, so `go list ./...` skips them. The editor
@@ -1289,9 +1293,10 @@ A pagehide beacon can carry the provider id while the call stays
 open. Delete does not end a connected socket. Reconcile does not
 send `session.end`. The client end is not enough when that frame
 never leaves.
-T7.38's truncation sentinel makes a billed call look unspent.
-`editorial.Run`, `MarkEpisode`, and `ResolveEpisode` release it.
-A decode failure of received text still settles. T7.42 owns that fix.
+T7.38's truncation sentinel made a billed call look unspent.
+`editorial.Run`, `MarkEpisode`, and `ResolveEpisode` released it.
+A decode failure of received text still settled. T7.42 now settles
+the capped call the same way.
 T7.28 took four rounds. Each round found another state the gallery
 card had never met: a pending editorial pass, a restart mid pass, and
 a render the detail cannot see. The binary still spells the editorial
