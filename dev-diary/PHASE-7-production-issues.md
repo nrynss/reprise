@@ -1021,7 +1021,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · mid
 owns:       internal/broker/
-status:     in-progress:remediate-r1:t7.39-rem-r1
+status:     in-progress:review-r2:t7.39-rev-r2@fd589086bfc4ed5ffd77de865a3dcc6c733d986a
 ```
 Every live take on 2026-09-27 ran two reconcile jobs for one session.
 On the Firefox take each job stored its own copy of the provider
