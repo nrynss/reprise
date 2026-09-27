@@ -151,3 +151,81 @@ func TestNewClientRefusesEmptyConfig(t *testing.T) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
 }
+
+// capped builds a canned model response cut off by the output cap. The
+// text is a JSON fragment, the way a capped editorial answer arrives.
+func capped(text string) *genai.GenerateContentResponse {
+	return &genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{{
+			Content:      &genai.Content{Role: "model", Parts: []*genai.Part{{Text: text}}},
+			FinishReason: genai.FinishReasonMaxTokens,
+		}},
+		UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount: 12, CandidatesTokenCount: 5, TotalTokenCount: 17,
+		},
+	}
+}
+
+// TestGenerateNamesTruncation checks a reply stopped by the output cap
+// fails with the truncation sentinel, so the caller names the cap instead
+// of decoding the fragment. The same fragment with a stop reason still
+// succeeds, which proves the sentinel keys on the finish reason.
+func TestGenerateNamesTruncation(t *testing.T) {
+	t.Parallel()
+	fragment := `{"title":"Harbor`
+	client := gemini.NewTestClient(func(context.Context, string, []*genai.Content, *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+		return capped(fragment), nil
+	})
+	_, _, err := client.Generate(t.Context(), "flash", []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hi"}}}}, nil)
+	if !errors.Is(err, gemini.ErrTruncated) {
+		t.Fatalf("error = %v, want ErrTruncated", err)
+	}
+	if errors.Is(err, gemini.ErrEmpty) || errors.Is(err, gemini.ErrGenerate) {
+		t.Fatalf("error = %v, want only ErrTruncated", err)
+	}
+	stopped := gemini.NewTestClient(func(context.Context, string, []*genai.Content, *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+		return answer(fragment), nil
+	})
+	text, _, err := stopped.Generate(t.Context(), "flash", []*genai.Content{{Role: "user", Parts: []*genai.Part{{Text: "hi"}}}}, nil)
+	if err != nil {
+		t.Fatalf("stopped fragment: %v", err)
+	}
+	if text != fragment {
+		t.Fatalf("text = %q, want the fragment passed through", text)
+	}
+}
+
+// TestGenerateEditorialBoundsReasoning checks the editorial call bounds
+// its reasoning budget inside the output cap, so reasoning cannot starve
+// the answer on a long take.
+func TestGenerateEditorialBoundsReasoning(t *testing.T) {
+	t.Parallel()
+	var gotConfig *genai.GenerateContentConfig
+	client := gemini.NewTestClient(func(_ context.Context, _ string, _ []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+		gotConfig = config
+		return answer(`{"title":"Harbor Light"}`), nil
+	})
+	if _, err := client.GenerateEditorial(t.Context(), "flash", request()); err != nil {
+		t.Fatalf("editorial: %v", err)
+	}
+	if gotConfig == nil || gotConfig.ThinkingConfig == nil || gotConfig.ThinkingConfig.ThinkingBudget == nil {
+		t.Fatalf("config = %+v, want an explicit reasoning budget", gotConfig)
+	}
+	budget := *gotConfig.ThinkingConfig.ThinkingBudget
+	if budget <= 0 || gotConfig.MaxOutputTokens <= budget {
+		t.Fatalf("budget %d cap %d, want a positive budget inside the cap", budget, gotConfig.MaxOutputTokens)
+	}
+}
+
+// TestGenerateEditorialReportsTruncation checks a capped editorial answer
+// reaches the caller as the truncation sentinel, never as a fragment the
+// run would misdecode.
+func TestGenerateEditorialReportsTruncation(t *testing.T) {
+	t.Parallel()
+	client := gemini.NewTestClient(func(context.Context, string, []*genai.Content, *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+		return capped(`{"cold_open":{"start_word":0`), nil
+	})
+	if _, err := client.GenerateEditorial(t.Context(), "flash", request()); !errors.Is(err, gemini.ErrTruncated) {
+		t.Fatalf("error = %v, want ErrTruncated", err)
+	}
+}

@@ -21,6 +21,13 @@ var ErrGenerate = errors.New("gemini: generate failed")
 // treats it like any other model failure and falls back.
 var ErrEmpty = errors.New("gemini: empty answer")
 
+// ErrTruncated reports a model answer cut off by the output cap. The text
+// carries a partial answer, so the caller names the truncation instead of
+// decoding the fragment. A partial editorial answer decodes as an
+// unexpected end of input, which hides the capped budget behind a parse
+// failure.
+var ErrTruncated = errors.New("gemini: truncated answer")
+
 // Config carries one client construction. Project and Location arrive from
 // settings as ordinary values. CredentialJSON is the service account key
 // file contents, resolved through the file source at boot.
@@ -91,7 +98,9 @@ type Usage struct {
 
 // Generate sends contents to the named model and returns the answer text
 // with its token usage. An empty model, empty contents, or a nil answer
-// fails. The model id always arrives from settings through the caller.
+// fails. The model id always arrives from settings through the caller. A
+// reply the output cap cut off fails with ErrTruncated, so the caller
+// names the cap instead of parsing a fragment.
 func (c *Client) Generate(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (string, Usage, error) {
 	if c == nil || c.generate == nil {
 		return "", Usage{}, fmt.Errorf("gemini: generate: %w: missing backend", ErrInvalid)
@@ -105,6 +114,11 @@ func (c *Client) Generate(ctx context.Context, model string, contents []*genai.C
 	}
 	if resp == nil {
 		return "", Usage{}, fmt.Errorf("gemini: generate: %w: nil response", ErrEmpty)
+	}
+	for _, candidate := range resp.Candidates {
+		if candidate != nil && candidate.FinishReason == genai.FinishReasonMaxTokens {
+			return "", Usage{}, fmt.Errorf("gemini: generate: %w: answer hit the output cap", ErrTruncated)
+		}
 	}
 	text := resp.Text()
 	if text == "" {

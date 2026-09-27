@@ -83,13 +83,25 @@ type EditorialAnswer struct {
 // the same session proposes the same episode twice.
 const editorialTemperature = 0.2
 
-// editorialMaxTokens caps the answer length. Proposals point at offsets
-// rather than quoting audio, so the answer stays short.
-const editorialMaxTokens = 4000
+// editorialMaxTokens caps the answer length. Reasoning shares this cap
+// with the answer, so the cap holds the bounded reasoning budget below
+// plus a full half hour answer with margin. A ten minute take measured
+// near 3400 reasoning tokens with 300 answer tokens, so this cap leaves
+// several times that room.
+const editorialMaxTokens = 8192
+
+// editorialThinkingBudget bounds the reasoning tokens the editorial pass
+// may spend. Reasoning shares the output cap with the answer, so an
+// unbounded budget starves the JSON on long takes and the fragment
+// decodes as an unexpected end of input. Two thousand tokens leave room
+// to weigh delivery across a half hour take.
+const editorialThinkingBudget = 2048
 
 // GenerateEditorial hears both stems, reads the word timeline, and returns
 // the proposals as JSON validated against ResponseSchema. The model id
-// arrives from settings through the caller, never from code.
+// arrives from settings through the caller, never from code. A reply the
+// output cap cut off fails with ErrTruncated instead of returning a
+// fragment for the caller to misdecode.
 func (c *Client) GenerateEditorial(ctx context.Context, model string, req EditorialRequest) (EditorialAnswer, error) {
 	if model == "" {
 		return EditorialAnswer{}, fmt.Errorf("gemini: editorial: %w: empty model", ErrInvalid)
@@ -105,6 +117,7 @@ func (c *Client) GenerateEditorial(ctx context.Context, model string, req Editor
 		mime = DefaultMIME
 	}
 	temperature := float32(editorialTemperature)
+	thinkingBudget := int32(editorialThinkingBudget)
 	contents := []*genai.Content{{
 		Role: "user",
 		Parts: []*genai.Part{
@@ -116,6 +129,7 @@ func (c *Client) GenerateEditorial(ctx context.Context, model string, req Editor
 	text, usage, err := c.Generate(ctx, model, contents, &genai.GenerateContentConfig{
 		SystemInstruction: genai.NewContentFromText(editorialSystem(), genai.RoleUser),
 		Temperature:       &temperature,
+		ThinkingConfig:    &genai.ThinkingConfig{ThinkingBudget: &thinkingBudget},
 		MaxOutputTokens:   editorialMaxTokens,
 		ResponseMIMEType:  "application/json",
 		ResponseSchema:    ResponseSchema(),

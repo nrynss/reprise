@@ -14,6 +14,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -363,4 +364,161 @@ func TestGeminiProbe(t *testing.T) {
 	logUsage(t, "choice", choice.UsageMetadata)
 
 	_ = loaded
+}
+
+// longTakeSentences carries varied episode material with an unresolved
+// thread and a laugh, so the editorial pass has cuts and a callback to
+// propose across the loops.
+var longTakeSentences = []string{
+	"The harbor ferry leaves at dawn and crosses the grey water slowly.",
+	"Gulls follow the wake while the crew coils rope on the stern deck.",
+	"I keep meaning to call Mara about the boathouse keys, and I still have not done it.",
+	"A lighthouse blinks twice, then the foghorn answers from the point.",
+	"Ha, the first time I tried to dock, I nearly took out the fuel pier.",
+	"Passengers sip coffee and watch the shoreline slide quietly past.",
+}
+
+// wavSeconds reads the duration of a mono 16 bit WAV file from its sample
+// count, so the probe can size loops and word timings from the audio it
+// built.
+func wavSeconds(t *testing.T, path string, rate int) float64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat wav: %v", err)
+	}
+	if info.Size() < 44 {
+		t.Fatalf("wav too short: %s", path)
+	}
+	return float64(info.Size()-44) / 2 / float64(rate)
+}
+
+// longTakeTimeline numbers every word of the looped sentences with even
+// timing across the measured duration. It mirrors the timeline shape the
+// run passes beside the stems.
+func longTakeTimeline(sentences []string, loops int, durationSecs float64) string {
+	var words []string
+	for _, s := range sentences {
+		words = append(words, strings.Fields(s)...)
+	}
+	total := len(words) * loops
+	perMs := durationSecs * 1000 / float64(total)
+	var out strings.Builder
+	idx := 0
+	for l := 0; l < loops; l++ {
+		for _, w := range words {
+			fmt.Fprintf(&out, "[%d] %s (%d-%d)\n", idx, w, int64(float64(idx)*perMs), int64(float64(idx+1)*perMs))
+			idx++
+		}
+	}
+	return out.String()
+}
+
+// newEditorialProbeClient reveals the service account key through settings
+// and opens the package client, so the long take exercises the real
+// editorial request shape with its output cap. It returns the editorial
+// model id from settings.
+func newEditorialProbeClient(t *testing.T) (*Client, string) {
+	t.Helper()
+	resolveConfig(t)
+	loaded, _, err := settings.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load settings: %v", err)
+	}
+	if loaded.EditorialModel == "" {
+		t.Fatal("editorial model resolved empty")
+	}
+	keyJSON, err := loaded.Secrets.GeminiCredential.Reveal()
+	if err != nil {
+		t.Fatalf("reveal gemini credential: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := NewClient(ctx, Config{
+		Project:        loaded.VertexProject,
+		Location:       loaded.VertexLocation,
+		CredentialJSON: keyJSON,
+	})
+	if err != nil {
+		t.Fatalf("new package client: %v", err)
+	}
+	return client, loaded.EditorialModel
+}
+
+// TestEditorialLongTake sends a speaker stem of at least ten minutes with
+// its word timeline through GenerateEditorial and requires a complete
+// schema shaped answer. A reply cut off by the output cap fails here with
+// the truncation sentinel, never with a decode error. It runs behind the
+// live tag only, synthesizes every sample locally, and spends one Vertex
+// call.
+func TestEditorialLongTake(t *testing.T) {
+	client, model := newEditorialProbeClient(t)
+	dir := t.TempDir()
+	voice := "/tmp/voices/en_US-lessac-medium.onnx"
+	rate := 22050
+
+	var paras []string
+	for i, s := range longTakeSentences {
+		out := filepath.Join(dir, fmt.Sprintf("take-%d.wav", i))
+		synthVoice(t, voice, s, out)
+		paras = append(paras, out)
+	}
+	loop := filepath.Join(dir, "loop.wav")
+	concatWAV(t, paras, rate, loop)
+	loopSecs := wavSeconds(t, loop, rate)
+	t.Logf("loop seconds %.1f", loopSecs)
+	loops := int(600/loopSecs) + 1
+	var reps []string
+	for i := 0; i < loops; i++ {
+		reps = append(reps, loop)
+	}
+	stemWAV := filepath.Join(dir, "stem.wav")
+	concatWAV(t, reps, rate, stemWAV)
+	stemSecs := wavSeconds(t, stemWAV, rate)
+	if stemSecs < 600 {
+		t.Fatalf("stem seconds %.1f, want at least 600", stemSecs)
+	}
+	stemOpus := filepath.Join(dir, "stem.opus")
+	encodeOpus(t, stemWAV, stemOpus)
+	userRaw, err := os.ReadFile(stemOpus)
+	if err != nil {
+		t.Fatalf("read stem opus: %v", err)
+	}
+
+	hostWAV := filepath.Join(dir, "host.wav")
+	synthVoice(t, voice, "Then the lightship answered, and we turned for home.", hostWAV)
+	hostOpus := filepath.Join(dir, "host.opus")
+	encodeOpus(t, hostWAV, hostOpus)
+	hostRaw, err := os.ReadFile(hostOpus)
+	if err != nil {
+		t.Fatalf("read host opus: %v", err)
+	}
+
+	timeline := longTakeTimeline(longTakeSentences, loops, stemSecs)
+	t.Logf("stem seconds %.1f user bytes %d host bytes %d timeline words %d",
+		stemSecs, len(userRaw), len(hostRaw), strings.Count(timeline, "\n"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+	defer cancel()
+	reply, err := client.GenerateEditorial(ctx, model, EditorialRequest{
+		UserStem: userRaw,
+		HostStem: hostRaw,
+		Timeline: timeline,
+	})
+	if err != nil {
+		if errors.Is(err, ErrTruncated) {
+			t.Fatalf("long take answer truncated: %v", err)
+		}
+		t.Fatalf("editorial long take: %v", err)
+	}
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(reply.JSON), &parsed); err != nil {
+		t.Fatalf("long take answer is not JSON: %v", err)
+	}
+	for _, key := range []string{"cold_open", "cuts", "title", "show_notes", "callback"} {
+		if _, ok := parsed[key]; !ok {
+			t.Fatalf("long take answer misses %q: %.300s", key, reply.JSON)
+		}
+	}
+	t.Logf("answer bytes %d usage %+v title %.120s", len(reply.JSON), reply.Usage, parsed["title"])
 }
