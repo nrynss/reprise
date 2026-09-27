@@ -1059,3 +1059,289 @@ func TestNewReconcilerRefusesBadConfig(t *testing.T) {
 		t.Fatalf("job kind %+v misses idempotent, 3 attempts, or resume", kind)
 	}
 }
+
+// commitThenFailWriter stores through the real media store, then fails
+// the first successful write. The blob is committed and the caller still
+// sees an error, which is the gap after a commit and before the next step.
+type commitThenFailWriter struct {
+	inner  *mediastore.Store
+	mu     sync.Mutex
+	failed bool
+}
+
+func (w *commitThenFailWriter) Persist(ctx context.Context, src io.Reader, put mediastore.Put) (string, error) {
+	mediaID, err := w.inner.Persist(ctx, src, put)
+	if err != nil {
+		return "", err
+	}
+	if w.failFirst() {
+		return "", errors.New("persist committed then the writer failed")
+	}
+	return mediaID, nil
+}
+
+func (w *commitThenFailWriter) PersistWithID(ctx context.Context, blobID string, src io.Reader, put mediastore.Put) error {
+	if err := w.inner.PersistWithID(ctx, blobID, src, put); err != nil {
+		return err
+	}
+	if w.failFirst() {
+		return errors.New("persist committed then the writer failed")
+	}
+	return nil
+}
+
+func (w *commitThenFailWriter) failFirst() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.failed {
+		return false
+	}
+	w.failed = true
+	return true
+}
+
+// holdFetcher counts artifact reads. It blocks every recording read until
+// release is closed, so a second reconciler can run while the first is
+// still inside that read.
+type holdFetcher struct {
+	mu           sync.Mutex
+	blobs        map[string][]byte
+	fetches      map[string]int
+	recordingURL string
+	timelineURL  string
+	firstIn      chan struct{}
+	secondIn     chan struct{}
+	timelineIn   chan struct{}
+	release      chan struct{}
+	held         int
+	onceFirst    sync.Once
+	onceSecond   sync.Once
+	onceTimeline sync.Once
+}
+
+func (f *holdFetcher) Fetch(ctx context.Context, artifactURL string) (io.ReadCloser, error) {
+	f.mu.Lock()
+	if f.fetches == nil {
+		f.fetches = map[string]int{}
+	}
+	f.fetches[artifactURL]++
+	raw, ok := f.blobs[artifactURL]
+	f.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("holdFetcher: unknown artifact: %w", ErrRead)
+	}
+	if artifactURL == f.recordingURL {
+		f.noteRecording()
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if artifactURL == f.timelineURL {
+		f.onceTimeline.Do(func() { close(f.timelineIn) })
+	}
+	return io.NopCloser(bytes.NewReader(raw)), nil
+}
+
+func (f *holdFetcher) noteRecording() {
+	f.mu.Lock()
+	f.held++
+	n := f.held
+	f.mu.Unlock()
+	if n == 1 {
+		f.onceFirst.Do(func() { close(f.firstIn) })
+		return
+	}
+	f.onceSecond.Do(func() { close(f.secondIn) })
+}
+
+func (f *holdFetcher) count(artifactURL string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.fetches[artifactURL]
+}
+
+func (f *recFixture) openReconciler(media MediaWriter, artifacts ArtifactFetcher) *Reconciler {
+	f.t.Helper()
+	rec, err := NewReconciler(ReconcilerConfig{
+		DB:                   f.db,
+		Sessions:             f.rec.sessions,
+		Artifacts:            artifacts,
+		Budgets:              f.budgets,
+		Leases:               f.leases,
+		Diary:                f.diary,
+		Media:                media,
+		Alerter:              f.alerter,
+		MarginSeconds:        DefaultMarginSeconds,
+		RecordingContentType: DefaultRecordingContentType,
+		FetchMaxBytes:        DefaultFetchMaxBytes,
+	})
+	if err != nil {
+		f.t.Fatalf("open reconciler: %v", err)
+	}
+	return rec
+}
+
+func recPrivateTypes(t *testing.T, db *sqlite.DB, episodeID string) map[string]int {
+	t.Helper()
+	rows, err := db.Reader().QueryContext(t.Context(),
+		`SELECT content_type, visibility, owner FROM media WHERE media_group = ?`, episodeID)
+	if err != nil {
+		t.Fatalf("list episode media: %v", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var contentType, visibility, owner string
+		if err := rows.Scan(&contentType, &visibility, &owner); err != nil {
+			t.Fatalf("scan episode media: %v", err)
+		}
+		if visibility != "private" || owner != recOwner {
+			t.Fatalf("blob %s visibility %q owner %q, want private %s", contentType, visibility, owner, recOwner)
+		}
+		out[contentType]++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("list episode media: %v", err)
+	}
+	return out
+}
+
+func recClaimState(t *testing.T, db *sqlite.DB, sessionID string) (bool, string, string) {
+	t.Helper()
+	var settled int
+	var recordingID, timelineID string
+	if err := db.Reader().QueryRowContext(t.Context(),
+		`SELECT settled, recording_media_id, timeline_media_id FROM reconcile_state WHERE session_id = ?`,
+		sessionID).Scan(&settled, &recordingID, &timelineID); err != nil {
+		t.Fatalf("read claim: %v", err)
+	}
+	return settled != 0, recordingID, timelineID
+}
+
+// TestReconcileCommitThenFailStoresOneRecording commits one recording and
+// then fails the writer. The claim is settled and one private recording
+// is stored. A second reconciler must not add another recording or
+// timeline, and must not fetch the recording again.
+func TestReconcileCommitThenFailStoresOneRecording(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-a")
+	const recordingURL = "https://artifacts.example/rec-a.ogg"
+	const timelineURL = "https://artifacts.example/tl-a.json"
+	fetcher := &countingFetcher{blobs: map[string][]byte{
+		recordingURL: recAudioA,
+		timelineURL:  recTimelineA,
+	}}
+	writer := &commitThenFailWriter{inner: fx.media}
+	fx.rec.artifacts = fetcher
+	fx.rec.media = writer
+
+	if _, err := fx.rec.Reconcile(t.Context(), in); err == nil {
+		t.Fatal("reconcile succeeded, want the writer error after the blob committed")
+	}
+	settled, _, _ := recClaimState(t, fx.db, in.SessionID)
+	if !settled {
+		t.Fatal("claim is not settled after the failed persist")
+	}
+	if held := recPrivateTypes(t, fx.db, in.EpisodeID); held["audio/ogg"] != 1 || len(held) != 1 {
+		t.Fatalf("episode media %v, want one private recording", held)
+	}
+	if got := fetcher.count(recordingURL); got != 1 {
+		t.Fatalf("recording fetched %d times before the retry, want one", got)
+	}
+	spent := recSpent(t, fx.costs)
+	if spent != recRate*372 {
+		t.Fatalf("spent %d, want one settle of %d", spent, recRate*372)
+	}
+
+	next := fx.openReconciler(writer, fetcher)
+	if _, err := next.Reconcile(t.Context(), in); err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	held := recPrivateTypes(t, fx.db, in.EpisodeID)
+	if held["audio/ogg"] != 1 || held["application/json"] != 1 || len(held) != 2 {
+		t.Fatalf("episode media %v, want one recording and one timeline", held)
+	}
+	if got := fetcher.count(recordingURL); got != 1 {
+		t.Fatalf("recording fetched %d times, want exactly once", got)
+	}
+	if got := fetcher.count(timelineURL); got != 1 {
+		t.Fatalf("timeline fetched %d times, want exactly once", got)
+	}
+	if got := recSpent(t, fx.costs); got != spent {
+		t.Fatalf("spent moved %d to %d on the second reconciler", spent, got)
+	}
+}
+
+// TestReconcileTwoValuesStoreOnePair runs two reconcilers on one database
+// and one media store. The recording read stays blocked until the other
+// call has entered it or has fetched the timeline. The table ends with
+// one private recording and one private timeline. Each URL is fetched
+// once and spend moves once.
+func TestReconcileTwoValuesStoreOnePair(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-a")
+	const recordingURL = "https://artifacts.example/rec-a.ogg"
+	const timelineURL = "https://artifacts.example/tl-a.json"
+	fetcher := &holdFetcher{
+		blobs: map[string][]byte{
+			recordingURL: recAudioA,
+			timelineURL:  recTimelineA,
+		},
+		recordingURL: recordingURL,
+		timelineURL:  timelineURL,
+		firstIn:      make(chan struct{}),
+		secondIn:     make(chan struct{}),
+		timelineIn:   make(chan struct{}),
+		release:      make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(fetcher.release) }) }
+	defer release()
+
+	first := fx.rec
+	first.artifacts = fetcher
+	second := fx.openReconciler(fx.media, fetcher)
+	var errA, errB error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, errA = first.Reconcile(t.Context(), in)
+	}()
+	<-fetcher.firstIn
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, errB = second.Reconcile(t.Context(), in)
+	}()
+	select {
+	case <-fetcher.secondIn:
+	case <-fetcher.timelineIn:
+	}
+	release()
+	wg.Wait()
+	if errA != nil {
+		t.Fatalf("first reconcile: %v", errA)
+	}
+	if errB != nil {
+		t.Fatalf("second reconcile: %v", errB)
+	}
+	held := recPrivateTypes(t, fx.db, in.EpisodeID)
+	if held["audio/ogg"] != 1 || held["application/json"] != 1 || len(held) != 2 {
+		t.Fatalf("episode media %v, want one recording and one timeline", held)
+	}
+	if got := fetcher.count(recordingURL); got != 1 {
+		t.Fatalf("recording fetched %d times, want exactly once", got)
+	}
+	if got := fetcher.count(timelineURL); got != 1 {
+		t.Fatalf("timeline fetched %d times, want exactly once", got)
+	}
+	if got := recSpent(t, fx.costs); got != recRate*372 {
+		t.Fatalf("spent %d, want exactly one settle of %d", got, recRate*372)
+	}
+	if reserved := recReserved(t, fx.costs); reserved != 0 {
+		t.Fatalf("held %d after two reconcilers, want none held", reserved)
+	}
+}

@@ -6,9 +6,10 @@
 // stereo recording and the timeline privately, because artifact URLs expire.
 // The provider read repeats safely, so the job kind is idempotent. The
 // money settle runs exactly once, guarded by a durable claim row this file
-// owns. The artifact tail runs under a per session lock, so a repeated
-// end stores nothing new. An ambiguous resume never settles twice. It
-// stops for review.
+// owns. Each artifact id is claimed in that row before its bytes are fetched,
+// so a second pass stores nothing new even after a crash or from another
+// reconciler. The per session lock only orders calls that share one value.
+// An ambiguous resume never settles twice. It stops for review.
 package broker
 
 import (
@@ -24,6 +25,7 @@ import (
 
 	"github.com/nrynss/keel/cost"
 	costsqlitestore "github.com/nrynss/keel/cost/sqlitestore"
+	"github.com/nrynss/keel/id"
 	"github.com/nrynss/keel/job"
 	"github.com/nrynss/keel/lease"
 	"github.com/nrynss/keel/mediastore"
@@ -152,9 +154,19 @@ type SessionStore interface {
 }
 
 // MediaWriter persists bytes privately. The media store implements it.
+// A writer that can store under a reserved id lets the claim row name
+// the blob before those bytes commit.
 type MediaWriter interface {
 	// Persist writes src as a new blob and returns its id.
 	Persist(ctx context.Context, src io.Reader, blob mediastore.Put) (string, error)
+}
+
+// idMediaWriter stores bytes under an id the caller already recorded.
+// Persist mints its id while the row commits, which is too late to
+// survive a crash between that commit and a later claim update.
+type idMediaWriter interface {
+	// PersistWithID writes src as blobID. The id must already be claimed.
+	PersistWithID(ctx context.Context, blobID string, src io.Reader, blob mediastore.Put) error
 }
 
 // AlertKind names why the reconciler raised an alert.
@@ -197,9 +209,10 @@ type Alerter interface {
 }
 
 var (
-	_ Settler      = (*costsqlitestore.KeyedBudget)(nil)
-	_ LeaseSettler = (*lease.Manager)(nil)
-	_ MediaWriter  = (*mediastore.Store)(nil)
+	_ Settler       = (*costsqlitestore.KeyedBudget)(nil)
+	_ LeaseSettler  = (*lease.Manager)(nil)
+	_ MediaWriter   = (*mediastore.Store)(nil)
+	_ idMediaWriter = (*mediastore.Store)(nil)
 )
 
 // Input is one reconciliation. The caller carries the mint time linkage,
@@ -287,7 +300,9 @@ type ReconcilerConfig struct {
 
 // Reconciler settles live sessions against provider truth. Create it with
 // New, because the zero value holds no stores. A Reconciler is safe for
-// concurrent use, and one session settles through one job at a time.
+// concurrent use. Calls that share one value take one session at a time.
+// A second value claims artifact ids in the row instead, so both still
+// store one recording and one timeline.
 type Reconciler struct {
 	db           *sqlite.DB
 	sessions     SessionReader
@@ -637,24 +652,47 @@ func (r *Reconciler) markSettled(ctx context.Context, sessionID string, seconds 
 	return nil
 }
 
-// markRecording records the persisted recording id.
-func (r *Reconciler) markRecording(ctx context.Context, sessionID, mediaID string) error {
-	if _, err := r.db.Writer().ExecContext(ctx,
-		`UPDATE reconcile_state SET recording_media_id = ?, updated_at = ? WHERE session_id = ?`,
-		mediaID, time.Now().UnixMilli(), sessionID); err != nil {
-		return fmt.Errorf("broker: mark reconcile recording: %w", ErrState)
+// claimArtifact records mediaID when that artifact id is still empty.
+// The update runs before the fetch, so a crash after the blob commits
+// still leaves the id for the next pass. False means a peer claimed it.
+func (r *Reconciler) claimArtifact(ctx context.Context, sessionID, kind, mediaID string) (bool, error) {
+	var query string
+	switch kind {
+	case "recording":
+		query = `UPDATE reconcile_state SET recording_media_id = ?, updated_at = ? WHERE session_id = ? AND recording_media_id = ''`
+	case "timeline":
+		query = `UPDATE reconcile_state SET timeline_media_id = ?, updated_at = ? WHERE session_id = ? AND timeline_media_id = ''`
+	default:
+		return false, fmt.Errorf("broker: claim %s: %w: unknown artifact", kind, ErrState)
 	}
-	return nil
+	done, err := r.db.Writer().ExecContext(ctx, query, mediaID, time.Now().UnixMilli(), sessionID)
+	if err != nil {
+		return false, fmt.Errorf("broker: claim %s: %w: %w", kind, ErrState, err)
+	}
+	won, err := done.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("broker: claim %s: %w: %w", kind, ErrState, err)
+	}
+	return won == 1, nil
 }
 
-// markTimeline records the persisted timeline id.
-func (r *Reconciler) markTimeline(ctx context.Context, sessionID, mediaID string) error {
-	if _, err := r.db.Writer().ExecContext(ctx,
-		`UPDATE reconcile_state SET timeline_media_id = ?, updated_at = ? WHERE session_id = ?`,
-		mediaID, time.Now().UnixMilli(), sessionID); err != nil {
-		return fmt.Errorf("broker: mark reconcile timeline: %w", ErrState)
+// artifactID reads the claimed id for kind from the writer connection.
+// The claim update just committed there, and a pooled read can lag it.
+func (r *Reconciler) artifactID(ctx context.Context, sessionID, kind string) (string, error) {
+	var query string
+	switch kind {
+	case "recording":
+		query = `SELECT recording_media_id FROM reconcile_state WHERE session_id = ?`
+	case "timeline":
+		query = `SELECT timeline_media_id FROM reconcile_state WHERE session_id = ?`
+	default:
+		return "", fmt.Errorf("broker: read %s id: %w: unknown artifact", kind, ErrState)
 	}
-	return nil
+	var mediaID string
+	if err := r.db.Writer().QueryRowContext(ctx, query, sessionID).Scan(&mediaID); err != nil {
+		return "", fmt.Errorf("broker: read %s id: %w: %w", kind, ErrState, err)
+	}
+	return mediaID, nil
 }
 
 // markOverCapAlerted records that the over cap alert fired. Later runs
@@ -692,9 +730,8 @@ func (r *Reconciler) review(ctx context.Context, in Input, detail string) (Resul
 // provider duration and settles the mint hold to that cost on both
 // ceilings. It closes the lease at the provider number, writes the
 // duration on the session row, and persists the recording and timeline.
-// One session runs here under its own lock, so a repeated end waits
-// and then stores nothing new. A repeat after a crash settles money
-// at most once. Artifact retries skip settled money and finish the bytes.
+// Money settles at most once. Each artifact id is claimed before the
+// fetch, so a repeat stores nothing and does not fetch again.
 func (r *Reconciler) Reconcile(ctx context.Context, in Input) (Result, error) {
 	if err := validate(in); err != nil {
 		return Result{}, err
@@ -929,11 +966,9 @@ func (r *Reconciler) completeExpiredTail(ctx context.Context, in Input, read Pro
 }
 
 // finishArtifacts completes the idempotent tail: the session row update,
-// the recording and timeline persists, and the over cap alert. Stored
-// media ids stay, so a repeat run fetches nothing and stores nothing.
-// The alert fires once per session on its durable flag, so retries stay
-// silent. Money never moves here, so retries finish the bytes without
-// spending twice.
+// the recording and timeline persists, and the over cap alert. A claimed
+// media id stays, so a repeat fetches nothing and stores nothing. The
+// alert fires once per session on its durable flag. Money never moves here.
 func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow) (Result, error) {
 	res := Result{
 		SessionID:        in.SessionID,
@@ -951,15 +986,15 @@ func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow
 	if err := r.diary.SetConnectedSeconds(ctx, in.SessionID, row.connectedSeconds); err != nil {
 		return res, fmt.Errorf("broker: write session duration: %w: %w", ErrState, err)
 	}
-	if row.recordingURL != "" && row.recordingMediaID == "" {
-		mediaID, err := r.persistRecording(ctx, in, row.recordingURL)
+	if row.recordingURL != "" {
+		mediaID, err := r.ensureArtifact(ctx, in, "recording", row.recordingURL, r.contentType, row.recordingMediaID)
 		if err != nil {
 			return res, err
 		}
 		res.RecordingMediaID = mediaID
 	}
-	if row.timelineURL != "" && row.timelineMediaID == "" {
-		mediaID, err := r.persistTimeline(ctx, in, row.timelineURL)
+	if row.timelineURL != "" {
+		mediaID, err := r.ensureArtifact(ctx, in, "timeline", row.timelineURL, r.timelineType, row.timelineMediaID)
 		if err != nil {
 			return res, err
 		}
@@ -978,43 +1013,157 @@ func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow
 	return res, nil
 }
 
-// persistRecording fetches the stereo recording and stores it privately.
-// Artifact URLs expire, so the bytes land in the media store on receipt.
-func (r *Reconciler) persistRecording(ctx context.Context, in Input, recordingURL string) (string, error) {
-	mediaID, err := r.persistArtifact(ctx, in, "recording", recordingURL, r.contentType)
+// artifactFlights records artifact fetches running in this process.
+// Two reconciler values do not share a guard. A claimed id can still
+// be mid fetch here. A new process has an empty set, so it can finish
+// a claim whose blob never landed.
+type artifactFlights struct {
+	mu sync.Mutex
+	n  map[string]int
+}
+
+// artifactFlight is process wide on purpose. The per value guard does
+// not cover a second Reconciler on the same database.
+var artifactFlight artifactFlights
+
+func artifactKey(sessionID, kind string) string {
+	return sessionID + "/" + kind
+}
+
+// enter counts one fetch that is about to claim or already owns the id.
+func (f *artifactFlights) enter(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.n == nil {
+		f.n = map[string]int{}
+	}
+	f.n[key]++
+}
+
+// leave drops one fetch. The key goes when the last fetch leaves.
+func (f *artifactFlights) leave(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.n[key]--
+	if f.n[key] <= 0 {
+		delete(f.n, key)
+	}
+}
+
+// tryStart begins a fetch only when none is running for key.
+// False means a peer in this process already holds the fetch.
+func (f *artifactFlights) tryStart(key string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.n[key] > 0 {
+		return false
+	}
+	if f.n == nil {
+		f.n = map[string]int{}
+	}
+	f.n[key] = 1
+	return true
+}
+
+// ensureArtifact stores one artifact once. An id already on the row is
+// kept. Otherwise this pass claims a fresh id before the fetch, then
+// stores the bytes under that id. A peer that loses the claim does not
+// fetch.
+func (r *Reconciler) ensureArtifact(ctx context.Context, in Input, kind, artifactURL, contentType, knownID string) (string, error) {
+	if knownID != "" {
+		return r.finishClaimed(ctx, in, kind, artifactURL, contentType, knownID)
+	}
+	mediaID, err := id.New()
+	if err != nil {
+		return "", fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
+	}
+	key := artifactKey(in.SessionID, kind)
+	artifactFlight.enter(key)
+	defer artifactFlight.leave(key)
+	won, err := r.claimArtifact(ctx, in.SessionID, kind, mediaID)
 	if err != nil {
 		return "", err
 	}
-	if err := r.markRecording(ctx, in.SessionID, mediaID); err != nil {
+	if !won {
+		return r.claimedArtifactID(ctx, in.SessionID, kind)
+	}
+	if err := r.fetchAndPersist(ctx, in, kind, artifactURL, contentType, mediaID); err != nil {
 		return "", err
 	}
 	return mediaID, nil
 }
 
-// persistTimeline fetches the timeline and stores it privately beside the
-// recording. Artifact URLs expire, so the bytes land in the media store
-// on receipt.
-func (r *Reconciler) persistTimeline(ctx context.Context, in Input, timelineURL string) (string, error) {
-	mediaID, err := r.persistArtifact(ctx, in, "timeline", timelineURL, r.timelineType)
+// finishClaimed returns mediaID when its blob is already stored or a
+// fetch for it is running in this process. Otherwise the earlier pass
+// died before the row landed, and this pass stores the same id.
+func (r *Reconciler) finishClaimed(ctx context.Context, in Input, kind, artifactURL, contentType, mediaID string) (string, error) {
+	stored, err := r.blobStored(ctx, mediaID)
 	if err != nil {
 		return "", err
 	}
-	if err := r.markTimeline(ctx, in.SessionID, mediaID); err != nil {
+	if stored {
+		return mediaID, nil
+	}
+	key := artifactKey(in.SessionID, kind)
+	if !artifactFlight.tryStart(key) {
+		return mediaID, nil
+	}
+	defer artifactFlight.leave(key)
+	stored, err = r.blobStored(ctx, mediaID)
+	if err != nil {
+		return "", err
+	}
+	if stored {
+		return mediaID, nil
+	}
+	if err := r.fetchAndPersist(ctx, in, kind, artifactURL, contentType, mediaID); err != nil {
 		return "", err
 	}
 	return mediaID, nil
 }
 
-// persistArtifact fetches one artifact URL and stores it privately under
-// the episode. kind names the artifact in errors.
-func (r *Reconciler) persistArtifact(ctx context.Context, in Input, kind, artifactURL, contentType string) (string, error) {
+// claimedArtifactID returns the id a peer wrote. An empty id after a
+// lost claim is a broken row, not a cue to fetch again.
+func (r *Reconciler) claimedArtifactID(ctx context.Context, sessionID, kind string) (string, error) {
+	mediaID, err := r.artifactID(ctx, sessionID, kind)
+	if err != nil {
+		return "", err
+	}
+	if mediaID == "" {
+		return "", fmt.Errorf("broker: persist %s: %w: the claim lost and the id is empty", kind, ErrState)
+	}
+	return mediaID, nil
+}
+
+// blobStored reports whether the media index has a row for mediaID.
+// The writer connection is the one the store just committed on.
+func (r *Reconciler) blobStored(ctx context.Context, mediaID string) (bool, error) {
+	if mediaID == "" {
+		return false, nil
+	}
+	var n int
+	if err := r.db.Writer().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM media WHERE id = ?`, mediaID).Scan(&n); err != nil {
+		return false, fmt.Errorf("broker: read media %s: %w: %w", mediaID, ErrState, err)
+	}
+	return n > 0, nil
+}
+
+// fetchAndPersist downloads one artifact and stores it under mediaID.
+// The id is already on the claim row, so a commit here cannot race a
+// second insert of the same URL.
+func (r *Reconciler) fetchAndPersist(ctx context.Context, in Input, kind, artifactURL, contentType, mediaID string) error {
 	body, err := r.artifacts.Fetch(ctx, artifactURL)
 	if err != nil {
-		return "", fmt.Errorf("broker: fetch %s: %w: %w", kind, ErrRead, err)
+		return fmt.Errorf("broker: fetch %s: %w: %w", kind, ErrRead, err)
 	}
 	defer body.Close()
+	writer, ok := r.media.(idMediaWriter)
+	if !ok {
+		return fmt.Errorf("broker: persist %s: %w: the media writer cannot store a reserved id", kind, ErrState)
+	}
 	capped := &cappedReader{inner: body, left: r.maxBytes + 1}
-	mediaID, err := r.media.Persist(ctx, capped, mediastore.Put{
+	err = writer.PersistWithID(ctx, mediaID, capped, mediastore.Put{
 		ContentType: contentType,
 		Owner:       in.OwnerID,
 		Group:       in.EpisodeID,
@@ -1022,11 +1171,11 @@ func (r *Reconciler) persistArtifact(ctx context.Context, in Input, kind, artifa
 	})
 	if err != nil {
 		if errors.Is(err, errArtifactTooLarge) {
-			return "", fmt.Errorf("broker: fetch %s: %w: artifact passes the byte cap", kind, ErrRead)
+			return fmt.Errorf("broker: fetch %s: %w: artifact passes the byte cap", kind, ErrRead)
 		}
-		return "", fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
+		return fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
 	}
-	return mediaID, nil
+	return nil
 }
 
 // cappedReader counts a stream and fails past the cap. The media persist
