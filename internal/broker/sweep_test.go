@@ -335,6 +335,49 @@ func TestSweepSkipsSettled(t *testing.T) {
 	}
 }
 
+// refuseEnd is a provider reader whose end never lands. The sweep has to
+// try that end again after the money has settled.
+type refuseEnd struct {
+	calls int
+}
+
+func (r *refuseEnd) ReadSession(context.Context, string) (ProviderSession, error) {
+	return ProviderSession{}, ErrSessionOpen
+}
+
+func (r *refuseEnd) EndSession(context.Context, string) (EndResult, error) {
+	r.calls++
+	return EndResult{}, errors.New("end refused")
+}
+
+// TestSweepRetriesEndAfterSettledClaim checks a sweep that settled an open
+// session and then failed to end it. The next sweep must end again. It must
+// not report the session already settled, and it must not settle twice.
+func TestSweepRetriesEndAfterSettledClaim(t *testing.T) {
+	sf := newSweepFixture(t, 4000)
+	sf.statuses.docs["prov-sweep"] = ProviderStatus{
+		ID: "prov-sweep", Status: "created", HasDuration: false, OpenSeconds: 10,
+	}
+	reader := &refuseEnd{}
+	sf.fx.rec.sessions = reader
+
+	_, err := sf.sweeper.Sweep(t.Context(), SweepInput{MarginSeconds: DefaultMarginSeconds})
+	spent := recSpent(t, sf.fx.costs)
+	if err == nil || !strings.Contains(err.Error(), "end refused") || reader.calls != 1 || spent != recRate*10 {
+		t.Fatalf("first sweep err %v ends %d spent %d, want one end error and one settle at %d", err, reader.calls, spent, recRate*10)
+	}
+	if len(sf.ender.calls) != 0 {
+		t.Fatalf("sweep ender %v on the first pass, want the provider end to fail first", sf.ender.calls)
+	}
+
+	again, err := sf.sweeper.Sweep(t.Context(), SweepInput{MarginSeconds: DefaultMarginSeconds})
+	spent2 := recSpent(t, sf.fx.costs)
+	skipped := len(again) == 1 && again[0].Skipped && again[0].Detail == "session already settled"
+	if err == nil || !strings.Contains(err.Error(), "end refused") || reader.calls != 2 || spent2 != spent || skipped || len(sf.ender.calls) != 0 {
+		t.Fatalf("second sweep %+v err %v ends %d spent %d ender %v, want another refused end, one settle, and no settled skip", again, err, reader.calls, spent2, sf.ender.calls)
+	}
+}
+
 func TestSweepGoneRecordReviews(t *testing.T) {
 	sf := newSweepFixture(t, 4000)
 	sf.statuses.gone["prov-sweep"] = true

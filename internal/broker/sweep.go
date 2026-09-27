@@ -3,7 +3,8 @@
 // the delete. A socket that is already gone still deletes, and a second
 // end does not open a new socket. The sweep reads every session row still
 // open past its cap plus a margin, books the accrued cost on both
-// ceilings, and records the outcome. The kind is idempotent. A second
+// ceilings, and records the outcome. The kind is idempotent. A failed
+// provider end stays pending, so the next pass tries it again. A second
 // pass moves no money and raises no alert.
 package broker
 
@@ -295,9 +296,9 @@ func (s *Sweeper) RunFunc(in SweepInput) job.Func {
 }
 
 // Sweep ends every session row still open past its cap plus the margin.
-// It settles each one through the reconciler, deletes the provider record
-// after, and records the outcome. A settled session is skipped, so a
-// repeat pass moves no money and raises no alert.
+// It settles each one through the reconciler, then ends the provider
+// session. A settled session whose end failed is ended again. A repeat
+// pass moves no money and raises no alert.
 func (s *Sweeper) Sweep(ctx context.Context, in SweepInput) ([]SweepOutcome, error) {
 	margin := in.MarginSeconds
 	if margin < 0 {
@@ -318,8 +319,9 @@ func (s *Sweeper) Sweep(ctx context.Context, in SweepInput) ([]SweepOutcome, err
 	return out, nil
 }
 
-// sweepOne ends and settles one candidate. Young rows and settled rows are
-// skipped with the reason on the outcome.
+// sweepOne ends and settles one candidate. Young rows are skipped.
+// A settled row whose provider end failed is ended again, and the money
+// stays where it is. A settled row that already ended is skipped.
 func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int) (SweepOutcome, error) {
 	if err := validateCandidate(candidate); err != nil {
 		return SweepOutcome{}, err
@@ -336,6 +338,36 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 		return SweepOutcome{}, err
 	}
 	if settled {
+		// Money already moved. Retry the provider end when it never landed.
+		// A later pass tries again after a failed end and does not settle.
+		pending, err := s.reconciler.endPending(ctx, candidate.SessionID)
+		if err != nil {
+			return SweepOutcome{}, err
+		}
+		if pending {
+			if err := s.reconciler.endProvider(ctx, candidate.SessionID, candidate.ProviderSessionID); err != nil {
+				return SweepOutcome{}, err
+			}
+			ended, err := s.ender.EndSession(ctx, candidate.ProviderSessionID)
+			if err != nil {
+				if merr := s.reconciler.setEndPending(ctx, candidate.SessionID, true); merr != nil {
+					return SweepOutcome{}, merr
+				}
+				return SweepOutcome{}, fmt.Errorf("broker: sweep: end session %s: %w: %w", candidate.ProviderSessionID, ErrSweep, err)
+			}
+			detail := fmt.Sprintf("provider session ended after the settle, %s", ended.Detail)
+			if ended.SocketEnded {
+				detail += ", socket ended before the delete"
+			}
+			if err := s.markSwept(ctx, candidate.SessionID, "", 0, ended.SocketEnded, detail); err != nil {
+				return SweepOutcome{}, err
+			}
+			return SweepOutcome{
+				SessionID:   candidate.SessionID,
+				ServerEnded: ended.SocketEnded,
+				Detail:      detail,
+			}, nil
+		}
 		if err := s.markSwept(ctx, candidate.SessionID, "", 0, false, "session already settled"); err != nil {
 			return SweepOutcome{}, err
 		}

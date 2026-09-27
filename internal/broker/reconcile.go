@@ -443,6 +443,7 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 		timeline_media_id TEXT NOT NULL DEFAULT '',
 		recording_url TEXT NOT NULL DEFAULT '',
 		timeline_url TEXT NOT NULL DEFAULT '',
+		end_pending INTEGER NOT NULL DEFAULT 0,
 		updated_at INTEGER NOT NULL DEFAULT 0
 	)`
 	if _, err := r.db.Writer().ExecContext(context.Background(), schema); err != nil {
@@ -454,6 +455,10 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 	}
 	if err := r.ensureColumn(context.Background(),
 		"timeline_media_id", "timeline_media_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
+	if err := r.ensureColumn(context.Background(),
+		"end_pending", "end_pending INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -824,8 +829,9 @@ func (r *Reconciler) ReconcileAbandoned(ctx context.Context, in Input, abandoned
 	})
 }
 
-// IsSettled reports whether the session already settled. The sweep skips
-// settled sessions, so a second pass moves no money and raises no alert.
+// IsSettled reports whether the session already settled. The sweep does
+// not move money for a settled session. A failed provider end stays
+// retryable on its own flag.
 func (r *Reconciler) IsSettled(ctx context.Context, sessionID string) (bool, error) {
 	if sessionID == "" {
 		return false, fmt.Errorf("broker: settled check: %w: session id must not be empty", ErrInvalid)
@@ -877,13 +883,57 @@ func (r *Reconciler) readForSettle(ctx context.Context, providerSessionID string
 // endProvider deletes the provider record after the artifacts are stored.
 // The end writes session.end before that delete when a socket is live.
 // A reader that cannot end is left for the sweep, which uses the same end.
-func (r *Reconciler) endProvider(ctx context.Context, providerSessionID string) error {
+// A failed end is marked pending so a later sweep tries again. The money
+// claim stays settled either way.
+func (r *Reconciler) endProvider(ctx context.Context, sessionID, providerSessionID string) error {
 	ender, ok := r.sessions.(SessionEnder)
 	if !ok || providerSessionID == "" {
 		return nil
 	}
 	if _, err := ender.EndSession(ctx, providerSessionID); err != nil {
+		if merr := r.setEndPending(ctx, sessionID, true); merr != nil {
+			return fmt.Errorf("broker: end provider session %s: %w: %w", providerSessionID, err, merr)
+		}
 		return fmt.Errorf("broker: end provider session %s: %w", providerSessionID, err)
+	}
+	if err := r.setEndPending(ctx, sessionID, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+// endPending reports whether a settled session still needs its provider
+// end. The sweep retries that end and does not settle again.
+func (r *Reconciler) endPending(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("broker: provider end: %w: session id must not be empty", ErrInvalid)
+	}
+	var pending int
+	err := r.db.Writer().QueryRowContext(ctx,
+		`SELECT end_pending FROM reconcile_state WHERE session_id = ?`, sessionID).Scan(&pending)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("broker: read provider end: %w", ErrState)
+	}
+	return pending != 0, nil
+}
+
+// setEndPending records whether the provider end still has to run.
+// Pending stays set until an end succeeds, so a failed try is not forgotten.
+func (r *Reconciler) setEndPending(ctx context.Context, sessionID string, pending bool) error {
+	if sessionID == "" {
+		return fmt.Errorf("broker: mark provider end: %w: session id must not be empty", ErrInvalid)
+	}
+	flag := 0
+	if pending {
+		flag = 1
+	}
+	if _, err := r.db.Writer().ExecContext(ctx,
+		`UPDATE reconcile_state SET end_pending = ?, updated_at = ? WHERE session_id = ?`,
+		flag, time.Now().UnixMilli(), sessionID); err != nil {
+		return fmt.Errorf("broker: mark provider end: %w", ErrState)
 	}
 	return nil
 }
@@ -1061,7 +1111,7 @@ func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow
 		r.alert(ctx, &res, AlertOverCap, in.OwnerID,
 			fmt.Sprintf("session ran %d seconds past a %d second cap", res.ConnectedSeconds, in.TokenCapSeconds))
 		if res.AlertError != "" {
-			if err := r.endProvider(ctx, in.ProviderSessionID); err != nil {
+			if err := r.endProvider(ctx, in.SessionID, in.ProviderSessionID); err != nil {
 				return res, err
 			}
 			return res, nil
@@ -1070,7 +1120,7 @@ func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow
 			return res, err
 		}
 	}
-	if err := r.endProvider(ctx, in.ProviderSessionID); err != nil {
+	if err := r.endProvider(ctx, in.SessionID, in.ProviderSessionID); err != nil {
 		return res, err
 	}
 	return res, nil
