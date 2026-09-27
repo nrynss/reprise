@@ -1108,7 +1108,7 @@ requires:   T7.38
 fixture-ok: yes
 size:       S · mid
 owns:       internal/editorial/, internal/memory/
-status:     in-progress:review-r1:t7.42-rev-r1@6d0d648feff69ef6aa465dc5fb3b1efff4d2c768
+status:     in-progress:land:t7.42-land@6d0d648feff69ef6aa465dc5fb3b1efff4d2c768
 ```
 T7.38 round 1 approved the truncation sentinel. The same round
 recorded two out of scope H findings. A capped call returns
