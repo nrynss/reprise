@@ -1086,7 +1086,7 @@ requires:   T7.36, T7.39
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:remediate-r1:t7.41-rem-r1
+status:     in-progress:review-r2:t7.41-rev-r2@ebfcc6e9f0bbe57842b5a10808f89bfb627aa1f7
 ```
 `startTranscript` passes `nil` host replies and zero offsets to the
 transcript job. So a live transcript holds only the guest's words. The
