@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -273,7 +275,13 @@ func TestEndSessionResumesThenEndsBeforeDelete(t *testing.T) {
 }
 
 // serveVoiceEnd speaks the resume handshake on one hijacked socket.
+// A missing bearer prefix is refused and does not open the socket.
 func serveVoiceEnd(w http.ResponseWriter, r *http.Request, upgrades *int, mu *sync.Mutex, note func(string), setFail func(string)) {
+	if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+		w.WriteHeader(http.StatusUnauthorized)
+		setFail("upgrade authorization was not a bearer token")
+		return
+	}
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		setFail("server cannot hijack")
@@ -289,9 +297,6 @@ func serveVoiceEnd(w http.ResponseWriter, r *http.Request, upgrades *int, mu *sy
 	mu.Lock()
 	*upgrades++
 	mu.Unlock()
-	if r.Header.Get("Authorization") == "" {
-		setFail("upgrade missing authorization")
-	}
 	if _, err := io.WriteString(rw, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"); err != nil {
 		setFail(err.Error())
 		return
@@ -346,6 +351,178 @@ func writeServerText(w io.Writer, payload []byte) error {
 	_, err := w.Write(frame)
 	return err
 }
+
+// TestBearerUpgradeEndsBeforeDelete pins the voice handshake. The
+// upgrade sends a bearer token, then session.end, then the delete.
+// The delete still sends the raw key. A missing prefix gets 401 and
+// must not delete.
+func TestBearerUpgradeEndsBeforeDelete(t *testing.T) {
+	var mu sync.Mutex
+	var order []string
+	var upgrades int
+	var fail string
+	var deleteAuth string
+	note := func(step string) {
+		mu.Lock()
+		order = append(order, step)
+		mu.Unlock()
+	}
+	setFail := func(msg string) {
+		mu.Lock()
+		if fail == "" {
+			fail = msg
+		}
+		mu.Unlock()
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/ws" {
+			serveVoiceEnd(w, r, &upgrades, &mu, note, setFail)
+			return
+		}
+		if r.Method == http.MethodDelete && r.URL.Path == "/v1/sessions/sess_live" {
+			mu.Lock()
+			deleteAuth = r.Header.Get("Authorization")
+			order = append(order, "delete")
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	client, err := NewSessionsClient(srv.URL, "test-key", srv.Client())
+	if err != nil {
+		t.Fatalf("new sessions client: %v", err)
+	}
+	res, err := client.EndSession(t.Context(), "sess_live")
+	mu.Lock()
+	gotFail := fail
+	gotOrder := append([]string(nil), order...)
+	gotAuth := deleteAuth
+	gotUpgrades := upgrades
+	mu.Unlock()
+	if gotFail != "" || err != nil || !res.SocketEnded || !res.Deleted {
+		t.Fatalf("end %+v err %v fail %q order %v, want session.end before delete", res, err, gotFail, gotOrder)
+	}
+	if len(gotOrder) != 3 || gotOrder[0] != "resume" || gotOrder[1] != "end" || gotOrder[2] != "delete" {
+		t.Fatalf("order %v, want resume, end, delete", gotOrder)
+	}
+	if gotAuth != "test-key" {
+		t.Fatalf("delete authorization %q, want the raw key", gotAuth)
+	}
+	if gotUpgrades != 1 {
+		t.Fatalf("upgrades %d, want one", gotUpgrades)
+	}
+}
+
+// TestUpgradeStatusDoesNotDelete pins a refused voice upgrade. A status
+// other than 101 returns an error, skips the delete, and clears the dial
+// so a second end opens another socket.
+func TestUpgradeStatusDoesNotDelete(t *testing.T) {
+	for _, code := range []int{http.StatusUnauthorized, http.StatusInternalServerError} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			assertUpgradeRefusal(t, code)
+		})
+	}
+}
+
+func assertUpgradeRefusal(t *testing.T, code int) {
+	t.Helper()
+	var mu sync.Mutex
+	upgrades := 0
+	deletes := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path == "/v1/ws" {
+			upgrades++
+			w.WriteHeader(code)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			deletes++
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	client, err := NewSessionsClient(srv.URL, "test-key", srv.Client())
+	if err != nil {
+		t.Fatalf("new sessions client: %v", err)
+	}
+	first, err1 := client.EndSession(t.Context(), "sess_up")
+	second, err2 := client.EndSession(t.Context(), "sess_up")
+	mu.Lock()
+	gotUpgrades := upgrades
+	gotDeletes := deletes
+	mu.Unlock()
+	if err1 == nil || err2 == nil || errors.Is(err1, ErrSocketGone) || errors.Is(err2, ErrSocketGone) {
+		t.Fatalf("ends %v and %v, deletes %d, upgrades %d", err1, err2, gotDeletes, gotUpgrades)
+	}
+	if !errors.Is(err1, ErrVoiceUpgrade) || !errors.Is(err2, ErrVoiceUpgrade) {
+		t.Fatalf("ends %v and %v, want a retryable upgrade error", err1, err2)
+	}
+	if first.Deleted || first.SocketEnded || second.Deleted || second.SocketEnded || gotDeletes != 0 || gotUpgrades != 2 {
+		t.Fatalf("ends %+v %+v deletes %d upgrades %d, want no delete and two dials", first, second, gotDeletes, gotUpgrades)
+	}
+}
+
+// TestEndSessionWriteDeadlineDoesNotDelete pins a timed out end frame.
+// The pipe deadline is already in the past, so the write fails. That
+// error keeps the deadline and does not delete the record.
+func TestEndSessionWriteDeadlineDoesNotDelete(t *testing.T) {
+	left, right := net.Pipe()
+	t.Cleanup(func() {
+		_ = left.Close()
+		_ = right.Close()
+	})
+	if err := left.SetDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	var mu sync.Mutex
+	deletes := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			mu.Lock()
+			deletes++
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	client, err := NewSessionsClient(srv.URL, "test-key", srv.Client())
+	if err != nil {
+		t.Fatalf("new sessions client: %v", err)
+	}
+	if err := client.HoldSocket("sess_open", &wsSocket{conn: frozenDeadline{Conn: left}}); err != nil {
+		t.Fatalf("hold socket: %v", err)
+	}
+	res, err := client.EndSession(t.Context(), "sess_open")
+	mu.Lock()
+	gotDeletes := deletes
+	mu.Unlock()
+	if err == nil || res.Deleted || res.SocketEnded || !errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, ErrSocketGone) {
+		t.Fatalf("end %+v err %v deletes %d, want the pipe deadline and no delete", res, err, gotDeletes)
+	}
+	if gotDeletes != 0 {
+		t.Fatalf("deletes %d, want none", gotDeletes)
+	}
+}
+
+// frozenDeadline ignores a later deadline. The pipe already carries one
+// that is in the past, and the write has to fail with that deadline.
+type frozenDeadline struct {
+	net.Conn
+}
+
+func (frozenDeadline) SetDeadline(time.Time) error { return nil }
+
+func (frozenDeadline) SetReadDeadline(time.Time) error { return nil }
+
+func (frozenDeadline) SetWriteDeadline(time.Time) error { return nil }
 
 func TestHoldSocketRejectsEmpty(t *testing.T) {
 	client, err := NewSessionsClient("https://agents.example", "test-key", nil)

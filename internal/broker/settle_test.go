@@ -259,12 +259,25 @@ func TestAdapterReadsOpenStatus(t *testing.T) {
 }
 
 // TestAdapterEndsSession checks the sweep delete maps both provider
-// answers: a removed record and one already gone both succeed, because
-// ending an ended session stays safe.
+// answers. A removed record and one already gone both succeed, because
+// ending an ended session stays safe. The voice socket is already
+// closed, so this measures the delete.
 func TestAdapterEndsSession(t *testing.T) {
 	srv := sessionsServer(t, map[string]string{"prov-end": sessionDoc("prov-end", nil, "")})
 	defer srv.Close()
-	adapter := testAdapter(t, srv)
+	client, err := assemblyai.NewSessionsClient(srv.URL, "probe-key", srv.Client())
+	if err != nil {
+		t.Fatalf("new sessions client: %v", err)
+	}
+	for _, id := range []string{"prov-end", "prov-gone"} {
+		if err := client.HoldSocket(id, closedSocket{}); err != nil {
+			t.Fatalf("hold socket: %v", err)
+		}
+	}
+	adapter, err := NewSessionsAdapter(client)
+	if err != nil {
+		t.Fatalf("new adapter: %v", err)
+	}
 	ended, err := adapter.EndSession(context.Background(), "prov-end")
 	if err != nil {
 		t.Fatalf("end session: %v", err)
@@ -279,6 +292,14 @@ func TestAdapterEndsSession(t *testing.T) {
 	if gone.Deleted {
 		t.Fatalf("gone result %+v, want deleted false with success", gone)
 	}
+}
+
+// closedSocket is a voice socket that has already gone. The end still
+// deletes the provider record and does not open a replacement.
+type closedSocket struct{}
+
+func (closedSocket) SendText(context.Context, []byte) error {
+	return assemblyai.ErrSocketGone
 }
 
 // TestAdapterRefusesNilClient checks a missing client fails before any

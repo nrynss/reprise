@@ -23,6 +23,10 @@ import (
 // still deletes the provider record. It does not open a replacement.
 var ErrSocketGone = errors.New("assemblyai: socket is gone")
 
+// ErrVoiceUpgrade reports a handshake that did not open a voice socket.
+// The record stays in place, and a later end may dial again.
+var ErrVoiceUpgrade = errors.New("assemblyai: voice upgrade failed")
+
 // sessionEndFrame is the client end. The voice socket stops billing only
 // when it receives this frame. A record delete does not send it.
 var sessionEndFrame = []byte(`{"type":"session.end"}`)
@@ -123,6 +127,8 @@ func (c *SessionsClient) StopSocket(ctx context.Context, sessionID string) (bool
 			if errors.Is(err, ErrSocketGone) {
 				return false, nil
 			}
+			// A refused upgrade is not a gone socket. Clear the dial so a
+			// later end can try again, and keep the provider record.
 			gate.dialed = false
 			return false, err
 		}
@@ -238,9 +244,10 @@ func (c *SessionsClient) dialVoice(ctx context.Context, sessionID string) (LiveS
 	return sock, nil
 }
 
-// dialConn opens the voice websocket on the sessions host. A host that
-// does not upgrade returns ErrSocketGone. A cancelled context returns
-// that context error, so a cancelled end does not look like a gone socket.
+// dialConn opens the voice websocket on the sessions host. Any status
+// other than 101 is a failed upgrade, not a gone socket. A cancelled
+// context returns that context error, so a cancelled end does not look
+// like a gone socket.
 func (c *SessionsClient) dialConn(ctx context.Context) (net.Conn, error) {
 	parsed, err := url.Parse(c.base)
 	if err != nil || parsed.Host == "" {
@@ -298,13 +305,14 @@ func (c *SessionsClient) dialConn(ctx context.Context) (net.Conn, error) {
 	}
 	if status != 101 {
 		_ = conn.Close()
-		return nil, fmt.Errorf("assemblyai: voice upgrade status %d: %w", status, ErrSocketGone)
+		return nil, fmt.Errorf("assemblyai: voice upgrade status %d: %w", status, ErrVoiceUpgrade)
 	}
 	return conn, nil
 }
 
-// writeUpgrade sends the websocket handshake. The key stays in the header
-// and never enters an error string.
+// writeUpgrade sends the websocket handshake. The voice socket requires
+// a bearer token. REST on this host accepts the raw key, so the prefix
+// is added here only. The key never enters an error string.
 func writeUpgrade(conn net.Conn, host, key string) error {
 	token := make([]byte, 16)
 	if _, err := rand.Read(token); err != nil {
@@ -317,7 +325,7 @@ func writeUpgrade(conn net.Conn, host, key string) error {
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: " + base64.StdEncoding.EncodeToString(token) + "\r\n" +
 		"Sec-WebSocket-Version: 13\r\n" +
-		"Authorization: " + key + "\r\n\r\n"
+		"Authorization: Bearer " + key + "\r\n\r\n"
 	_, err := io.WriteString(conn, request)
 	return err
 }
@@ -383,7 +391,9 @@ func (s *wsSocket) SendText(ctx context.Context, payload []byte) error {
 		return err
 	}
 	if _, err := s.conn.Write(frame); err != nil {
-		return fmt.Errorf("assemblyai: write voice socket: %w", ErrSocketGone)
+		// Keep the write error, including a deadline. The frame was not
+		// written, so this is not a gone socket and the record stays.
+		return fmt.Errorf("assemblyai: write voice socket: %w", err)
 	}
 	return nil
 }
