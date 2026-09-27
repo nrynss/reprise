@@ -17,8 +17,9 @@ settled session. T7.26 landed raw PCM stem uploads, and T7.27 landed WebKit
 recording. T7.28 landed so a live draft can be heard. T7.29
 to T7.32 wire the post-render chain, publish and erase, the seeded season,
 and export, which the binary never assembled. T7.4
-owner login is deferred. T6.4b real-voice checks are blocked until a person
-reruns them, and the final P7 exit checks are not complete.
+owner login is deferred. T6.4b real-voice checks are under way on
+`f79cb91`, with two of four runs measured. They opened T7.36 to T7.41,
+and the final P7 exit checks are not complete.
 
 The libraries carry the general work. Chaaya `0.2.0` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered

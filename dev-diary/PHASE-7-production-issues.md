@@ -910,6 +910,148 @@ unless the binary patches the kind.
 **Done when:** A test boots with a concurrency of two and runs two
 renders at once. An interrupted render resumes through the kind alone.
 
+### T7.36: The host stem keeps the call's clock ★
+```yaml
+requires:   T7.26, T7.27
+fixture-ok: yes
+size:       M · frontier
+owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/host-stem.ts, web/src/lib/voice/host-stem.test.ts
+status:     not-started
+```
+The host stem appends each block as it arrives, so the silence between
+replies never reaches it. A live Chrome take put host speech at 4.66,
+12.79, 14.22 and 22.61 seconds on the call. The stored stem carries
+it at 0.34, 3.13, 4.80 and 7.58 seconds, with offset zero. The render
+delays the whole stem by that one offset, so every later reply plays
+early and over the guest. Audio that arrives after an interruption
+flush also lands in the stem, though the guest never heard it.
+
+* Write the host stem on the context clock the user stem uses. Each
+  reply starts where the player started it, with silence before it.
+* Cut each interrupted reply at the flush, so the stem holds only
+  what played.
+* Both stems start at the same context instant. Their stored offsets
+  stay truthful when they do not.
+* Attribute the 20 to 60 ms offset steps between the user stem and
+  the provider recording (one in Chrome, four in Firefox). Fix them if
+  the user stem drops or repeats blocks. Record them if they sit on the
+  provider side.
+
+**Done when:** A synthetic take with marked host replies and one
+interruption yields a host stem whose marks sit at their play times
+within one block. The live probe aligns each stem against its
+provider channel with one offset across the take.
+
+### T7.37: The render reduces the guest's room noise
+```yaml
+requires:   T7.35
+fixture-ok: yes
+size:       S · mid
+owns:       internal/render/
+status:     not-started
+```
+Capture keeps noise suppression off by design, because `voice_focus`
+cleans what the provider hears. Nothing cleans the stem the render
+uses. A live take measured about 26 dB between speech peaks and the
+room floor at −51 dBFS. `loudnorm` then lifts the guest about 15 dB,
+floor included, so the episode sounds noisier than the call.
+
+* Reduce stationary noise on the user stem before the mix and before
+  `loudnorm`. The stored stem stays raw.
+* Keep speech intact. Measure the speech band level before and after.
+
+**Done when:** A fixture stem of generated speech over added noise
+renders with its floor at least 15 dB lower, measured by `astats` on
+the written file. The speech band level moves by less than 1 dB.
+
+### T7.38: The editorial answer fits a long take
+```yaml
+requires:   T7.2
+fixture-ok: yes
+size:       S · frontier
+owns:       internal/gemini/
+status:     not-started
+```
+A 142 second live take fell back to "Untitled episode (76 words)". The
+box logged `editorial: decode: editorial: model failed: unexpected
+EOF`. A 32 second take on the same build succeeded. The answer caps at
+`editorialMaxTokens` of 4000, and thinking tokens may count against it.
+
+* Find what truncates the answer, and measure it with a live probe on
+  generated speech.
+* Size the cap, or the thinking budget, so a 30 minute session
+  answers whole. A truncated answer names truncation, never a decode
+  error.
+
+**Done when:** The live probe returns a complete answer for a fixture
+of at least 10 minutes. A unit test pins a truncated reply to its own
+sentinel.
+
+### T7.39: A repeat end stores one recording
+```yaml
+requires:   T7.2
+fixture-ok: yes
+size:       S · mid
+owns:       internal/broker/
+status:     not-started
+```
+Every live take on 2026-09-27 ran two reconcile jobs for one session.
+On the Firefox take each job stored its own copy of the provider
+recording, as media `e7136cf1…` and `dd4683d3…`. Money settles once,
+but private media doubles and one copy has no reference.
+
+* A second reconcile for a settled session stores nothing new.
+* The stored recording keeps one media row per session.
+
+**Done when:** A test posts end twice, and the media table holds one
+recording for the session. The mutation that drops the guard fails
+it.
+
+### T7.40: The processing screen follows the jobs and leads on
+```yaml
+requires:   T7.36
+fixture-ok: yes
+size:       M · mid
+owns:       web/src/routes/processing/, web/src/lib/voice/processing-state.ts, web/src/lib/voice/record-state.ts, web/src/routes/record/+page.svelte
+status:     not-started
+```
+The live handoff to `/processing` carries no job ids. So transcription
+and the editorial pass read "Waiting" forever, while the draft reads
+done before either ran. The screen offers no link on. After End, the
+page also sits about 21 seconds on a 142 second take while 17.7 MB
+upload, with nothing on screen.
+
+* The screen follows the real transcript and editorial jobs for the
+  episode, and the draft reads done only after both.
+* It links to the episode once the draft exists, and to the gallery
+  at every point.
+* End shows upload progress at once, so a long take never looks hung.
+
+**Done when:** A mock take lands on a screen whose steps follow the
+fixture jobs to done, then offers the episode link. A throttled
+upload shows progress within one second of End.
+
+### T7.41: The transcript carries the host's replies
+```yaml
+requires:   T7.36
+fixture-ok: yes
+size:       S · mid
+owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
+status:     not-started
+```
+`startTranscript` passes `nil` host replies and zero offsets to the
+transcript job. So a live transcript holds only the guest's words. The
+Firefox take stored 76 words, exactly the guest's eleven lines, and the
+fallback title counted them.
+
+* Pass each host reply with its text and its start on the episode
+  clock, read from a stored row.
+* Pass the stem offsets the stems table records.
+
+**Done when:** A fixture episode with two host replies stores a
+transcript whose host words sit at their reply times. A test fails
+when the host replies revert to `nil`.
+
 ---
 
 ## Exit criteria
@@ -918,6 +1060,7 @@ renders at once. An interrupted render resumes through the kind alone.
 - [ ] No mint stays held after its end plus the sweep margin.
 - [ ] The uploader reads its own bytes and anon reads carry the header.
 - [ ] Round 2 of the production record re-measures every check on the deployed build.
+- [ ] A live take renders with every host reply where the call played it.
 
 ---
 
@@ -1041,6 +1184,15 @@ Run every gate step from the worktree root, and read CI after a push.
 On this workstation ffmpeg is 9.0.2 against the 9.0.1 pin, so
 `tools/check.sh` stops at its tool check. The owner accepted running
 every later step by hand, with each exit code recorded.
+
+The first real-voice takes on 2026-09-27 ran on `f79cb91` with the
+owner on mic and speakers. Echo cancellation held in Chrome and
+Firefox, and connected seconds matched the ledger both times. The
+host stem lost its gaps (T7.36), and a long editorial answer came back
+truncated (T7.38). `project.md` says both stems share one context
+clock. The user stem does, but the host stem was never written on it.
+Time to first host audio reached 8.7 seconds once, against a median
+near 1.4 seconds. Nothing yet says whether that delay is ours.
 
 ### Notes for the next developer
 
