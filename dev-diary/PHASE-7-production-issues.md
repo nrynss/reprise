@@ -1135,7 +1135,7 @@ requires:   T7.36, T7.39
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/assemblyai/, internal/broker/
-status:     in-progress:review-r2:t7.43-rev-r2@6535036f55fb2b817d2b3026d9450b98f6a4e75d
+status:     in-progress:remediate-r2:t7.43-rem-r2
 ```
 T7.36 round 1 approved the client end. The same round recorded an
 out of scope H finding. A tab close whose `session.end` frame never
