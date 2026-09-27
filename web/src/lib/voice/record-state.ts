@@ -29,10 +29,13 @@ import {
 import {
 	completionPair,
 	createCompletionDriver,
+	describeCompletionFailure,
+	postStemsComplete,
 	type CompletionDriver,
 	type CompletionView,
 	type StemPair
 } from '../../routes/record/stems-complete';
+import { depositProcessingHandoff } from '$lib/voice/processing-state';
 import { drainUserBlock, type HostMark } from '$lib/voice/take';
 import { HostStemWriter } from '$lib/voice/host-stem';
 import { floatToPcm16, pcm16ToBytes } from '$lib/voice/pcm';
@@ -109,6 +112,10 @@ interface HeapPerformance extends Performance {
 const UPLOAD_BASE = '/api/uploads';
 const CHUNK_FRAMES = 4096;
 const TONE_SECONDS = 2;
+// A slow upload leaves for the processing screen instead of holding the
+// guest on a blank ending state. The screen keeps the same upload and draws
+// its progress. A short upload still finishes here first.
+const UPLOAD_HANDOFF_MS = 250;
 
 // emptySnapshot gives the page an initial render with no session behind it.
 export const emptySnapshot: RecordSnapshot = {
@@ -362,16 +369,24 @@ export class RecordController {
 		}
 	}
 
-	/** Drive the end control. The first press arms, the second press ends. */
+	/** Drive the end control. The first press asks, and confirm ends. */
 	endControl(): void {
 		if (this.phase !== 'live') return;
 		if (!this.armed) {
 			this.armed = true;
-			this.notice = 'Press end again to stop the take.';
+			this.notice = 'End this take? Cancel keeps it recording.';
 			this.emit();
 			return;
 		}
 		void this.endTake();
+	}
+
+	/** Drop the end confirmation and keep the take recording. */
+	cancelEnd(): void {
+		if (this.phase !== 'live' || !this.armed) return;
+		this.armed = false;
+		this.notice = 'On air. The host hears you.';
+		this.emit();
 	}
 
 	/** End the take and hand the session to the processing screen. */
@@ -393,29 +408,64 @@ export class RecordController {
 			await voice.end();
 			this.flushHostStem();
 			await this.recorder?.stop();
-			if (this.userUpload !== null) await this.userUpload.finish();
-			if (this.hostUpload !== null) await this.hostUpload.finish();
-			this.uploadFailure = describeUploadFailure(this.userUpload, this.hostUpload);
-			const userBytes = this.userUpload?.receipt?.sizeBytes ?? 0;
-			const hostBytes = this.hostUpload?.receipt?.sizeBytes ?? 0;
 			const providerSessionId = voice.providerSessionId;
-			try {
-				await closeSession(session.session_id, providerSessionId);
-			} catch (error) {
+			let closeError: unknown = null;
+			const closing = closeSession(session.session_id, providerSessionId).catch((error: unknown) => {
+				closeError = error;
+			});
+			const finishing = Promise.all([
+				this.userUpload?.finish() ?? Promise.resolve(),
+				this.hostUpload?.finish() ?? Promise.resolve()
+			]);
+			const pace = await paceUploads(finishing, UPLOAD_HANDOFF_MS);
+			if (pace === 'slow') {
+				await closing;
+				if (closeError !== null) {
+					void finishing.catch(() => undefined);
+					this.pendingEnd = session.session_id;
+					this.pendingProviderId = providerSessionId;
+					this.pendingCompletion = {
+						episode: session.episode_id,
+						pair: this.storedPair(),
+						userBytes: 0,
+						hostBytes: 0
+					};
+					this.completionPosted = false;
+					this.failTake(describeSessionEndFailure(closeError));
+					return;
+				}
+				if (this.destroyed) {
+					void this.settleUploads(finishing).catch(() => undefined);
+					return;
+				}
+				this.guard?.close();
+				depositProcessingHandoff({
+					progress: () => this.uploadProgress(),
+					settle: () => this.settleUploads(finishing)
+				});
+				void this.openProcessing(session.episode_id, finishing);
+				return;
+			}
+			await finishing;
+			await closing;
+			if (closeError !== null) {
 				this.pendingEnd = session.session_id;
 				this.pendingProviderId = providerSessionId;
 				this.pendingCompletion = {
 					episode: session.episode_id,
 					pair: this.storedPair(),
-					userBytes,
-					hostBytes
+					userBytes: this.userUpload?.receipt?.sizeBytes ?? 0,
+					hostBytes: this.hostUpload?.receipt?.sizeBytes ?? 0
 				};
 				this.completionPosted = false;
-				this.failTake(describeSessionEndFailure(error));
+				this.failTake(describeSessionEndFailure(closeError));
 				return;
 			}
 			this.pendingEnd = null;
 			this.pendingProviderId = '';
+			this.uploadFailure = describeUploadFailure(this.userUpload, this.hostUpload);
+			const userBytes = this.userUpload?.receipt?.sizeBytes ?? 0;
+			const hostBytes = this.hostUpload?.receipt?.sizeBytes ?? 0;
 			if (this.uploadFailure !== null) {
 				this.pendingCompletion = {
 					episode: session.episode_id,
@@ -547,16 +597,60 @@ export class RecordController {
 		}
 	}
 
+	// uploadProgress sums both stems so the next screen can draw one bar
+	// while the same uploaders are still finishing.
+	private uploadProgress(): { stored: number; captured: number } {
+		return {
+			stored: (this.userUpload?.stored ?? 0) + (this.hostUpload?.stored ?? 0),
+			captured: (this.userUpload?.capturedBytes ?? 0) + (this.hostUpload?.capturedBytes ?? 0)
+		};
+	}
+
+	// settleUploads waits out the upload and posts the draft move. The
+	// processing screen awaits this same promise, so the bytes stay in flight
+	// after the record page is gone.
+	private async settleUploads(
+		finishing: Promise<void>
+	): Promise<{ userBytes: number; hostBytes: number; transcriptJob: string }> {
+		await finishing;
+		const failure = describeUploadFailure(this.userUpload, this.hostUpload);
+		if (failure !== null) throw new Error(`${failure} The stems stay stored.`);
+		const userBytes = this.userUpload?.receipt?.sizeBytes ?? 0;
+		const hostBytes = this.hostUpload?.receipt?.sizeBytes ?? 0;
+		const episode = this.session?.episode_id ?? '';
+		try {
+			const answer = await postStemsComplete(episode, this.storedPair());
+			return { userBytes, hostBytes, transcriptJob: answer.jobId };
+		} catch (error) {
+			throw new Error(describeCompletionFailure(error), { cause: error });
+		}
+	}
+
+	// openProcessing moves to the processing screen without reloading, so
+	// the upload already running on this page keeps its requests.
+	private async openProcessing(episode: string, finishing: Promise<void>): Promise<void> {
+		const suffix = this.mockMode ? '&mock=1' : '';
+		const url = `/processing?episode=${encodeURIComponent(episode)}${suffix}`;
+		const navigation = await import('$app/navigation');
+		if (this.destroyed) {
+			void this.settleUploads(finishing).catch(() => undefined);
+			return;
+		}
+		await navigation.goto(url);
+	}
+
 	// goProcessing hands the finished take to the processing screen. The
-	// handoff names the episode and the durable totals, plus the mock flag
-	// under the harness so the doubles stay in charge there. End and retry
-	// both come through here. A page that has already gone does not assign,
-	// so a late success cannot pull the guest off the gallery.
+	// handoff names the episode, the transcript job when the move started
+	// one, and the durable totals. The mock flag keeps the doubles in charge.
+	// End and retry both come through here. A page that has already gone
+	// does not assign, so a late success cannot pull the guest off the gallery.
 	private goProcessing(episode: string, userBytes: number, hostBytes: number): void {
 		if (this.destroyed) return;
+		const job = this.completionDriver?.lastAnswer()?.jobId ?? '';
+		const jobQuery = job.length > 0 ? `&transcript=${encodeURIComponent(job)}` : '';
 		const suffix = this.mockMode ? '&mock=1' : '';
 		window.location.assign(
-			`/processing?episode=${encodeURIComponent(episode)}&uploads=done&userBytes=${userBytes}&hostBytes=${hostBytes}${suffix}`
+			`/processing?episode=${encodeURIComponent(episode)}&uploads=done&userBytes=${userBytes}&hostBytes=${hostBytes}${jobQuery}${suffix}`
 		);
 	}
 
@@ -1035,6 +1129,18 @@ export class RecordController {
 		this.notice = `Recovered ${receipts.length} uploads over persisted bytes.`;
 		this.emit();
 	}
+}
+
+// paceUploads reports ready when the upload finishes inside the window.
+// Otherwise the caller hands the same promise to the processing screen.
+function paceUploads(finishing: Promise<void>, windowMs: number): Promise<'ready' | 'slow'> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const slow = new Promise<'slow'>((resolve) => {
+		timer = setTimeout(() => resolve('slow'), windowMs);
+	});
+	return Promise.race([finishing.then(() => 'ready' as const), slow]).finally(() => {
+		if (timer !== undefined) clearTimeout(timer);
+	});
 }
 
 function formatElapsed(now: number, start: number): string {

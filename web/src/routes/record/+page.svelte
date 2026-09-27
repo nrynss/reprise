@@ -62,6 +62,8 @@
 					retryCompletion();
 				} else if (target instanceof Element && target.closest('#record-retry') !== null) {
 					retryControllerCompletion();
+				} else if (target instanceof Element && target.closest('#record-end-cancel') !== null) {
+					controller.cancelEnd();
 				} else if (target instanceof Element && target.closest('#record-end-now') !== null) {
 					controller.endControl();
 				} else if (target instanceof Element && target.closest('#record-end') !== null) {
@@ -140,6 +142,9 @@
 			>
 				{snap.armed ? 'Confirm end session' : 'End session'}
 			</button>
+			{#if snap.armed && snap.phase === 'live'}
+				<button id="record-end-cancel" type="button" aria-label="Cancel end">Cancel</button>
+			{/if}
 		</section>
 	{/if}
 

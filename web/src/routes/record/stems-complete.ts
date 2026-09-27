@@ -118,9 +118,12 @@ export type CompletionSink = (view: CompletionView) => void;
 
 // CompletionDriver runs the completion and remembers the last request for
 // its retry. The page builds one and renders every view it sends.
+// lastAnswer is the latest successful body, so the next screen can follow
+// the transcript job the move just started.
 export interface CompletionDriver {
 	run(episodeId: string, pair: StemPair): Promise<void>;
 	retry(): Promise<void>;
+	lastAnswer(): StemsCompleteAnswer | null;
 }
 
 // createCompletionDriver builds the driver around one render callback. A
@@ -129,6 +132,7 @@ export function createCompletionDriver(notify: CompletionSink): CompletionDriver
 	let lastEpisode: string | null = null;
 	let lastPair: StemPair | null = null;
 	let canRetryNow = false;
+	let answer: StemsCompleteAnswer | null = null;
 
 	async function run(episodeId: string, pair: StemPair): Promise<void> {
 		lastEpisode = episodeId;
@@ -136,7 +140,7 @@ export function createCompletionDriver(notify: CompletionSink): CompletionDriver
 		canRetryNow = false;
 		notify({ status: 'posting', text: 'Moving the take to draft.', canRetry: false });
 		try {
-			const answer = await postStemsComplete(episodeId, pair);
+			answer = await postStemsComplete(episodeId, pair);
 			notify({ status: 'ready', text: describeCompletion(answer), canRetry: false });
 		} catch (error) {
 			canRetryNow = true;
@@ -150,7 +154,7 @@ export function createCompletionDriver(notify: CompletionSink): CompletionDriver
 		return run(lastEpisode, lastPair);
 	}
 
-	return { run, retry };
+	return { run, retry, lastAnswer: () => answer };
 }
 
 // StemsHarness supplies the mock take stem ids and rates. It mirrors the

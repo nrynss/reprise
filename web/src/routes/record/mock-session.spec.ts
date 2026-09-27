@@ -97,6 +97,22 @@ function probeStream(path: string): { sample_rate: string; channels: number; cod
 	return { sample_rate: stream.sample_rate, channels: stream.channels, codec_name: stream.codec_name };
 }
 
+// The stored host stem is the greeting plus the lead before it. The lead
+// moves a little with the audio clock, so the byte count is not fixed.
+// The interrupted reply is absent. Both full tones would be twice one tone.
+function expectCutHostStem(byteCount: number, samples: number[]): void {
+	const oneTone = 48000 * 2;
+	expect(byteCount).toBeGreaterThan(oneTone);
+	expect(byteCount).toBeLessThan(oneTone * 2);
+	const frames = toInt16(samples);
+	let loud = 0;
+	for (let i = 0; i < frames.length; i += 1) {
+		if (Math.abs(frames[i]) > 1000) loud += 1;
+	}
+	expect(loud).toBeGreaterThan(35_000);
+	expect(loud).toBeLessThan(60_000);
+}
+
 function toInt16(bytes: number[]): Int16Array {
 	const view = new DataView(new Uint8Array(bytes).buffer);
 	const out = new Int16Array(Math.floor(bytes.length / 2));
@@ -130,7 +146,8 @@ test('mock take stores both stems with markers in the user stem', async ({ page 
 		(window as unknown as { __mockVoice: Harness }).__mockVoice.finishUploads()
 	);
 	expect(totals.userBytes).toBe(blocks * 4096 * 2);
-	expect(totals.hostBytes).toBe(2 * 48000 * 2);
+	expect(totals.hostBytes).toBeGreaterThan(48000 * 2);
+	expect(totals.hostBytes).toBeLessThan(2 * 48000 * 2);
 	const stems = await page.evaluate((ids: { userId: string; hostId: string }) => {
 		const mock = (window as unknown as { __mockVoice: Harness }).__mockVoice;
 		return { userBytes: mock.serverBytes(ids.userId), hostBytes: mock.serverBytes(ids.hostId) };
@@ -139,7 +156,8 @@ test('mock take stores both stems with markers in the user stem', async ({ page 
 		return { userId: mock.userUploadId(), hostId: mock.hostUploadId() };
 	}));
 	expect(stems.userBytes.length).toBe(blocks * 4096 * 2);
-	expect(stems.hostBytes.length).toBe(2 * 48000 * 2);
+	expectCutHostStem(stems.hostBytes.length, stems.hostBytes);
+	expect(totals.hostBytes).toBe(stems.hostBytes.length);
 
 	mkdirSync(OUT, { recursive: true });
 	const userPath = join(OUT, 'user.wav');
@@ -218,7 +236,7 @@ test('reload completes the take over exactly the persisted bytes', async ({ page
 		const mock = (window as unknown as { __mockVoice: Harness }).__mockVoice;
 		return (
 			mock.serverBytes(mock.userUploadId()).length === 200 * 4096 * 2 &&
-			mock.serverBytes(mock.hostUploadId()).length === 2 * 65536
+			mock.serverBytes(mock.hostUploadId()).length === 65536
 		);
 	});
 	const before = await page.evaluate(() => {
