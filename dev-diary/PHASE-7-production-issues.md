@@ -915,8 +915,8 @@ renders at once. An interrupted render resumes through the kind alone.
 requires:   T7.26, T7.27
 fixture-ok: yes
 size:       L · frontier
-owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/host-stem.ts, web/src/lib/voice/host-stem.test.ts, web/src/lib/voice/session-calls.ts, web/src/lib/voice/socket.ts
-status:     not-started
+owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/host-stem.ts, web/src/lib/voice/host-stem.test.ts, web/src/lib/voice/session-calls.ts, web/src/lib/voice/socket.ts, web/package.json, web/package-lock.json, README.md
+status:     in-progress:implement:t7.36-impl
 ```
 The host stem appends each block as it arrives, so the silence between
 replies never reaches it. A live Chrome take put host speech at 4.66,
@@ -946,9 +946,11 @@ Firefox closed about 30 seconds after the tab did.
   provider side.
 * Report the provider session id to the server as soon as the socket
   learns it, so a sweep can always find and settle the session.
-* Keep `SessionGuard` for the `pagehide` end. Its options take only a
-  URL, so the early report above is what names the session. The
-  missing body option is https://github.com/nrynss/chaaya/issues/6.
+* Pin Chaaya `0.2.1` exactly. It changes only `SessionGuard`, which
+  gains a `body` option read at send time
+  (https://github.com/nrynss/chaaya/issues/6). The `pagehide` close
+  carries the provider id as a JSON string. The early report stays,
+  because a crashed or suspended page sends no close at all.
 * Find why Firefox keeps the call open after the tab closes, and end
   it with the tab.
 
@@ -956,10 +958,15 @@ Firefox closed about 30 seconds after the tab did.
 interruption yields a host stem whose marks sit at their play times
 within one block. The live probe aligns each stem against its
 provider channel with one offset across the take. A mock take reports
-its provider id before any end, and a take closed by `pagehide` settles
-from that stored id. A live tab close in Chrome and in Firefox settles through the
-reconciler, and the Sessions API shows the call ended within 5 seconds
-of the close.
+its provider id before any end. A take closed by `pagehide` sends one
+close whose body names the provider id. The server settles from that
+id, and a test reading the beacon body pins it. A live tab close in
+Chrome and in Firefox settles through the reconciler, and the Sessions
+API shows the call ended within 5 seconds of the close.
+
+At landing the orchestrator moves the Chaaya pin in `AGENTS.md`,
+`dev-diary/libraries.md`, `dev-diary/project.md` and
+`dev-diary/README.md`. Round files keep the version they measured.
 
 ### T7.37: The render reduces the guest's room noise
 ```yaml
@@ -967,7 +974,7 @@ requires:   T7.35
 fixture-ok: yes
 size:       S · mid
 owns:       internal/render/
-status:     not-started
+status:     in-progress:implement:t7.37-impl
 ```
 Capture keeps noise suppression off by design, because `voice_focus`
 cleans what the provider hears. Nothing cleans the stem the render
@@ -991,7 +998,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/gemini/
-status:     not-started
+status:     in-progress:implement:t7.38-impl
 ```
 A 142 second live take fell back to "Untitled episode (76 words)". The
 box logged `editorial: decode: editorial: model failed: unexpected
@@ -1014,7 +1021,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · mid
 owns:       internal/broker/
-status:     not-started
+status:     in-progress:implement:t7.39-impl
 ```
 Every live take on 2026-09-27 ran two reconcile jobs for one session.
 On the Firefox take each job stored its own copy of the provider
