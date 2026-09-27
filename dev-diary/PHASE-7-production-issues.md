@@ -947,8 +947,8 @@ Firefox closed about 30 seconds after the tab did.
 * Report the provider session id to the server as soon as the socket
   learns it, so a sweep can always find and settle the session.
 * Keep `SessionGuard` for the `pagehide` end. Its options take only a
-  URL, so the early report above is what names the session. Raise the
-  missing body option as a Chaaya issue in the handoff.
+  URL, so the early report above is what names the session. The
+  missing body option is https://github.com/nrynss/chaaya/issues/6.
 * Find why Firefox keeps the call open after the tab closes, and end
   it with the tab.
 
