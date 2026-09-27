@@ -974,7 +974,7 @@ requires:   T7.35
 fixture-ok: yes
 size:       S · mid
 owns:       internal/render/
-status:     in-progress:land:t7.37-land@bc88251251679ea2028a7349bf61288ab4e62cda
+status:     done:cff150417ae8284b86439ef2e048f9ee33b941bb
 ```
 Capture keeps noise suppression off by design, because `voice_focus`
 cleans what the provider hears. Nothing cleans the stem the render
@@ -1168,6 +1168,14 @@ the delete. Making the end only DELETE fails that test.
 
 ### What exists now
 
+T7.37 landed at cff1504 after round 2 APPROVE with zero residue.
+Round 1 had one M finding. The mix trimmed the denoiser delay and
+dropped the last 25 ms of the guest. The landed chain pads 1200
+silent samples before the reducer and still trims that delay.
+The render diff matches reviewed commit bc88251. Main had moved,
+so the landing rebased. Render race tests passed on the rebased
+commit. The stored stem stays raw. The floor drop on the fixture
+is 24.82 dB and the speech band moves 0.09 dB.
 T7.42 landed at 96dacf0 after round 1 APPROVE with zero findings.
 The editorial and memory diff matches reviewed commit 6d0d648.
 Main had moved, so the landing rebased. Race tests on both packages
