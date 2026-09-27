@@ -141,6 +141,58 @@ func alignmentLag(a, b []float64, start int) int {
 	return lag
 }
 
+// writePCMMono writes a 48 kHz mono wav from integer samples.
+func writePCMMono(t *testing.T, path string, samples []int16) {
+	t.Helper()
+	raw := path + ".s16"
+	buf := make([]byte, len(samples)*2)
+	for i, s := range samples {
+		binary.LittleEndian.PutUint16(buf[i*2:], uint16(s))
+	}
+	if err := os.WriteFile(raw, buf, 0o644); err != nil {
+		t.Fatalf("write pcm: %v", err)
+	}
+	runTool(t, "ffmpeg", "-hide_banner", "-y",
+		"-f", "s16le", "-ar", strconv.Itoa(MixRate), "-ac", "1", "-i", raw,
+		"-c:a", "pcm_s16le", "-ar", strconv.Itoa(MixRate), "-ac", "1", path)
+}
+
+// peakIndex returns the first sample of maximum absolute amplitude in
+// [from, to), and that amplitude.
+func peakIndex(samples []float64, from, to int) (int, float64) {
+	bestAt := -1
+	best := -1.0
+	if from < 0 {
+		from = 0
+	}
+	if to > len(samples) {
+		to = len(samples)
+	}
+	for i := from; i < to; i++ {
+		v := math.Abs(samples[i])
+		if v > best {
+			best = v
+			bestAt = i
+		}
+	}
+	return bestAt, best
+}
+
+func probeSeconds(t *testing.T, path string) float64 {
+	t.Helper()
+	cmd := exec.Command("ffprobe", "-hide_banner", "-v", "error",
+		"-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("probe duration: %v", err)
+	}
+	v, err := strconv.ParseFloat(string(bytes.TrimSpace(out)), 64)
+	if err != nil {
+		t.Fatalf("parse duration %q: %v", out, err)
+	}
+	return v
+}
+
 func shaFile(t *testing.T, path string) [32]byte {
 	t.Helper()
 	buf, err := os.ReadFile(path)
@@ -198,6 +250,73 @@ func TestMixStemsKeepsUserClock(t *testing.T) {
 	if lag < -240 || lag > 240 {
 		t.Fatalf("mix lags the user stem by %d samples, want within 240", lag)
 	}
+}
+
+// TestMixStemsKeepsGuestTail checks that the reducer flushes its overlap.
+// An impulse at the end of the guest stays on that sample, and a guest
+// longer than the host keeps its full length.
+func TestMixStemsKeepsGuestTail(t *testing.T) {
+	if MixRate != 48000 {
+		t.Fatal("guest tail pin is measured at 48 kHz")
+	}
+	t.Run("impulses", func(t *testing.T) {
+		const (
+			guestN = 2 * 48000
+			early  = 4800
+		)
+		end := guestN - 100
+		dir := t.TempDir()
+		userPath := filepath.Join(dir, "user.wav")
+		hostPath := filepath.Join(dir, "host.wav")
+		mixPath := filepath.Join(dir, "mix.wav")
+		user := make([]int16, guestN)
+		user[early] = 32767
+		user[end] = 32767
+		writePCMMono(t, userPath, user)
+		writePCMMono(t, hostPath, make([]int16, guestN))
+
+		if err := mixStems(t.Context(), ffmpeg.Tools{}, userPath, 0, hostPath, 0, mixPath); err != nil {
+			t.Fatalf("mix: %v", err)
+		}
+		mixed := decodeMono48(t, mixPath)
+		if len(mixed) != guestN {
+			t.Fatalf("equal mix is %d samples, want %d", len(mixed), guestN)
+		}
+		earlyAt, earlyAmp := peakIndex(mixed, 0, guestN/2)
+		endAt, endAmp := peakIndex(mixed, guestN/2, guestN)
+		t.Logf("early peak sample %d amp %.5f, end peak sample %d amp %.5f", earlyAt, earlyAmp, endAt, endAmp)
+		if earlyAt != early || earlyAmp < 0.05 {
+			t.Fatalf("early impulse peaks at sample %d amplitude %.5f, want sample %d", earlyAt, earlyAmp, early)
+		}
+		if endAt != end || endAmp < 0.05 {
+			t.Fatalf("end impulse peaks at sample %d amplitude %.5f, want sample %d", endAt, endAmp, end)
+		}
+	})
+	t.Run("longerGuest", func(t *testing.T) {
+		const (
+			guestN = 48000
+			hostN  = 9600
+		)
+		dir := t.TempDir()
+		userPath := filepath.Join(dir, "user.wav")
+		hostPath := filepath.Join(dir, "host.wav")
+		mixPath := filepath.Join(dir, "mix.wav")
+		writePCMMono(t, userPath, make([]int16, guestN))
+		writePCMMono(t, hostPath, make([]int16, hostN))
+
+		if err := mixStems(t.Context(), ffmpeg.Tools{}, userPath, 0, hostPath, 0, mixPath); err != nil {
+			t.Fatalf("mix: %v", err)
+		}
+		gotN := len(decodeMono48(t, mixPath))
+		dur := probeSeconds(t, mixPath)
+		t.Logf("longer guest mix is %d samples, ffprobe %.6f s", gotN, dur)
+		if gotN != guestN {
+			t.Fatalf("longer guest mix is %d samples, want %d", gotN, guestN)
+		}
+		if math.Abs(dur-1) > 0.0005 {
+			t.Fatalf("ffprobe duration is %.6f s, want 1.000 s", dur)
+		}
+	})
 }
 
 func TestMixStemsLeavesStemBytesAlone(t *testing.T) {
