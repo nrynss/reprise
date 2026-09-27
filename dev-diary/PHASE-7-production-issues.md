@@ -926,9 +926,9 @@ delays the whole stem by that one offset, so every later reply plays
 early and over the guest. Audio that arrives after an interruption
 flush also lands in the stem, though the guest never heard it.
 
-The `pagehide` listener sends `session.end` on the socket and never
-posts the end to the server. The server learns the provider session id
-only from that post. Two tab close takes on 2026-09-27 left session
+On `pagehide` the page sends `session.end` on the socket, and Chaaya's
+`SessionGuard` beacons the server end. That beacon carries no body, and
+the server learns the provider session id only from an end body. Two tab close takes on 2026-09-27 left session
 rows with an empty provider id and zero connected seconds. Each kept
 its 2.25 dollar mint hold, and the sweep skipped both. The ledger
 missed about 76 connected seconds. The Chrome call closed at once.
@@ -946,17 +946,18 @@ Firefox closed about 30 seconds after the tab did.
   provider side.
 * Report the provider session id to the server as soon as the socket
   learns it, so a sweep can always find and settle the session.
-* `pagehide` also posts the end to the server, by beacon or keepalive
-  fetch, with the provider id.
+* Keep `SessionGuard` for the `pagehide` end. Its options take only a
+  URL, so the early report above is what names the session. Raise the
+  missing body option as a Chaaya issue in the handoff.
 * Find why Firefox keeps the call open after the tab closes, and end
   it with the tab.
 
 **Done when:** A synthetic take with marked host replies and one
 interruption yields a host stem whose marks sit at their play times
 within one block. The live probe aligns each stem against its
-provider channel with one offset across the take. A mock take closed
-by `pagehide` posts one end with the provider id, pinned by the beacon
-count. A live tab close in Chrome and in Firefox settles through the
+provider channel with one offset across the take. A mock take reports
+its provider id before any end, and a take closed by `pagehide` settles
+from that stored id. A live tab close in Chrome and in Firefox settles through the
 reconciler, and the Sessions API shows the call ended within 5 seconds
 of the close.
 
@@ -977,6 +978,8 @@ floor included, so the episode sounds noisier than the call.
 * Reduce stationary noise on the user stem before the mix and before
   `loudnorm`. The stored stem stays raw.
 * Keep speech intact. Measure the speech band level before and after.
+* Read `dev-diary/libraries.md` and Keel's media recipes first. If
+  noise reduction belongs in Keel, it goes through Keel's loop.
 
 **Done when:** A fixture stem of generated speech over added noise
 renders with its floor at least 15 dB lower, measured by `astats` on
@@ -1005,7 +1008,7 @@ EOF`. A 32 second take on the same build succeeded. The answer caps at
 of at least 10 minutes. A unit test pins a truncated reply to its own
 sentinel.
 
-### T7.39: A repeat end stores one recording
+### T7.39: A repeat end stores one recording and keeps the timeline
 ```yaml
 requires:   T7.2
 fixture-ok: yes
@@ -1016,14 +1019,20 @@ status:     not-started
 Every live take on 2026-09-27 ran two reconcile jobs for one session.
 On the Firefox take each job stored its own copy of the provider
 recording, as media `e7136cf1…` and `dd4683d3…`. Money settles once,
-but private media doubles and one copy has no reference.
+but private media doubles and one copy has no reference. The End
+control posts the end with the provider id, and `SessionGuard.destroy`
+then beacons a second, bodiless end. The server starts a reconcile for
+each. The reconciler also keeps only the expiring timeline URL, never
+the timeline bytes.
 
 * A second reconcile for a settled session stores nothing new.
 * The stored recording keeps one media row per session.
+* The timeline bytes persist on receipt beside the recording, since the
+  URL expires.
 
 **Done when:** A test posts end twice, and the media table holds one
-recording for the session. The mutation that drops the guard fails
-it.
+recording and one timeline for the session. The mutation that drops
+the guard fails it.
 
 ### T7.40: End confirms, then processing follows the jobs
 ```yaml
@@ -1063,7 +1072,7 @@ ends the session.
 
 ### T7.41: The transcript carries the host's replies
 ```yaml
-requires:   T7.36
+requires:   T7.36, T7.39
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
@@ -1075,7 +1084,8 @@ Firefox take stored 76 words, exactly the guest's eleven lines, and the
 fallback title counted them.
 
 * Pass each host reply with its text and its start on the episode
-  clock, read from a stored row.
+  clock. Read them from the persisted provider timeline. The `turns`
+  table has no writer today.
 * Pass the stem offsets the stems table records.
 
 **Done when:** A fixture episode with two host replies stores a
