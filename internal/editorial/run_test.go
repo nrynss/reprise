@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/nrynss/keel/cost"
 	"github.com/nrynss/reprise/internal/editorial"
+	"github.com/nrynss/reprise/internal/gemini"
 )
 
 // fullAnswer proposes a cold open near twelve seconds, one cut, a title,
@@ -211,6 +213,70 @@ func TestRunFallsBackOnModelFailure(t *testing.T) {
 	}
 }
 
+// TestRunSettlesTruncatedAnswer checks a capped call still leaves a
+// renderable draft. The provider billed it, so the estimate settles and
+// the reservation is not released.
+func TestRunSettlesTruncatedAnswer(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	seedForty(t, db)
+	model := &scriptedModel{err: fmt.Errorf("gemini: generate: %w: answer hit the output cap", gemini.ErrTruncated)}
+	budgets := &fakeBudget{}
+	var receipt []byte
+	result, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !result.Fallback || result.Cuts != 0 {
+		t.Fatalf("result = %+v, want a fallback draft with no cuts", result)
+	}
+	want := editorial.Estimate(12)
+	if want == 0 || result.Price != want {
+		t.Fatalf("price = %v, want the estimate %v", result.Price, want)
+	}
+	if title := episodeTitle(t, db); title != result.Title || !strings.Contains(title, "Untitled") {
+		t.Fatalf("title = %q, want a plain title", title)
+	}
+	if got := rowCount(t, db, "proposals", "ep-1"); got != 1 {
+		t.Fatalf("proposals = %d, want the title row only", got)
+	}
+	if len(receipt) != 0 {
+		t.Fatal("receipt holds text the cap did not return")
+	}
+	budgets.mu.Lock()
+	defer budgets.mu.Unlock()
+	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
+		t.Fatalf("budget holds %+v, want one settle and no release", budgets)
+	}
+	if budgets.settled[0] != [2]cost.Price{want, want} {
+		t.Fatalf("settled = %v, want {%v %v}", budgets.settled[0], want, want)
+	}
+}
+
+// TestRunReleasesTruncationLookalike checks text that merely mentions a
+// capped answer. That call never spent, so the reservation releases and
+// the recorded price stays zero.
+func TestRunReleasesTruncationLookalike(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	seedForty(t, db)
+	model := &scriptedModel{err: fmt.Errorf("note: gemini: truncated answer was not this error")}
+	budgets := &fakeBudget{}
+	var receipt []byte
+	result, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !result.Fallback || result.Price != 0 {
+		t.Fatalf("result = %+v, want a free fallback", result)
+	}
+	budgets.mu.Lock()
+	defer budgets.mu.Unlock()
+	if len(budgets.settled) != 0 || len(budgets.released) != 1 {
+		t.Fatalf("budget holds %+v, want one release and no settle", budgets)
+	}
+}
+
 // TestRunFallsBackOnUnusableAnswer checks JSON the pass cannot use still
 // leaves a renderable draft. The call spent, so the reservation settles.
 func TestRunFallsBackOnUnusableAnswer(t *testing.T) {
@@ -336,6 +402,30 @@ func TestRunSettlesSpentCallOnFallbackStoreFailure(t *testing.T) {
 	defer budgets.mu.Unlock()
 	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
 		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
+	}
+}
+
+// TestRunSettlesTruncationWhenFallbackStoreFails checks a store failure
+// after a capped call. The call was billed, so the estimate still settles.
+func TestRunSettlesTruncationWhenFallbackStoreFails(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	seedForty(t, db)
+	mustExec(t, db, "DROP TABLE proposals")
+	model := &scriptedModel{err: fmt.Errorf("gemini: generate: %w: answer hit the output cap", gemini.ErrTruncated)}
+	budgets := &fakeBudget{}
+	var receipt []byte
+	if _, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt)); err == nil {
+		t.Fatal("run succeeded, want the fallback store failure")
+	}
+	want := editorial.Estimate(12)
+	budgets.mu.Lock()
+	defer budgets.mu.Unlock()
+	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
+		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
+	}
+	if want == 0 || budgets.settled[0] != [2]cost.Price{want, want} {
+		t.Fatalf("settled = %v, want the estimate %v", budgets.settled, want)
 	}
 }
 

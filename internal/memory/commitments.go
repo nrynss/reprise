@@ -291,6 +291,22 @@ func StoreCommitments(ctx context.Context, db *sql.DB, ownerID, episodeID string
 	return nil
 }
 
+// billedTruncation reports an answer cut off by the output cap.
+// The gemini package owns that sentinel and already imports this
+// package for the marking prompts, so this package cannot name it.
+// The walk compares each unwrapped layer to that sentinel's text.
+// A longer message does not count.
+func billedTruncation(err error) bool {
+	const text = "gemini: truncated answer"
+	for err != nil {
+		if err.Error() == text {
+			return true
+		}
+		err = errors.Unwrap(err)
+	}
+	return false
+}
+
 // MarkConfig carries one episode marking run.
 type MarkConfig struct {
 	// DB is the diary writer holding words and mentions.
@@ -327,8 +343,10 @@ type MarkResult struct {
 // and a refused reservation returns before any provider call. Candidates
 // whose quote misses the words are rejected and logged, never stored.
 // The receipt store runs before parsing, so the answer persists even
-// when parsing fails. Marking makes no second attempt on any failure,
-// so a restart never pays twice.
+// when parsing fails. A truncated answer was already billed, so that
+// failure settles the estimate and still returns the model error.
+// Marking makes no second attempt on any failure, so a restart never
+// pays twice.
 func MarkEpisode(ctx context.Context, cfg MarkConfig) (MarkResult, error) {
 	if cfg.DB == nil || cfg.Model == nil || cfg.Budgets == nil {
 		return MarkResult{}, fmt.Errorf("memory: mark episode: %w: missing store, model, or budget", ErrInvalid)
@@ -363,6 +381,12 @@ func MarkEpisode(ctx context.Context, cfg MarkConfig) (MarkResult, error) {
 	}()
 	reply, err := cfg.Model.GenerateCommitments(ctx, cfg.ModelID, CommitmentRequest{Transcript: transcript})
 	if err != nil {
+		if billedTruncation(err) {
+			if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+				return MarkResult{}, fmt.Errorf("memory: mark episode: settle: %w", settleErr)
+			}
+			settled = true
+		}
 		return MarkResult{}, fmt.Errorf("memory: mark episode: %w: %w", ErrModel, err)
 	}
 	if strings.TrimSpace(reply.JSON) == "" {
@@ -565,7 +589,8 @@ type ResolveResult struct {
 // call. A negative answer stores nothing and still settles the
 // call. An evidence quote missing from the later words fails with
 // ErrModel and stores nothing, because a close needs its proof in the
-// words.
+// words. A truncated answer was already billed, so that failure
+// settles the estimate and still returns the model error.
 func ResolveEpisode(ctx context.Context, cfg ResolveConfig) (ResolveResult, error) {
 	if cfg.DB == nil || cfg.Model == nil || cfg.Budgets == nil {
 		return ResolveResult{}, fmt.Errorf("memory: resolve episode: %w: missing store, model, or budget", ErrInvalid)
@@ -623,6 +648,11 @@ func ResolveEpisode(ctx context.Context, cfg ResolveConfig) (ResolveResult, erro
 	reply, err := cfg.Model.GenerateResolution(ctx, cfg.ModelID,
 		ResolutionRequest{Commitment: commitment, Transcript: transcript})
 	if err != nil {
+		if billedTruncation(err) {
+			if settleErr := settle(); settleErr != nil {
+				return ResolveResult{}, settleErr
+			}
+		}
 		return ResolveResult{}, fmt.Errorf("memory: resolve episode: %w: %w", ErrModel, err)
 	}
 	if strings.TrimSpace(reply.JSON) == "" {

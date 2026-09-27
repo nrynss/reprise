@@ -104,8 +104,9 @@ func Estimate(audioSeconds float64) cost.Price {
 // reservation returns before any provider call. Dangling proposals are
 // dropped and logged, never stored. A model failure still leaves a
 // renderable draft with no cuts and a plain title, and reports it through
-// Result. Run makes no second attempt on any failure, so a restart never
-// pays twice.
+// Result. A truncated answer was already billed, so that failure settles
+// the estimate instead of releasing it. Run makes no second attempt on
+// any failure, so a restart never pays twice.
 func Run(ctx context.Context, cfg Config) (Result, error) {
 	if cfg.DB == nil || cfg.Model == nil || cfg.Budgets == nil {
 		return Result{}, fmt.Errorf("editorial: run: %w: missing store, model, or budget", ErrInvalid)
@@ -144,10 +145,27 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	})
 	if err != nil {
 		log.Warn("editorial: model failed, leaving a renderable draft", "error", err)
-		if storeErr := store(ctx, cfg.DB, cfg.OwnerID, cfg.EpisodeID, words, draft{Title: plainTitle(len(words))}); storeErr != nil {
+		title := plainTitle(len(words))
+		// A capped answer returns no text, but the call was billed.
+		// Settle the same estimate a bad decode settles.
+		billed := errors.Is(err, gemini.ErrTruncated)
+		if storeErr := store(ctx, cfg.DB, cfg.OwnerID, cfg.EpisodeID, words, draft{Title: title}); storeErr != nil {
+			if billed {
+				if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+					return Result{}, errors.Join(storeErr, fmt.Errorf("editorial: run: settle: %w", settleErr))
+				}
+				settled = true
+			}
 			return Result{}, storeErr
 		}
-		return Result{Fallback: true, Title: plainTitle(len(words)), Price: cost.Price(0)}, nil
+		if !billed {
+			return Result{Fallback: true, Title: title, Price: cost.Price(0)}, nil
+		}
+		if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+			return Result{}, fmt.Errorf("editorial: run: settle: %w", settleErr)
+		}
+		settled = true
+		return Result{Fallback: true, Title: title, Price: estimate}, nil
 	}
 	if err := cfg.SaveRaw(ctx, []byte(reply.JSON)); err != nil {
 		if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {

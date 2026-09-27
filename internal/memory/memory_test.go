@@ -11,6 +11,7 @@ import (
 
 	"github.com/nrynss/keel/cost"
 	"github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/reprise/internal/gemini"
 	"github.com/nrynss/reprise/internal/memory"
 	"github.com/nrynss/reprise/internal/store"
 )
@@ -53,6 +54,8 @@ type scriptBudget struct {
 	reserved   int
 	settled    int
 	released   int
+	held       cost.Price
+	actual     cost.Price
 }
 
 func (b *scriptBudget) Reserve(price cost.Price) error {
@@ -62,6 +65,8 @@ func (b *scriptBudget) Reserve(price cost.Price) error {
 
 func (b *scriptBudget) Settle(reserved, actual cost.Price) error {
 	b.settled++
+	b.held = reserved
+	b.actual = actual
 	return nil
 }
 
@@ -358,6 +363,85 @@ func TestMarkEpisodeNeedsWords(t *testing.T) {
 	}
 }
 
+// TestMarkEpisodeSettlesTruncatedAnswer checks a capped marking call.
+// The provider billed it, so the estimate settles and nothing is stored.
+func TestMarkEpisodeSettlesTruncatedAnswer(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "owner-a-ep1", "owner-a", 1)
+	words := []string{"I", "will", "call", "Maya"}
+	addWords(t, db, "owner-a", "owner-a-ep1", words)
+	model := &scriptModel{commitmentsErr: fmt.Errorf("gemini: generate: %w: answer hit the output cap", gemini.ErrTruncated)}
+	budget := &scriptBudget{}
+	var receipts [][]byte
+	rates := memory.Rates{PromptPerMillionUSD: 1, CompletionPerMillionUSD: 1, MaxOutputTokens: 100}
+	cfg := memory.MarkConfig{
+		DB: db, Model: model, Budgets: budget,
+		Rates:     rates,
+		ModelID:   "mark-model",
+		OwnerID:   "owner-a",
+		EpisodeID: "owner-a-ep1",
+		SaveRaw: func(ctx context.Context, raw []byte) error {
+			receipts = append(receipts, raw)
+			return nil
+		},
+	}
+	_, err := memory.MarkEpisode(t.Context(), cfg)
+	if !errors.Is(err, memory.ErrModel) || !errors.Is(err, gemini.ErrTruncated) {
+		t.Fatalf("mark error = %v, want the truncated model error", err)
+	}
+	if model.commitCalls != 1 {
+		t.Fatalf("model calls = %d, want one billed call", model.commitCalls)
+	}
+	if len(receipts) != 0 {
+		t.Fatalf("receipts = %d, want none when the cap returns no text", len(receipts))
+	}
+	if n := mentionCount(t, db, "owner-a-ep1", "commitment"); n != 0 {
+		t.Fatalf("commitment mentions = %d, want none", n)
+	}
+	want := memory.Estimate(len(memory.Transcript(words)), rates)
+	if want == 0 {
+		t.Fatal("estimate is zero, so a free call would pass")
+	}
+	if budget.reserved != 1 || budget.settled != 1 || budget.released != 0 {
+		t.Fatalf("budget moves = %+v, want one settle and no release", budget)
+	}
+	if budget.held != want || budget.actual != want {
+		t.Fatalf("settled = %v %v, want the estimate %v", budget.held, budget.actual, want)
+	}
+}
+
+// TestMarkEpisodeReleasesTruncationLookalike checks text that merely
+// mentions a capped answer. That call never spent, so the reservation
+// releases.
+func TestMarkEpisodeReleasesTruncationLookalike(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "owner-a-ep1", "owner-a", 1)
+	addWords(t, db, "owner-a", "owner-a-ep1", []string{"I", "will", "call", "Maya"})
+	model := &scriptModel{commitmentsErr: fmt.Errorf("note: gemini: truncated answer was not this error")}
+	budget := &scriptBudget{}
+	cfg := memory.MarkConfig{
+		DB: db, Model: model, Budgets: budget,
+		Rates:     memory.Rates{PromptPerMillionUSD: 1, CompletionPerMillionUSD: 1, MaxOutputTokens: 100},
+		ModelID:   "mark-model",
+		OwnerID:   "owner-a",
+		EpisodeID: "owner-a-ep1",
+		SaveRaw: func(ctx context.Context, raw []byte) error {
+			return nil
+		},
+	}
+	_, err := memory.MarkEpisode(t.Context(), cfg)
+	if !errors.Is(err, memory.ErrModel) || errors.Is(err, gemini.ErrTruncated) {
+		t.Fatalf("mark error = %v, want a model error that is not truncation", err)
+	}
+	if budget.settled != 0 || budget.released != 1 {
+		t.Fatalf("budget moves = %+v, want one release and no settle", budget)
+	}
+}
+
 // TestParseCommitmentsRejectsDrift pins strict decoding. An unknown field
 // fails the parse, so a changed shape cannot slide past silently.
 func TestParseCommitmentsRejectsDrift(t *testing.T) {
@@ -495,6 +579,91 @@ func TestResolveEpisodeNegativeStoresNothing(t *testing.T) {
 	}
 	if n := mentionCount(t, db, "owner-a-ep2", "doing"); n != 0 {
 		t.Fatalf("doing mentions = %d, want none", n)
+	}
+}
+
+// TestResolveEpisodeSettlesTruncatedAnswer checks a capped resolution
+// call. The provider billed it, so the estimate settles and the
+// commitment stays open.
+func TestResolveEpisodeSettlesTruncatedAnswer(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	seedResolution(t, db)
+	model := &scriptModel{resolutionErr: fmt.Errorf("gemini: generate: %w: answer hit the output cap", gemini.ErrTruncated)}
+	budget := &scriptBudget{}
+	var receipts [][]byte
+	rates := memory.Rates{PromptPerMillionUSD: 1, CompletionPerMillionUSD: 1, MaxOutputTokens: 100}
+	cfg := memory.ResolveConfig{
+		DB: db, Model: model, Budgets: budget,
+		Rates:        rates,
+		ModelID:      "mark-model",
+		OwnerID:      "owner-a",
+		CommitmentID: "owner-a-c1",
+		EpisodeID:    "owner-a-ep2",
+		SaveRaw: func(ctx context.Context, raw []byte) error {
+			receipts = append(receipts, raw)
+			return nil
+		},
+	}
+	_, err := memory.ResolveEpisode(t.Context(), cfg)
+	if !errors.Is(err, memory.ErrModel) || !errors.Is(err, gemini.ErrTruncated) {
+		t.Fatalf("resolve error = %v, want the truncated model error", err)
+	}
+	if model.resolveCalls != 1 {
+		t.Fatalf("model calls = %d, want one billed call", model.resolveCalls)
+	}
+	if len(receipts) != 0 {
+		t.Fatalf("receipts = %d, want none when the cap returns no text", len(receipts))
+	}
+	if n := mentionCount(t, db, "owner-a-ep2", "doing"); n != 0 {
+		t.Fatalf("doing mentions = %d, want none", n)
+	}
+	open, openErr := memory.OpenCommitments(t.Context(), db, "owner-a")
+	if openErr != nil {
+		t.Fatalf("open commitments: %v", openErr)
+	}
+	if len(open) != 1 {
+		t.Fatalf("open commitments = %d, want the still open one", len(open))
+	}
+	transcript := memory.Transcript([]string{"I", "called", "Maya", "back", "today"})
+	want := memory.Estimate(len(transcript)+len("I will call Maya back"), rates)
+	if want == 0 {
+		t.Fatal("estimate is zero, so a free call would pass")
+	}
+	if budget.reserved != 1 || budget.settled != 1 || budget.released != 0 {
+		t.Fatalf("budget moves = %+v, want one settle and no release", budget)
+	}
+	if budget.held != want || budget.actual != want {
+		t.Fatalf("settled = %v %v, want the estimate %v", budget.held, budget.actual, want)
+	}
+}
+
+// TestResolveEpisodeReleasesOtherModelErrors checks a model failure that
+// is not a capped answer. The reservation releases, because that call
+// is not treated as spent.
+func TestResolveEpisodeReleasesOtherModelErrors(t *testing.T) {
+	t.Parallel()
+	db := openIndex(t)
+	seedResolution(t, db)
+	model := &scriptModel{resolutionErr: fmt.Errorf("gemini: generate: %w", gemini.ErrEmpty)}
+	budget := &scriptBudget{}
+	cfg := memory.ResolveConfig{
+		DB: db, Model: model, Budgets: budget,
+		Rates:        memory.Rates{PromptPerMillionUSD: 1, CompletionPerMillionUSD: 1, MaxOutputTokens: 100},
+		ModelID:      "mark-model",
+		OwnerID:      "owner-a",
+		CommitmentID: "owner-a-c1",
+		EpisodeID:    "owner-a-ep2",
+		SaveRaw: func(ctx context.Context, raw []byte) error {
+			return nil
+		},
+	}
+	_, err := memory.ResolveEpisode(t.Context(), cfg)
+	if !errors.Is(err, memory.ErrModel) || !errors.Is(err, gemini.ErrEmpty) || errors.Is(err, gemini.ErrTruncated) {
+		t.Fatalf("resolve error = %v, want an empty answer, not truncation", err)
+	}
+	if budget.settled != 0 || budget.released != 1 {
+		t.Fatalf("budget moves = %+v, want one release and no settle", budget)
 	}
 }
 
