@@ -910,12 +910,12 @@ unless the binary patches the kind.
 **Done when:** A test boots with a concurrency of two and runs two
 renders at once. An interrupted render resumes through the kind alone.
 
-### T7.36: The host stem keeps the call's clock ★
+### T7.36: The host stem keeps the call's clock, and a closed tab reports its end ★
 ```yaml
 requires:   T7.26, T7.27
 fixture-ok: yes
-size:       M · frontier
-owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/host-stem.ts, web/src/lib/voice/host-stem.test.ts
+size:       L · frontier
+owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/host-stem.ts, web/src/lib/voice/host-stem.test.ts, web/src/lib/voice/session-calls.ts, web/src/lib/voice/socket.ts
 status:     not-started
 ```
 The host stem appends each block as it arrives, so the silence between
@@ -925,6 +925,14 @@ it at 0.34, 3.13, 4.80 and 7.58 seconds, with offset zero. The render
 delays the whole stem by that one offset, so every later reply plays
 early and over the guest. Audio that arrives after an interruption
 flush also lands in the stem, though the guest never heard it.
+
+The `pagehide` listener sends `session.end` on the socket and never
+posts the end to the server. The server learns the provider session id
+only from that post. Two tab close takes on 2026-09-27 left session
+rows with an empty provider id and zero connected seconds. Each kept
+its 2.25 dollar mint hold, and the sweep skipped both. The ledger
+missed about 76 connected seconds. The Chrome call closed at once.
+Firefox closed about 30 seconds after the tab did.
 
 * Write the host stem on the context clock the user stem uses. Each
   reply starts where the player started it, with silence before it.
@@ -936,11 +944,21 @@ flush also lands in the stem, though the guest never heard it.
   the provider recording (one in Chrome, four in Firefox). Fix them if
   the user stem drops or repeats blocks. Record them if they sit on the
   provider side.
+* Report the provider session id to the server as soon as the socket
+  learns it, so a sweep can always find and settle the session.
+* `pagehide` also posts the end to the server, by beacon or keepalive
+  fetch, with the provider id.
+* Find why Firefox keeps the call open after the tab closes, and end
+  it with the tab.
 
 **Done when:** A synthetic take with marked host replies and one
 interruption yields a host stem whose marks sit at their play times
 within one block. The live probe aligns each stem against its
-provider channel with one offset across the take.
+provider channel with one offset across the take. A mock take closed
+by `pagehide` posts one end with the provider id, pinned by the beacon
+count. A live tab close in Chrome and in Firefox settles through the
+reconciler, and the Sessions API shows the call ended within 5 seconds
+of the close.
 
 ### T7.37: The render reduces the guest's room noise
 ```yaml
