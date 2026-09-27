@@ -7,12 +7,15 @@
 // The provider read repeats safely, so the job kind is idempotent. The
 // money settle runs exactly once, guarded by a durable claim row this file
 // owns. Each artifact id is claimed in that row before its bytes are fetched,
-// so a second pass stores nothing new even after a crash or from another
-// reconciler. The per session lock only orders calls that share one value.
+// so another pass cannot store a second copy after a crash or from another
+// reconciler. A file that lands without its row is indexed when it matches
+// the download, and replaced when it does not. The per session lock only
+// orders calls that share one value.
 // An ambiguous resume never settles twice. It stops for review.
 package broker
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -20,6 +23,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -1150,8 +1157,9 @@ func (r *Reconciler) blobStored(ctx context.Context, mediaID string) (bool, erro
 }
 
 // fetchAndPersist downloads one artifact and stores it under mediaID.
-// The id is already on the claim row, so a commit here cannot race a
-// second insert of the same URL.
+// The id is already on the claim row, so a second insert of the same
+// URL cannot commit. A file left at that id without a row is indexed
+// when it matches this download, and replaced when it does not.
 func (r *Reconciler) fetchAndPersist(ctx context.Context, in Input, kind, artifactURL, contentType, mediaID string) error {
 	body, err := r.artifacts.Fetch(ctx, artifactURL)
 	if err != nil {
@@ -1163,19 +1171,162 @@ func (r *Reconciler) fetchAndPersist(ctx context.Context, in Input, kind, artifa
 		return fmt.Errorf("broker: persist %s: %w: the media writer cannot store a reserved id", kind, ErrState)
 	}
 	capped := &cappedReader{inner: body, left: r.maxBytes + 1}
-	err = writer.PersistWithID(ctx, mediaID, capped, mediastore.Put{
+	put := mediastore.Put{
 		ContentType: contentType,
 		Owner:       in.OwnerID,
 		Group:       in.EpisodeID,
 		Visibility:  mediastore.Private,
-	})
+	}
+	err = writer.PersistWithID(ctx, mediaID, capped, put)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, errArtifactTooLarge) {
+		return fmt.Errorf("broker: fetch %s: %w: artifact passes the byte cap", kind, ErrRead)
+	}
+	if errors.Is(err, mediastore.ErrAlreadyExists) {
+		return r.recoverClaimedFile(ctx, kind, mediaID, capped, put)
+	}
+	return fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
+}
+
+// recoverClaimedFile stores mediaID when its file is already on disk and
+// its row is not. A file that matches the download is indexed in place.
+// A different file is a short write, so it is removed and the download
+// is stored under the same id. Indexing the short file would publish a
+// truncated recording.
+//
+// The store creates the file before it copies bytes, and an existing
+// name fails before that copy. The stream is still the full download.
+func (r *Reconciler) recoverClaimedFile(ctx context.Context, kind, mediaID string, src io.Reader, put mediastore.Put) error {
+	stored, err := r.blobStored(ctx, mediaID)
+	if err != nil {
+		return err
+	}
+	if stored {
+		return nil
+	}
+	raw, err := io.ReadAll(src)
 	if err != nil {
 		if errors.Is(err, errArtifactTooLarge) {
 			return fmt.Errorf("broker: fetch %s: %w: artifact passes the byte cap", kind, ErrRead)
 		}
+		return fmt.Errorf("broker: fetch %s: %w: %w", kind, ErrRead, err)
+	}
+	stored, err = r.blobStored(ctx, mediaID)
+	if err != nil {
+		return err
+	}
+	if stored {
+		return nil
+	}
+	dir, ok := mediaDirectory(r.media)
+	if !ok || !id.Valid(mediaID) {
+		return fmt.Errorf("broker: persist %s: %w: the claimed file is already on disk", kind, ErrState)
+	}
+	path := filepath.Join(dir, mediaID)
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return r.persistClaimedID(ctx, kind, mediaID, raw, put)
+		}
+		return fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
+	}
+	if bytes.Equal(onDisk, raw) {
+		return r.indexClaimedFile(ctx, kind, mediaID, int64(len(raw)), put)
+	}
+	stored, err = r.blobStored(ctx, mediaID)
+	if err != nil {
+		return err
+	}
+	if stored {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
+	}
+	return r.persistClaimedID(ctx, kind, mediaID, raw, put)
+}
+
+// persistClaimedID stores raw under mediaID. The caller already removed
+// any short file at that name, or the name was free.
+func (r *Reconciler) persistClaimedID(ctx context.Context, kind, mediaID string, raw []byte, put mediastore.Put) error {
+	writer, ok := r.media.(idMediaWriter)
+	if !ok {
+		return fmt.Errorf("broker: persist %s: %w: the media writer cannot store a reserved id", kind, ErrState)
+	}
+	if err := writer.PersistWithID(ctx, mediaID, bytes.NewReader(raw), put); err != nil {
 		return fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
 	}
 	return nil
+}
+
+// indexClaimedFile inserts the media row for a file that is already
+// durable. The row is what makes the file reachable. A conflicting row
+// means another pass stored it.
+func (r *Reconciler) indexClaimedFile(ctx context.Context, kind, mediaID string, size int64, put mediastore.Put) error {
+	contentType, err := bareContentType(put.ContentType)
+	if err != nil {
+		return fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
+	}
+	visibility := "private"
+	if put.Visibility == mediastore.Public {
+		visibility = string(mediastore.Public)
+	}
+	res, err := r.db.Writer().ExecContext(ctx,
+		`INSERT INTO media (id, owner, media_group, content_type, size_bytes, visibility, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO NOTHING`,
+		mediaID, put.Owner, put.Group, contentType, size, visibility, time.Now().UTC().UnixNano())
+	if err != nil {
+		return fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
+	}
+	if n == 1 {
+		return nil
+	}
+	stored, err := r.blobStored(ctx, mediaID)
+	if err != nil {
+		return err
+	}
+	if stored {
+		return nil
+	}
+	return fmt.Errorf("broker: persist %s: %w: the media row did not land", kind, ErrState)
+}
+
+// mediaDirectory reads the directory the media store writes into.
+// DeleteIfPresent leaves a file in place when its row is missing, and
+// the store does not expose that directory. Recovery needs the path to
+// tell a short file from a finished download.
+func mediaDirectory(media MediaWriter) (string, bool) {
+	store, ok := media.(*mediastore.Store)
+	if !ok {
+		return "", false
+	}
+	field := reflect.ValueOf(store).Elem().FieldByName("dir")
+	if !field.IsValid() || field.Kind() != reflect.String {
+		return "", false
+	}
+	dir := field.String()
+	if dir == "" {
+		return "", false
+	}
+	return dir, true
+}
+
+// bareContentType cuts parameters and case the way the media store does,
+// so a recovered row is served as the same type the store would write.
+func bareContentType(contentType string) (string, error) {
+	bare, _, _ := strings.Cut(contentType, ";")
+	bare = strings.ToLower(strings.TrimSpace(bare))
+	if bare == "" {
+		return "", fmt.Errorf("content type is empty")
+	}
+	return bare, nil
 }
 
 // cappedReader counts a stream and fails past the cap. The media persist

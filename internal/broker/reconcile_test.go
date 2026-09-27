@@ -1345,3 +1345,157 @@ func TestReconcileTwoValuesStoreOnePair(t *testing.T) {
 		t.Fatalf("held %d after two reconcilers, want none held", reserved)
 	}
 }
+
+// orphanFileWriter writes one artifact under its claimed id and returns
+// before the media row. contentType selects which artifact. keep is a
+// prefix length, and zero writes the whole stream. Every other call uses
+// the real store.
+type orphanFileWriter struct {
+	dir         string
+	inner       *mediastore.Store
+	contentType string
+	keep        int
+	mu          sync.Mutex
+	orphaned    bool
+}
+
+func (w *orphanFileWriter) Persist(ctx context.Context, src io.Reader, put mediastore.Put) (string, error) {
+	return w.inner.Persist(ctx, src, put)
+}
+
+func (w *orphanFileWriter) PersistWithID(ctx context.Context, blobID string, src io.Reader, put mediastore.Put) error {
+	raw, err := io.ReadAll(src)
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	orphanThis := !w.orphaned && put.ContentType == w.contentType
+	if orphanThis {
+		w.orphaned = true
+	}
+	w.mu.Unlock()
+	if !orphanThis {
+		return w.inner.PersistWithID(ctx, blobID, bytes.NewReader(raw), put)
+	}
+	body := raw
+	if w.keep > 0 && w.keep < len(raw) {
+		body = raw[:w.keep]
+	}
+	if err := os.WriteFile(filepath.Join(w.dir, blobID), body, 0o644); err != nil {
+		return err
+	}
+	return errors.New("artifact file landed before the media row")
+}
+
+// TestReconcileOrphanFileStoresOneRecording leaves a claimed id and a
+// file, and no media row. That is the gap after the file is created and
+// before the row commits. A second reconciler stores one private
+// recording and one private timeline. A short file is replaced with the
+// download. A finished file is kept. Spent does not move again.
+func TestReconcileOrphanFileStoresOneRecording(t *testing.T) {
+	t.Run("complete recording", func(t *testing.T) {
+		reconcileOrphanFile(t, "audio/ogg", 0)
+	})
+	t.Run("complete timeline", func(t *testing.T) {
+		reconcileOrphanFile(t, "application/json", 0)
+	})
+	t.Run("partial recording", func(t *testing.T) {
+		reconcileOrphanFile(t, "audio/ogg", 16)
+	})
+}
+
+func reconcileOrphanFile(t *testing.T, contentType string, keep int) {
+	t.Helper()
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-a")
+	const recordingURL = "https://artifacts.example/rec-a.ogg"
+	const timelineURL = "https://artifacts.example/tl-a.json"
+	fetcher := &countingFetcher{blobs: map[string][]byte{
+		recordingURL: recAudioA,
+		timelineURL:  recTimelineA,
+	}}
+	writer := &orphanFileWriter{
+		dir: fx.mediaDir, inner: fx.media, contentType: contentType, keep: keep,
+	}
+	fx.rec.artifacts = fetcher
+	fx.rec.media = writer
+
+	if _, err := fx.rec.Reconcile(t.Context(), in); err == nil {
+		t.Fatal("reconcile succeeded, want the gap before the media row")
+	}
+	settled, recordingID, timelineID := recClaimState(t, fx.db, in.SessionID)
+	if !settled || recordingID == "" {
+		t.Fatalf("settled %v recording %q, want a settled claim and a recording id", settled, recordingID)
+	}
+	if contentType == "application/json" && timelineID == "" {
+		t.Fatal("timeline id is empty, want the claim set before the missing row")
+	}
+	if _, err := os.Stat(filepath.Join(fx.mediaDir, claimedOrphanID(contentType, recordingID, timelineID))); err != nil {
+		t.Fatalf("orphan file: %v", err)
+	}
+	var audioRows int
+	if err := fx.db.Writer().QueryRowContext(t.Context(),
+		`SELECT COUNT(*) FROM media WHERE id = ?`, recordingID).Scan(&audioRows); err != nil {
+		t.Fatalf("count recording row: %v", err)
+	}
+	if contentType == "audio/ogg" && audioRows != 0 {
+		t.Fatalf("recording row count %d, want none before the second reconciler", audioRows)
+	}
+	spent := recSpent(t, fx.costs)
+	if spent != recRate*372 {
+		t.Fatalf("spent %d, want one settle of %d", spent, recRate*372)
+	}
+
+	next := fx.openReconciler(fx.media, fetcher)
+	if _, err := next.Reconcile(t.Context(), in); err != nil {
+		held := recPrivateTypes(t, fx.db, in.EpisodeID)
+		t.Fatalf("second reconcile: %v, episode media %v", err, held)
+	}
+	_, recordingAfter, timelineAfter := recClaimState(t, fx.db, in.SessionID)
+	if recordingAfter != recordingID {
+		t.Fatalf("recording id changed from %s to %s", recordingID, recordingAfter)
+	}
+	if timelineID != "" && timelineAfter != timelineID {
+		t.Fatalf("timeline id changed from %s to %s", timelineID, timelineAfter)
+	}
+	if timelineAfter == "" {
+		t.Fatal("timeline id is empty after the second reconciler")
+	}
+	held := recPrivateTypes(t, fx.db, in.EpisodeID)
+	if held["audio/ogg"] != 1 || held["application/json"] != 1 || len(held) != 2 {
+		t.Fatalf("episode media %v, want one recording and one timeline", held)
+	}
+	assertClaimedBlob(t, fx.db, fx.mediaDir, recordingAfter, "audio/ogg", recAudioA)
+	assertClaimedBlob(t, fx.db, fx.mediaDir, timelineAfter, "application/json", recTimelineA)
+	if got := recSpent(t, fx.costs); got != spent {
+		t.Fatalf("spent moved %d to %d on the second reconciler", spent, got)
+	}
+}
+
+func claimedOrphanID(contentType, recordingID, timelineID string) string {
+	if contentType == "application/json" {
+		return timelineID
+	}
+	return recordingID
+}
+
+func assertClaimedBlob(t *testing.T, db *sqlite.DB, dir, blobID, contentType string, want []byte) {
+	t.Helper()
+	var gotType, visibility, owner string
+	var size int64
+	if err := db.Writer().QueryRowContext(t.Context(),
+		`SELECT content_type, visibility, owner, size_bytes FROM media WHERE id = ?`, blobID).
+		Scan(&gotType, &visibility, &owner, &size); err != nil {
+		t.Fatalf("media %s: %v", blobID, err)
+	}
+	if gotType != contentType || visibility != "private" || owner != recOwner {
+		t.Fatalf("media %s type %s visibility %s owner %s", blobID, gotType, visibility, owner)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, blobID))
+	if err != nil {
+		t.Fatalf("read %s: %v", blobID, err)
+	}
+	if int64(len(raw)) != size || !bytes.Equal(raw, want) {
+		t.Fatalf("blob %s is %d bytes, row %d, want %d artifact bytes", blobID, len(raw), size, len(want))
+	}
+}
