@@ -1021,7 +1021,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · mid
 owns:       internal/broker/
-status:     in-progress:land:t7.39-land@124ac4c9a01656f91d3b9bf3f2e95795f6d143a3
+status:     done:2f9e55c27cfb21e1650ce394ab8b94eb9f737b39
 ```
 Every live take on 2026-09-27 ran two reconcile jobs for one session.
 On the Firefox take each job stored its own copy of the provider
@@ -1168,6 +1168,15 @@ the delete. Making the end only DELETE fails that test.
 
 ### What exists now
 
+T7.39 landed at 2f9e55c after round 3 APPROVE with zero residue.
+Round 1 had two H findings. A second pass could store another
+private recording. Round 2 had one C. A crash after the file was
+created and before the media row left the id claimed and the table
+empty. The landed pass claims the id first, indexes a finished file
+that has no row, and replaces a short file. The broker diff matches
+reviewed commit 124ac4c. Main had moved, so the landing rebased.
+Broker race tests passed on the rebased commit. One session keeps
+one recording and one timeline. Money settles once.
 T7.37 landed at cff1504 after round 2 APPROVE with zero residue.
 Round 1 had one M finding. The mix trimmed the denoiser delay and
 dropped the last 25 ms of the guest. The landed chain pads 1200
