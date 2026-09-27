@@ -1135,7 +1135,7 @@ requires:   T7.36, T7.39
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/assemblyai/, internal/broker/
-status:     in-progress:review-r1:t7.43-rev-r1@29b894ac7bdd1ceac8267c453ac73f17f116df21
+status:     in-progress:remediate-r1:t7.43-rem-r1
 ```
 T7.36 round 1 approved the client end. The same round recorded an
 out of scope H finding. A tab close whose `session.end` frame never
@@ -1172,6 +1172,25 @@ as the guest. The editorial timeline is unlabelled too.
 **Done when:** A fixture with one host reply and one guest line
 shows the host words as the host. Dropping the role on insert
 fails that test.
+
+### T7.45: Erase ends a connected provider socket
+```yaml
+requires:   T7.43
+fixture-ok: yes
+size:       S · mid
+owns:       internal/privacy/
+status:     not-started
+```
+T7.43 round 1 recorded an out of scope H finding. Account erase
+deletes the provider record through `TerminateSession`. That call
+writes no `session.end`. A connected socket stays billable.
+
+* Erase uses the same end the sweep uses. That end writes
+  `session.end` before the delete.
+* A socket that is already gone still deletes.
+
+**Done when:** A test with a held socket sees `session.end` before
+the delete. Calling `TerminateSession` again fails that test.
 
 ---
 
