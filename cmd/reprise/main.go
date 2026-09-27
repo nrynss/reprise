@@ -1068,6 +1068,25 @@ func reportEpisode(progress func(job.Progress), ownerID, episodeID string) {
 	progress(job.Progress{Stage: "start", Detail: raw})
 }
 
+// transcriptBatchStage marks a transcript job that is about to upload.
+// An interrupt before this stage uploaded nothing and may be scheduled
+// again. An interrupt at this stage stays terminal.
+const transcriptBatchStage = "batch"
+
+// markTranscriptBatch records that the guest upload is about to start.
+// The snapshot keeps the episode linkage, because a progress report
+// replaces the stored snapshot whole.
+func markTranscriptBatch(progress func(job.Progress), ownerID, episodeID string) {
+	if progress == nil {
+		return
+	}
+	raw, err := json.Marshal(episodeDescriptor{OwnerID: ownerID, EpisodeID: episodeID})
+	if err != nil {
+		return
+	}
+	progress(job.Progress{Stage: transcriptBatchStage, Detail: raw})
+}
+
 // pipeline binds every long pass to its shared clients and settings
 // models. One value serves the whole process, so the Gemini client is
 // built once and each paid kind carries the settings model id. Model
@@ -1174,6 +1193,7 @@ func (p *pipeline) kinds(renderKind job.Kind, rec *broker.Reconciler, sweeper *b
 func (p *pipeline) editTranscriptFunc(ownerID, episodeID string, audio []byte, durationSecs float64, host []transcript.HostReply, offsets transcript.Offsets) job.Func {
 	return func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
 		reportEpisode(progress, ownerID, episodeID)
+		markTranscriptBatch(progress, ownerID, episodeID)
 		res, err := transcript.Run(ctx, transcript.Config{
 			DB:           p.db.Writer(),
 			Batch:        p.batch,
@@ -2250,7 +2270,10 @@ func (j *jobs) editInputs(ctx context.Context, ownerID, episodeID string) (userA
 // terminal pass reports the standing outcome instead of scheduling beside
 // a silent first, and a draft that pass left wordless fails, so the
 // gallery agrees the pass left nothing. It returns job.ErrLimit when the
-// kind runs at capacity, and the caller answers retry.
+// kind runs at capacity, and the caller answers retry. An interrupted
+// pass that never reached the batch is scheduled again. That pass
+// uploaded nothing. A pass that reached the batch stays terminal, so
+// the guest audio is not uploaded twice.
 func (j *jobs) ensureTranscript(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
 	j.schedMu.Lock()
 	defer j.schedMu.Unlock()
@@ -2269,12 +2292,35 @@ func (j *jobs) ensureTranscript(ctx context.Context, ownerID, episodeID string) 
 		if !jobTerminal(last.Status) {
 			return "", false, nil
 		}
+		if job.Status(last.Status) == job.StatusInterrupted {
+			started, err := j.transcriptBatchStarted(ctx, last.JobID)
+			if err != nil {
+				return "", false, err
+			}
+			if !started {
+				return j.startTranscript(ctx, ownerID, episodeID)
+			}
+		}
 		if err := j.failSilentDraft(ctx, episodeID); err != nil {
 			return "", false, err
 		}
 		return "", false, nil
 	}
 	return j.startTranscript(ctx, ownerID, episodeID)
+}
+
+// transcriptBatchStarted reports whether the job reached the guest
+// upload. A missing store counts as started, so this process does not
+// schedule a second batch it cannot see.
+func (j *jobs) transcriptBatchStarted(ctx context.Context, jobID string) (bool, error) {
+	if j.store == nil {
+		return true, nil
+	}
+	rec, err := j.store.Get(ctx, jobID)
+	if err != nil {
+		return false, fmt.Errorf("reprise: read transcript job %s: %w", jobID, err)
+	}
+	return rec.Progress.Stage == transcriptBatchStage, nil
 }
 
 // jobTerminal reports whether a job status ends scheduling for its
@@ -2370,10 +2416,10 @@ type timelineTurn struct {
 }
 
 // hostReplies reads the persisted provider timeline for one episode.
-// pending means the claim table exists and the blob can still land.
-// The job waits for that blob and does not start the batch yet.
-// No claim table returns no replies. A timeline that cannot be read
-// or parsed returns an error, so the batch does not start.
+// pending means the blob can still land, or reconcile is still writing it.
+// The job waits for a finished document and does not start the batch yet.
+// No claim table returns no replies. A bad document after reconcile
+// finished returns an error, so the batch does not start.
 func (j *jobs) hostReplies(ctx context.Context, ownerID, episodeID string) ([]transcript.HostReply, bool, error) {
 	mediaID, pending, err := j.timelineMediaID(ctx, ownerID, episodeID)
 	if err != nil || pending || mediaID == "" {
@@ -2394,6 +2440,13 @@ func (j *jobs) hostReplies(ctx context.Context, ownerID, episodeID string) ([]tr
 	}
 	replies, err := repliesFromTimeline(raw)
 	if err != nil {
+		inflight, ferr := j.reconcileInFlight(ctx)
+		if ferr != nil {
+			return nil, false, ferr
+		}
+		if inflight {
+			return nil, true, nil
+		}
 		return nil, false, err
 	}
 	return replies, false, nil
@@ -2439,7 +2492,9 @@ func (j *jobs) timelineMediaID(ctx context.Context, ownerID, episodeID string) (
 // absentTimeline reports what an empty claim means. proceed is a
 // finished reconcile that stored no timeline, so the batch runs with
 // no host replies. lost is a finished reconcile that named a timeline
-// and never stored the blob. Otherwise the blob can still land.
+// and never stored the blob. An unsettled row stays pending until a
+// reconcile job for the episode has ended and none is unfinished.
+// No reconcile job yet keeps waiting, so the timeline can still land.
 func (j *jobs) absentTimeline(ctx context.Context, ownerID, episodeID string) (bool, bool, error) {
 	cols, err := j.claimColumns(ctx, "settled", "timeline_url")
 	if err != nil {
@@ -2463,7 +2518,21 @@ func (j *jobs) absentTimeline(ctx context.Context, ownerID, episodeID string) (b
 		return false, false, fmt.Errorf("reprise: read timeline: %w", err)
 	}
 	if !settled.Valid || settled.Int64 == 0 {
-		return false, false, nil
+		inflight, err := j.reconcileInFlight(ctx)
+		if err != nil {
+			return false, false, err
+		}
+		if inflight {
+			return false, false, nil
+		}
+		ended, err := j.episodeReconcileEnded(ctx, episodeID)
+		if err != nil {
+			return false, false, err
+		}
+		if !ended {
+			return false, false, nil
+		}
+		return true, false, nil
 	}
 	if !timelineURL.Valid || timelineURL.String == "" {
 		return true, false, nil
@@ -2504,6 +2573,48 @@ func (j *jobs) claimColumns(ctx context.Context, names ...string) (map[string]bo
 		return nil, fmt.Errorf("reprise: read timeline: %w", err)
 	}
 	return found, nil
+}
+
+// episodeReconcileEnded reports whether a reconcile job for this
+// episode has ended. No such job reports false, so an empty claim
+// keeps waiting for the timeline.
+func (j *jobs) episodeReconcileEnded(ctx context.Context, episodeID string) (bool, error) {
+	var tables int
+	if err := j.pipe.db.Reader().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'jobs'`).Scan(&tables); err != nil {
+		return false, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	if tables == 0 {
+		return false, nil
+	}
+	pattern := `%"episode_id":"` + escapeLike(episodeID) + `"%`
+	rows, err := j.pipe.db.Reader().QueryContext(ctx,
+		`SELECT status FROM jobs WHERE kind = ? AND progress LIKE ? ESCAPE '\'`,
+		broker.KindName, pattern)
+	if err != nil {
+		return false, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	defer rows.Close()
+	ended := false
+	for rows.Next() {
+		var status string
+		if err := rows.Scan(&status); err != nil {
+			return false, fmt.Errorf("reprise: read timeline: %w", err)
+		}
+		if jobTerminal(status) {
+			ended = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	return ended, nil
+}
+
+// escapeLike escapes the LIKE wildcards in one id, so a claim read
+// matches that id only.
+func escapeLike(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }
 
 // reconcileInFlight reports whether a reconcile job is still queued or
@@ -2675,7 +2786,19 @@ func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (
 	if err != nil {
 		return "", false, err
 	}
+	// Stamp finishes before this gate opens, so the later batch stage
+	// cannot be overwritten by that stamp.
+	stampDone := make(chan struct{})
+	defer close(stampDone)
 	chained := func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
+		select {
+		case <-stampDone:
+		case <-ctx.Done():
+			return j.settleTranscript(ctx, ownerID, episodeID, nil, fmt.Errorf("reprise: transcript: %w", ctx.Err()))
+		}
+		if err := ctx.Err(); err != nil {
+			return j.settleTranscript(ctx, ownerID, episodeID, nil, fmt.Errorf("reprise: transcript: %w", err))
+		}
 		got := replies
 		if pending {
 			waited, waitErr := j.awaitHostReplies(ctx, ownerID, episodeID)

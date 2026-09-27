@@ -1849,3 +1849,350 @@ func TestHostWordBoundsComeFromTheStoredSpan(t *testing.T) {
 		}
 	}
 }
+
+// mergedReplyWords is the guest word plus the two stored host replies,
+// shifted by the stem offsets the timeline tests link.
+func mergedReplyWords() []transcript.Stored {
+	return []transcript.Stored{
+		{Text: "guest", StartMs: 120, EndMs: 270},
+		{Text: "Alpha", StartMs: 1050, EndMs: 1650},
+		{Text: "Beta", StartMs: 1050, EndMs: 1650},
+		{Text: "Gamma", StartMs: 4050, EndMs: 4850},
+	}
+}
+
+// assertWords fails when the stored timeline does not match want.
+func assertWords(t *testing.T, stored, want []transcript.Stored) {
+	t.Helper()
+	if len(stored) != len(want) {
+		t.Fatalf("stored = %+v, want %d words", stored, len(want))
+	}
+	for i := range want {
+		if stored[i].Text != want[i].Text || stored[i].StartMs != want[i].StartMs || stored[i].EndMs != want[i].EndMs {
+			t.Fatalf("word %d = %+v, want %+v", i, stored[i], want[i])
+		}
+	}
+}
+
+// loadEditWords reads the stored edit timeline and fails the test on error.
+func loadEditWords(t *testing.T, fx *wireFixture, episodeID string) []transcript.Stored {
+	t.Helper()
+	stored, err := transcript.Load(t.Context(), fx.db.Writer(), episodeID)
+	if err != nil {
+		t.Fatalf("load words: %v", err)
+	}
+	return stored
+}
+
+// newOffsetEpisode builds one episode with both stems, a scripted batch,
+// and a draft runner. The stems carry the offsets the reply tests expect.
+func newOffsetEpisode(t *testing.T, owner string) (*wireFixture, *jobs, string, string, *atomic.Int32) {
+	t.Helper()
+	fx := openWireFixture(t)
+	insertWireUser(t, fx, owner)
+	diary, err := broker.NewSQLiteDiary(fx.db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	episodeID, sessionID, err := diary.CreateEpisodeAndSession(t.Context(), owner, 1800)
+	if err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+	linkOffsetStems(t, fx, owner, episodeID, 20, 50)
+	server, uploads := scriptedTranscriptUploads()
+	t.Cleanup(server.Close)
+	batch, err := assemblyai.NewBatchClient(assemblyai.Config{
+		BaseURL: server.URL,
+		APIKey:  "probe-key",
+		Model:   "test-transcription",
+		Client:  server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("open batch client: %v", err)
+	}
+	fx.pipe.batch = batch
+	return fx, openDraftJobs(t, fx), episodeID, sessionID, uploads
+}
+
+// insertClaim stores one reconcile claim for the session.
+func insertClaim(t *testing.T, fx *wireFixture, sessionID string, settled int, mediaID string) {
+	t.Helper()
+	if _, err := fx.db.Writer().ExecContext(t.Context(), reconcileClaimTable); err != nil {
+		t.Fatalf("create claim table: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`INSERT INTO reconcile_state (session_id, settled, timeline_media_id, timeline_url)
+		 VALUES (?, ?, ?, '')`, sessionID, settled, mediaID); err != nil {
+		t.Fatalf("store claim: %v", err)
+	}
+}
+
+// plantReconcile stores one reconcile job linked to the episode.
+func plantReconcile(t *testing.T, drafts *jobs, id, owner, episodeID string, status job.Status) {
+	t.Helper()
+	detail, err := json.Marshal(episodeDescriptor{OwnerID: owner, EpisodeID: episodeID})
+	if err != nil {
+		t.Fatalf("encode reconcile linkage: %v", err)
+	}
+	stage := "read"
+	rec := job.Record{
+		ID: id, Kind: broker.KindName, Status: status,
+		Attempt: 1, RootID: id,
+		Progress:  job.Progress{Stage: stage, Detail: detail},
+		UpdatedAt: time.Now(),
+	}
+	if status == job.StatusError {
+		rec.Err = errors.New("reconcile ended")
+		rec.Progress.Stage = "error"
+	}
+	if err := drafts.store.Create(t.Context(), rec); err != nil {
+		t.Fatalf("plant reconcile: %v", err)
+	}
+}
+
+// replaceTimelineBlob writes the finished timeline over a claimed id.
+// The rename keeps a reader from observing a second prefix.
+func replaceTimelineBlob(t *testing.T, fx *wireFixture, mediaID string, body []byte) {
+	t.Helper()
+	path := filepath.Join(fx.pipe.mediaDir, mediaID)
+	tmp := path + ".next"
+	if err := os.WriteFile(tmp, body, 0o644); err != nil {
+		t.Fatalf("write timeline: %v", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatalf("replace timeline: %v", err)
+	}
+}
+
+// waitJobStatus waits until id reaches want. Another terminal status fails.
+func waitJobStatus(t *testing.T, store job.Store, id string, want job.Status) job.Record {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		rec, err := store.Get(t.Context(), id)
+		if err != nil {
+			t.Fatalf("read job: %v", err)
+		}
+		if rec.Status == want {
+			return rec
+		}
+		if jobTerminal(string(rec.Status)) {
+			t.Fatalf("job %s ended %s: %v", id, rec.Status, rec.Err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s stayed %s, want %s", id, rec.Status, want)
+		}
+		time.Sleep(timelinePoll)
+	}
+}
+
+// waitIdleJobs waits until no job is queued or running.
+func waitIdleJobs(t *testing.T, store job.Store) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		left, err := store.Unfinished(t.Context())
+		if err != nil {
+			t.Fatalf("list jobs: %v", err)
+		}
+		if len(left) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("jobs still running: %d", len(left))
+		}
+		time.Sleep(timelinePoll)
+	}
+}
+
+// setJobStatus writes one terminal status onto an existing job row.
+func setJobStatus(t *testing.T, fx *wireFixture, id string, status job.Status) {
+	t.Helper()
+	res, err := fx.db.Writer().ExecContext(t.Context(),
+		`UPDATE jobs SET status = ? WHERE id = ?`, string(status), id)
+	if err != nil {
+		t.Fatalf("set job status: %v", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		t.Fatalf("set job status: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("set job status updated %d rows, want 1", n)
+	}
+}
+
+// TestPartialTimelineWhileReconcileRunsStillMerges keeps a reconcile
+// job running while the claimed file holds only a prefix. The wait
+// stays pending. The finished document then merges and uploads once.
+func TestPartialTimelineWhileReconcileRunsStillMerges(t *testing.T) {
+	const owner = "owner-partial-timeline"
+	fx, drafts, episodeID, sessionID, uploads := newOffsetEpisode(t, owner)
+	prefix := []byte(`{"turns":`)
+	if _, err := repliesFromTimeline(prefix); err == nil {
+		t.Fatal("prefix parsed, want a partial document")
+	}
+	plantReconcile(t, drafts, "reconcile-partial", owner, episodeID, job.StatusRunning)
+	timelineID, err := fx.media.Persist(t.Context(), bytes.NewReader(prefix), mediastore.Put{
+		ContentType: "application/json",
+		Owner:       owner,
+		Group:       episodeID,
+		Visibility:  mediastore.Private,
+	})
+	if err != nil {
+		t.Fatalf("persist prefix: %v", err)
+	}
+	insertClaim(t, fx, sessionID, 0, timelineID)
+	replies, pending, err := drafts.hostReplies(t.Context(), owner, episodeID)
+	if err != nil || !pending || len(replies) != 0 {
+		t.Fatalf("prefix replies = %v pending %v err %v, want pending", replies, pending, err)
+	}
+	jobID, started, err := drafts.startTranscript(t.Context(), owner, episodeID)
+	if err != nil || !started || jobID == "" {
+		t.Fatalf("start transcript = %q %v err %v, want a job", jobID, started, err)
+	}
+	for range 25 {
+		rec, err := drafts.store.Get(t.Context(), jobID)
+		if err != nil {
+			t.Fatalf("read job: %v", err)
+		}
+		if jobTerminal(string(rec.Status)) {
+			t.Fatalf("job ended %s on the prefix: %v", rec.Status, rec.Err)
+		}
+		replies, pending, err = drafts.hostReplies(t.Context(), owner, episodeID)
+		if err != nil || !pending || len(replies) != 0 {
+			t.Fatalf("prefix replies = %v pending %v err %v, want pending", replies, pending, err)
+		}
+		time.Sleep(timelinePoll)
+	}
+	if uploads.Load() != 0 {
+		t.Fatalf("uploads = %d, want none while the file is a prefix", uploads.Load())
+	}
+	replaceTimelineBlob(t, fx, timelineID, twoReplyTimeline(t))
+	replies, pending, err = drafts.hostReplies(t.Context(), owner, episodeID)
+	if err != nil || pending || len(replies) != 2 {
+		t.Fatalf("finished replies = %v pending %v err %v, want two replies", replies, pending, err)
+	}
+	waitJobStatus(t, drafts.store, jobID, job.StatusDone)
+	if uploads.Load() != 1 {
+		t.Fatalf("uploads = %d, want one batch", uploads.Load())
+	}
+	assertWords(t, loadEditWords(t, fx, episodeID), mergedReplyWords())
+	if err := drafts.store.Finish(t.Context(), job.Record{
+		ID: "reconcile-partial", Status: job.StatusDone, UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("finish reconcile: %v", err)
+	}
+	waitIdleJobs(t, drafts.store)
+}
+
+// TestTerminalReconcileDoesNotBlockTheGuestBatch runs the guest batch
+// when reconcile has ended in error, settled is still 0, and the
+// timeline url is empty. The job uploads once and stores no host words.
+func TestTerminalReconcileDoesNotBlockTheGuestBatch(t *testing.T) {
+	const owner = "owner-reconcile-error"
+	fx, drafts, episodeID, sessionID, uploads := newOffsetEpisode(t, owner)
+	insertClaim(t, fx, sessionID, 0, "")
+	plantReconcile(t, drafts, "reconcile-ended", owner, episodeID, job.StatusError)
+	jobID, started, err := drafts.startTranscript(t.Context(), owner, episodeID)
+	if err != nil || !started || jobID == "" {
+		t.Fatalf("start transcript = %q %v err %v, want a job", jobID, started, err)
+	}
+	waitJobStatus(t, drafts.store, jobID, job.StatusDone)
+	if uploads.Load() != 1 {
+		t.Fatalf("uploads = %d, want one batch", uploads.Load())
+	}
+	stored := loadEditWords(t, fx, episodeID)
+	if len(stored) != 1 || stored[0].Text != "guest" || stored[0].StartMs != 120 || stored[0].EndMs != 270 {
+		t.Fatalf("stored = %+v, want only the guest word", stored)
+	}
+	waitIdleJobs(t, drafts.store)
+}
+
+// TestRestartDuringTheWaitStillMerges interrupts a waiting transcript
+// before any upload, then stores the two replies. A later schedule
+// runs one batch and merges those words.
+func TestRestartDuringTheWaitStillMerges(t *testing.T) {
+	const owner = "owner-interrupted-wait"
+	fx, drafts, episodeID, sessionID, uploads := newOffsetEpisode(t, owner)
+	insertClaim(t, fx, sessionID, 0, "")
+	jobID, started, err := drafts.startTranscript(t.Context(), owner, episodeID)
+	if err != nil || !started || jobID == "" {
+		t.Fatalf("start transcript = %q %v err %v, want a job", jobID, started, err)
+	}
+	if err := drafts.runner.Cancel(jobID); err != nil {
+		t.Fatalf("cancel wait: %v", err)
+	}
+	waitJobStatus(t, drafts.store, jobID, job.StatusCancelled)
+	if uploads.Load() != 0 {
+		t.Fatalf("uploads = %d, want none before the timeline", uploads.Load())
+	}
+	setJobStatus(t, fx, jobID, job.StatusInterrupted)
+	rec, err := drafts.store.Get(t.Context(), jobID)
+	if err != nil {
+		t.Fatalf("read interrupted job: %v", err)
+	}
+	if rec.Status != job.StatusInterrupted {
+		t.Fatalf("status = %s, want interrupted", rec.Status)
+	}
+	if rec.Progress.Stage == transcriptBatchStage {
+		t.Fatal("wait reached the batch, want a wait that never uploaded")
+	}
+	timelineID, err := fx.media.Persist(t.Context(), bytes.NewReader(twoReplyTimeline(t)), mediastore.Put{
+		ContentType: "application/json",
+		Owner:       owner,
+		Group:       episodeID,
+		Visibility:  mediastore.Private,
+	})
+	if err != nil {
+		t.Fatalf("persist timeline: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`UPDATE reconcile_state SET timeline_media_id = ? WHERE session_id = ?`,
+		timelineID, sessionID); err != nil {
+		t.Fatalf("store timeline id: %v", err)
+	}
+	again, scheduled, err := drafts.ensureTranscript(t.Context(), owner, episodeID)
+	if err != nil || !scheduled || again == "" || again == jobID {
+		t.Fatalf("ensure = %q scheduled %v err %v, want a new pass", again, scheduled, err)
+	}
+	waitJobStatus(t, drafts.store, again, job.StatusDone)
+	if uploads.Load() != 1 {
+		t.Fatalf("uploads = %d, want one batch", uploads.Load())
+	}
+	assertWords(t, loadEditWords(t, fx, episodeID), mergedReplyWords())
+	if n := kindJobsFor(t, fx, kindEditTranscript, episodeID); n != 2 {
+		t.Fatalf("transcript jobs = %d, want the interrupted wait and one pass", n)
+	}
+	waitIdleJobs(t, drafts.store)
+}
+
+// TestInterruptedUploadIsNotScheduledAgain leaves an interrupted
+// transcript that already reached the batch. The schedule starts
+// nothing, so the guest audio is not uploaded again.
+func TestInterruptedUploadIsNotScheduledAgain(t *testing.T) {
+	const owner = "owner-interrupted-batch"
+	fx, drafts, episodeID, _, uploads := newOffsetEpisode(t, owner)
+	detail, err := json.Marshal(episodeDescriptor{OwnerID: owner, EpisodeID: episodeID})
+	if err != nil {
+		t.Fatalf("encode linkage: %v", err)
+	}
+	if err := drafts.store.Create(t.Context(), job.Record{
+		ID: "job-uploaded", Kind: kindEditTranscript, Status: job.StatusInterrupted,
+		Attempt: 1, RootID: "job-uploaded",
+		Progress:  job.Progress{Stage: transcriptBatchStage, Detail: detail},
+		UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("plant interrupted batch: %v", err)
+	}
+	again, scheduled, err := drafts.ensureTranscript(t.Context(), owner, episodeID)
+	if err != nil || scheduled || again != "" {
+		t.Fatalf("ensure = %q scheduled %v err %v, want no second batch", again, scheduled, err)
+	}
+	if uploads.Load() != 0 {
+		t.Fatalf("uploads = %d, want none", uploads.Load())
+	}
+	if n := kindJobsFor(t, fx, kindEditTranscript, episodeID); n != 1 {
+		t.Fatalf("transcript jobs = %d, want the interrupted batch alone", n)
+	}
+}
