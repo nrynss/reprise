@@ -143,7 +143,7 @@ requires:   T6.1b
 fixture-ok: no
 size:       M · frontier
 owns:       dev-diary/probes/live-sessions.md
-status:     blocked:its worktree is gone and no run reached main, so a person reruns all four after P7 closes
+status:     in-progress:implement:t6.4b-impl
 ```
 The only task that needs a person. It runs once, after everything else lands, and nothing earlier
 waits on it.
