@@ -1007,29 +1007,41 @@ but private media doubles and one copy has no reference.
 recording for the session. The mutation that drops the guard fails
 it.
 
-### T7.40: The processing screen follows the jobs and leads on
+### T7.40: End confirms, then processing follows the jobs
 ```yaml
 requires:   T7.36
 fixture-ok: yes
-size:       M · mid
-owns:       web/src/routes/processing/, web/src/lib/voice/processing-state.ts, web/src/lib/voice/record-state.ts, web/src/routes/record/+page.svelte
+size:       L · frontier
+owns:       web/src/routes/processing/, web/src/lib/voice/processing-state.ts, web/src/lib/voice/record-state.ts, web/src/routes/record/
 status:     not-started
 ```
 The live handoff to `/processing` carries no job ids. So transcription
 and the editorial pass read "Waiting" forever, while the draft reads
 done before either ran. The screen offers no link on. After End, the
 page also sits about 21 seconds on a 142 second take while 17.7 MB
-upload, with nothing on screen.
+upload, with nothing on screen. The screen itself is a bare list with
+none of the styling the gallery and episode pages carry.
 
+* End asks the guest to confirm. Cancel keeps the take recording.
+  Confirm ends the session at once, on the same path the end control
+  uses today.
+* Confirm moves the guest to the processing screen at once. Upload is
+  its first step, with progress. Leaving the record page never drops
+  an upload in flight.
 * The screen follows the real transcript and editorial jobs for the
   episode, and the draft reads done only after both.
 * It links to the episode once the draft exists, and to the gallery
   at every point.
-* End shows upload progress at once, so a long take never looks hung.
+* The screen matches the gallery and episode pages in layout, type and
+  states, including failure.
+* The confirmation never delays `pagehide`. Closing the tab still ends
+  the session.
 
-**Done when:** A mock take lands on a screen whose steps follow the
-fixture jobs to done, then offers the episode link. A throttled
-upload shows progress within one second of End.
+**Done when:** A mock take ends through the confirmation and lands on
+the processing screen within one second, before a throttled upload
+finishes. Its steps follow the fixture jobs to done, then offer the
+episode link. Cancel leaves the take recording. A closed tab still
+ends the session.
 
 ### T7.41: The transcript carries the host's replies
 ```yaml
