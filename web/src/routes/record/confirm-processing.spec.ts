@@ -1,6 +1,7 @@
 // Confirm ends the take and opens processing while the upload is still
 // running. Cancel leaves the take on air. A tab close during the ask still
-// ends the session. Run it with the mock suite beside the route.
+// ends the session. A reload during that upload posts the resumed pair.
+// Run it with the mock suite beside the route.
 
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
@@ -9,6 +10,9 @@ interface Harness {
 	feedBlocks(count: number): void;
 	sessionEndCount(): number;
 	httpEndCount(): number;
+	userUploadId(): string | undefined;
+	hostUploadId(): string | undefined;
+	rate(): number;
 }
 
 async function startMockTake(page: Page): Promise<void> {
@@ -111,6 +115,88 @@ test('confirm opens processing before a throttled upload finishes', async ({ pag
 	await expect(page.getByText('done: Transcript ready.', { exact: true })).toBeVisible({ timeout: 15_000 });
 	await expect(page.getByText('done: Proposals ready.', { exact: true })).toBeVisible();
 	await expect(page.getByText('done: The draft is ready.', { exact: true })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Open the episode', exact: true })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'Gallery', exact: true })).toBeVisible();
+});
+
+test('a reload during the upload posts the resumed stem pair', async ({ page }) => {
+	test.setTimeout(30_000);
+	await startMockTake(page);
+	const ids = await page.evaluate(() => {
+		const mock = (window as unknown as { __mockVoice: Harness }).__mockVoice;
+		return {
+			userId: mock.userUploadId() ?? '',
+			hostId: mock.hostUploadId() ?? '',
+			rate: mock.rate()
+		};
+	});
+	expect(ids.userId).not.toBe('');
+	expect(ids.hostId).not.toBe('');
+	expect(ids.userId).not.toBe(ids.hostId);
+	await page.evaluate(() => {
+		(window as unknown as { __mockVoice: Harness }).__mockVoice.feedBlocks(8);
+	});
+	await page.evaluate(() => {
+		const previous = window.fetch.bind(window);
+		window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+			const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+			if (url.includes('/api/uploads/') && url.includes('/chunks/')) {
+				await new Promise((resolve) => setTimeout(resolve, 4000));
+			}
+			return previous(input, init);
+		}) as typeof window.fetch;
+	});
+	const posts: Array<Record<string, unknown>> = [];
+	await page.route('**/api/episodes/**', async (route) => {
+		const url = route.request().url();
+		if (url.includes('/stems/complete')) {
+			posts.push(route.request().postDataJSON() as Record<string, unknown>);
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					episode_id: 'mock-episode',
+					moved: true,
+					scheduled: true,
+					job_id: 'tj-1',
+					state: 'draft'
+				})
+			});
+			return;
+		}
+		const ready = posts.length > 0;
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({
+				episode: {
+					id: 'mock-episode',
+					number: 1,
+					title: 'Untitled episode',
+					state: 'draft',
+					visibility: 'private'
+				},
+				proposals: [],
+				words: [],
+				transcript_outcome: ready ? { job_id: 'tj-1', status: 'running', error: '' } : null,
+				editorial_outcome: ready ? { job_id: 'ej-1', status: 'running', error: '' } : null
+			})
+		});
+	});
+	await page.getByRole('button', { name: 'End session', exact: true }).click();
+	await page.getByRole('button', { name: 'Confirm end session', exact: true }).click({ noWaitAfter: true });
+	await page.waitForURL(/\/processing/, { timeout: 1000 });
+	await expect(page.getByText('Uploading the take.')).toBeVisible();
+	const before = posts.length;
+	await page.reload();
+	await expect.poll(() => posts.length, { timeout: 15_000 }).toBeGreaterThan(before);
+	const body = posts[posts.length - 1] ?? {};
+	expect(body['user_media_id']).toBe(ids.userId);
+	expect(body['host_media_id']).toBe(ids.hostId);
+	expect(body['user_sample_rate']).toBe(Math.round(ids.rate));
+	expect(body['host_sample_rate']).toBe(24000);
+	await expect(page.getByText('done: The draft is ready.', { exact: true })).toBeVisible({ timeout: 15_000 });
+	await expect(page.getByText('waiting:')).toHaveCount(0);
 	await expect(page.getByRole('link', { name: 'Open the episode', exact: true })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Gallery', exact: true })).toBeVisible();
 });

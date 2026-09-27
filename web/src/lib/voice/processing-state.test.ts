@@ -1,13 +1,20 @@
 // Pins for the processing steps. The draft stays waiting until the upload
 // and both passes have finished, including when a pass has no job yet.
+// A retry of a failed draft move must not leave transcription failed while
+// the new job is still running.
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { progressFrame } from './mock';
 import {
+	depositProcessingHandoff,
 	draftStep,
+	emptyProcessing,
+	ProcessingController,
 	readingFromJob,
 	stoppedDetail,
 	uploadDetail,
 	uploadPercent,
+	type ProcessingSnapshot,
 	type ProcessingStep
 } from './processing-state';
 
@@ -64,5 +71,86 @@ describe('uploadDetail', () => {
 		expect(uploadDetail(10, 40)).toBe('Uploading the take. 10 of 40 bytes.');
 		expect(uploadPercent(10, 40)).toBe(25);
 		expect(uploadPercent(0, 0)).toBe(0);
+	});
+});
+
+function requestUrl(input: RequestInfo | URL): string {
+	if (typeof input === 'string') return input;
+	if (input instanceof URL) return input.href;
+	return input.url;
+}
+
+function openJobStream(): Response {
+	const body = new ReadableStream<Uint8Array>({
+		start(controller) {
+			controller.enqueue(new TextEncoder().encode(progressFrame('tj-1', 'running', 1, 4, 1)));
+		}
+	});
+	return new Response(body, {
+		status: 200,
+		headers: { 'content-type': 'text/event-stream' }
+	});
+}
+
+async function waitUntil(read: () => boolean): Promise<void> {
+	const start = Date.now();
+	while (!read()) {
+		if (Date.now() - start > 2000) throw new Error('the processing step did not update');
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+}
+
+describe('retry after a failed draft move', () => {
+	let controller: ProcessingController | null = null;
+
+	afterEach(() => {
+		controller?.destroy();
+		controller = null;
+		vi.unstubAllGlobals();
+	});
+
+	it('clears a failed transcript step while the new job is still running', async () => {
+		let settles = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = requestUrl(input);
+				if (url.includes('/events')) return openJobStream();
+				if (url.includes('/api/jobs/')) {
+					return new Response(
+						JSON.stringify({ jobId: 'tj-1', status: 'running', stage: 'running', current: 1, total: 4 }),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					);
+				}
+				return new Response(JSON.stringify({ transcript_outcome: null, editorial_outcome: null }), {
+					status: 200,
+					headers: { 'content-type': 'application/json' }
+				});
+			})
+		);
+		depositProcessingHandoff({
+			progress: () => ({ stored: 4, captured: 8 }),
+			settle: async () => {
+				settles += 1;
+				if (settles === 1) throw new Error('draft move refused');
+				return { userBytes: 10, hostBytes: 20, transcriptJob: 'tj-1' };
+			}
+		});
+		let latest: ProcessingSnapshot = emptyProcessing();
+		controller = new ProcessingController(new URLSearchParams('episode=ep-1'), (snap) => {
+			latest = snap;
+		});
+		controller.mount();
+		await waitUntil(() => latest.transcription.state === 'failed');
+		expect(latest.draft.state).toBe('failed');
+		controller.retrySettle();
+		const started = Date.now();
+		while (latest.transcription.state === 'failed' && Date.now() - started < 2000) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+		expect(latest.transcription.state).toBe('running');
+		expect(latest.draft.state).not.toBe('failed');
+		expect(latest.upload.state).not.toBe('failed');
+		expect(latest.editorial.state).not.toBe('failed');
 	});
 });

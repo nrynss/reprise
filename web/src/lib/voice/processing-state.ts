@@ -6,6 +6,7 @@
 import { ChunkUploader } from '@nrynss/chaaya/audio';
 import { JobStream, type JobSnapshot } from '@nrynss/chaaya/job';
 import { readJobState } from './session-calls';
+import { completionPair, postStemsComplete } from '../../routes/record/stems-complete';
 import {
 	MockUploadServer,
 	progressFrame,
@@ -190,6 +191,9 @@ export class ProcessingController {
 	private handoff: ProcessingHandoff | null = null;
 	private readingOutcomes = false;
 	private alive = true;
+	private readonly userMediaId: string;
+	private readonly hostMediaId: string;
+	private readonly userSampleRate: number;
 
 	constructor(query: URLSearchParams, onChange: (snapshot: ProcessingSnapshot) => void) {
 		this.onChange = onChange;
@@ -199,6 +203,10 @@ export class ProcessingController {
 		this.mockMode = params['mock'] === '1';
 		this.transcriptJob = params['transcript'] ?? '';
 		this.editorialJob = params['editorial'] ?? '';
+		this.userMediaId = params['userMedia'] ?? '';
+		this.hostMediaId = params['hostMedia'] ?? '';
+		const parsedRate = Number(params['userRate'] ?? '');
+		this.userSampleRate = Number.isInteger(parsedRate) && parsedRate > 0 ? parsedRate : 0;
 		if (params['uploads'] === 'done') {
 			const userBytes = Number(params['userBytes'] ?? '0');
 			const hostBytes = Number(params['hostBytes'] ?? '0');
@@ -282,10 +290,17 @@ export class ProcessingController {
 			fetchState: () => readJobState<JobSnapshot>(id)
 		});
 		const current = kind === 'transcript' ? this.snapshot.transcription : this.snapshot.editorial;
-		if (current.state === 'waiting') {
+		// Replace a waiting or failed step. A failed step would otherwise ignore
+		// every frame until the job ends.
+		if (current.state === 'waiting' || current.state === 'failed') {
 			const next = { ...current, state: 'running' as const, detail: 'Following the job.' };
 			if (kind === 'transcript') this.snapshot.transcription = next;
 			else this.snapshot.editorial = next;
+			this.snapshot.draft = draftStep(
+				this.snapshot.upload.state,
+				this.snapshot.transcription.state,
+				this.snapshot.editorial.state
+			);
 		}
 		if (kind === 'transcript') this.transcriptStream = stream;
 		else this.editorialStream = stream;
@@ -323,7 +338,20 @@ export class ProcessingController {
 				detail: `Both stems durable: ${settled.userBytes} user bytes, ${settled.hostBytes} host bytes.`,
 				percent: 100
 			};
-			if (settled.transcriptJob !== '') this.watchJob(settled.transcriptJob, 'transcript');
+			if (settled.transcriptJob !== '') {
+				// A failed transcript step stays on screen until a terminal frame,
+				// because a non-terminal reading keeps it. Clear it before the new
+				// job is watched.
+				if (this.snapshot.transcription.state === 'failed') {
+					this.snapshot.transcription = idleStep('Transcription', 'Waiting.');
+					this.snapshot.draft = draftStep(
+						this.snapshot.upload.state,
+						this.snapshot.transcription.state,
+						this.snapshot.editorial.state
+					);
+				}
+				this.watchJob(settled.transcriptJob, 'transcript');
+			}
 			this.refresh();
 			await this.readOutcomes();
 		} catch (error) {
@@ -368,6 +396,35 @@ export class ProcessingController {
 		this.uploadTimer = null;
 	}
 
+	// pairFromResume names the stem pair a reload can post. A receipt covers
+	// a session this page just finished. An id that was not resumed already
+	// left the store, so that stem finished before the reload.
+	private pairFromResume(
+		receipts: ReadonlyArray<{ id: string; sizeBytes: number }>,
+		resumedIds: readonly string[],
+		failedIds: readonly string[]
+	): { userId: string; hostId: string; userBytes: number; hostBytes: number; sizesKnown: boolean } | null {
+		const userId = this.userMediaId;
+		const hostId = this.hostMediaId;
+		if (userId === '' || hostId === '' || userId === hostId) return null;
+		if (this.userSampleRate <= 0 || this.snapshot.episode === '') return null;
+		if (failedIds.includes(userId) || failedIds.includes(hostId)) return null;
+		const userReceipt = receipts.find((item) => item.id === userId);
+		const hostReceipt = receipts.find((item) => item.id === hostId);
+		const userSeen = resumedIds.includes(userId);
+		const hostSeen = resumedIds.includes(hostId);
+		if (userSeen && userReceipt === undefined) return null;
+		if (hostSeen && hostReceipt === undefined) return null;
+		if (!userSeen && !hostSeen) return null;
+		return {
+			userId,
+			hostId,
+			userBytes: userReceipt?.sizeBytes ?? 0,
+			hostBytes: hostReceipt?.sizeBytes ?? 0,
+			sizesKnown: userReceipt !== undefined && hostReceipt !== undefined
+		};
+	}
+
 	private async resumeUploads(): Promise<void> {
 		this.snapshot.upload = {
 			...this.snapshot.upload,
@@ -388,10 +445,24 @@ export class ProcessingController {
 		}
 		let total = 0;
 		let count = 0;
+		const receipts: Array<{ id: string; sizeBytes: number }> = [];
+		const resumedIds: string[] = [];
+		const failedIds: string[] = [];
 		for (;;) {
 			const resumed = await ChunkUploader.resume();
 			if (resumed === undefined) break;
+			const id = resumed.id ?? '';
+			if (id !== '' && resumedIds.includes(id)) {
+				failedIds.push(id);
+				break;
+			}
+			if (id !== '') resumedIds.push(id);
 			await resumed.finish();
+			if (resumed.receipt !== undefined) {
+				receipts.push({ id: resumed.receipt.id, sizeBytes: resumed.receipt.sizeBytes });
+			} else if (id !== '') {
+				failedIds.push(id);
+			}
 			total += resumed.receipt?.sizeBytes ?? 0;
 			count += 1;
 		}
@@ -402,14 +473,49 @@ export class ProcessingController {
 				detail: 'No persisted upload waits.',
 				percent: 0
 			};
-		} else {
+			this.emit();
+			return;
+		}
+		const pair = this.pairFromResume(receipts, resumedIds, failedIds);
+		if (pair === null) {
 			this.snapshot.upload = {
 				...this.snapshot.upload,
 				state: 'done',
 				detail: `${count} stems, ${total} bytes durable.`,
 				percent: 100
 			};
+			this.emit();
+			return;
 		}
+		this.snapshot.upload = {
+			name: 'Upload',
+			state: 'done',
+			detail: pair.sizesKnown
+				? `Both stems durable: ${pair.userBytes} user bytes, ${pair.hostBytes} host bytes.`
+				: 'Both stems durable.',
+			percent: 100
+		};
+		this.emit();
+		const handoff: ProcessingHandoff = {
+			progress: () => ({
+				stored: pair.userBytes + pair.hostBytes,
+				captured: pair.userBytes + pair.hostBytes
+			}),
+			settle: async () => {
+				const answer = await postStemsComplete(
+					this.snapshot.episode,
+					completionPair(pair.userId, pair.hostId, this.userSampleRate)
+				);
+				return {
+					userBytes: pair.userBytes,
+					hostBytes: pair.hostBytes,
+					transcriptJob: answer.jobId
+				};
+			}
+		};
+		await this.followHandoff(handoff);
+		if (!this.alive || pair.sizesKnown || this.snapshot.upload.state !== 'done') return;
+		this.snapshot.upload = { ...this.snapshot.upload, detail: 'Both stems durable.' };
 		this.emit();
 	}
 

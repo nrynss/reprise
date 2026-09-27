@@ -630,7 +630,16 @@ export class RecordController {
 	// the upload already running on this page keeps its requests.
 	private async openProcessing(episode: string, finishing: Promise<void>): Promise<void> {
 		const suffix = this.mockMode ? '&mock=1' : '';
-		const url = `/processing?episode=${encodeURIComponent(episode)}${suffix}`;
+		// The stem ids and the user rate ride on the address. A reload has no
+		// uploader left, and the draft move still needs the pair.
+		const userMedia = this.userUpload?.id ?? '';
+		const hostMedia = this.hostUpload?.id ?? '';
+		const userRate = Math.round(this.context?.sampleRate ?? 0);
+		const stemQuery =
+			userMedia.length > 0 && hostMedia.length > 0
+				? `&userMedia=${encodeURIComponent(userMedia)}&hostMedia=${encodeURIComponent(hostMedia)}&userRate=${userRate}`
+				: '';
+		const url = `/processing?episode=${encodeURIComponent(episode)}${stemQuery}${suffix}`;
 		const navigation = await import('$app/navigation');
 		if (this.destroyed) {
 			void this.settleUploads(finishing).catch(() => undefined);
