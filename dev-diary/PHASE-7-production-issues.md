@@ -1047,7 +1047,7 @@ requires:   T7.36
 fixture-ok: yes
 size:       L · frontier
 owns:       web/src/routes/processing/, web/src/lib/voice/processing-state.ts, web/src/lib/voice/record-state.ts, web/src/routes/record/
-status:     not-started
+status:     in-progress:implement:t7.40-impl
 ```
 The live handoff to `/processing` carries no job ids. So transcription
 and the editorial pass read "Waiting" forever, while the draft reads
@@ -1086,7 +1086,7 @@ requires:   T7.36, T7.39
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     not-started
+status:     in-progress:implement:t7.41-impl
 ```
 `startTranscript` passes `nil` host replies and zero offsets to the
 transcript job. So a live transcript holds only the guest's words. The
@@ -1135,7 +1135,7 @@ requires:   T7.36, T7.39
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/assemblyai/, internal/broker/
-status:     not-started
+status:     in-progress:implement:t7.43-impl
 ```
 T7.36 round 1 approved the client end. The same round recorded an
 out of scope H finding. A tab close whose `session.end` frame never
