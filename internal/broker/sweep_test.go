@@ -136,6 +136,7 @@ func TestSweepSettlesCompletedPastCapExactlyOnce(t *testing.T) {
 	}
 	sf.fx.rec.artifacts = recFetcher{blobs: map[string][]byte{
 		"https://artifacts.example/rec-a.ogg": recAudioA,
+		"https://artifacts.example/tl-a.json": recTimelineA,
 	}}
 
 	out, err := sf.sweeper.Sweep(t.Context(), SweepInput{MarginSeconds: DefaultMarginSeconds})

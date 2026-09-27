@@ -1,12 +1,14 @@
 // Package broker starts live sessions behind seven ordered checks.
 //
 // This file settles them. After a session ends, reconciliation reads the
-// real connected seconds from the provider, settles the mint time budget
-// hold to the real cost, closes the lease against the provider number, and
-// persists the stereo recording privately, because artifact URLs expire.
+// real connected seconds from the provider and settles the mint hold to
+// that cost. It closes the lease at the provider number. It persists the
+// stereo recording and the timeline privately, because artifact URLs expire.
 // The provider read repeats safely, so the job kind is idempotent. The
 // money settle runs exactly once, guarded by a durable claim row this file
-// owns. An ambiguous resume never settles twice. It stops for review.
+// owns. The artifact tail runs under a per session lock, so a repeated
+// end stores nothing new. An ambiguous resume never settles twice. It
+// stops for review.
 package broker
 
 import (
@@ -17,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/nrynss/keel/cost"
@@ -41,6 +44,10 @@ const DefaultMarginSeconds = 60
 // under. The provider keeps its own copy beside ours.
 const DefaultRecordingContentType = "audio/ogg"
 
+// DefaultTimelineContentType is the media type the timeline lands under.
+// The timeline arrives as JSON beside the recording.
+const DefaultTimelineContentType = "application/json"
+
 // DefaultFetchMaxBytes caps one artifact download. A three hour stereo
 // recording fits with room, and anything larger is a provider surprise
 // worth refusing rather than streaming to disk unbounded.
@@ -62,8 +69,8 @@ var (
 
 // ProviderSession is one provider session read. DurationSeconds is the
 // connected time the settle prices. RecordingURL names the stereo
-// recording, TimelineURL the timeline. Both expire, so the recording lands
-// in the media store on receipt and the URLs stay as metadata.
+// recording, TimelineURL the timeline. Both expire, so both artifacts
+// land in the media store on receipt and the URLs stay as metadata.
 type ProviderSession struct {
 	// ID is the provider session id that was read.
 	ID string `json:"id"`
@@ -229,6 +236,9 @@ type Result struct {
 	// RecordingMediaID is the persisted stereo recording, or empty when
 	// the provider carried no recording URL.
 	RecordingMediaID string `json:"recording_media_id"`
+	// TimelineMediaID is the persisted timeline, or empty when the
+	// provider carried no timeline URL.
+	TimelineMediaID string `json:"timeline_media_id"`
 	// TimelineURL keeps the expiring timeline URL as metadata.
 	TimelineURL string `json:"timeline_url"`
 	// NeedsReview reports an ambiguous resume that settled nothing, for
@@ -256,7 +266,7 @@ type ReconcilerConfig struct {
 	Leases LeaseSettler
 	// Diary writes the settled duration. It must not be nil.
 	Diary SessionStore
-	// Media persists the stereo recording. It must not be nil.
+	// Media persists the stereo recording and the timeline. It must not be nil.
 	Media MediaWriter
 	// Alerter delivers over cap and review alerts. Nil records them on
 	// the result only.
@@ -267,6 +277,9 @@ type ReconcilerConfig struct {
 	// RecordingContentType is the media type the recording lands under.
 	// Empty means the default.
 	RecordingContentType string
+	// TimelineContentType is the media type the timeline lands under.
+	// Empty means the default.
+	TimelineContentType string
 	// FetchMaxBytes caps one artifact download. Zero or negative means
 	// the default.
 	FetchMaxBytes int64
@@ -276,17 +289,53 @@ type ReconcilerConfig struct {
 // New, because the zero value holds no stores. A Reconciler is safe for
 // concurrent use, and one session settles through one job at a time.
 type Reconciler struct {
-	db          *sqlite.DB
-	sessions    SessionReader
-	artifacts   ArtifactFetcher
-	budgets     Settler
-	leases      LeaseSettler
-	diary       SessionStore
-	media       MediaWriter
-	alerter     Alerter
-	margin      int
-	contentType string
-	maxBytes    int64
+	db           *sqlite.DB
+	sessions     SessionReader
+	artifacts    ArtifactFetcher
+	budgets      Settler
+	leases       LeaseSettler
+	diary        SessionStore
+	media        MediaWriter
+	alerter      Alerter
+	margin       int
+	contentType  string
+	timelineType string
+	maxBytes     int64
+	mu           sync.Mutex
+	guards       map[string]*sessionGuard
+}
+
+// sessionGuard serializes one session across reconcile jobs. The waiter
+// count drops the map entry once the last holder leaves, so the map
+// holds running sessions only.
+type sessionGuard struct {
+	mu      sync.Mutex
+	waiters int
+}
+
+// hold returns the guard for one session and counts this holder. The
+// caller locks the guard and drops it with release.
+func (r *Reconciler) hold(sessionID string) *sessionGuard {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	guard, ok := r.guards[sessionID]
+	if !ok {
+		guard = &sessionGuard{}
+		r.guards[sessionID] = guard
+	}
+	guard.waiters++
+	return guard
+}
+
+// release unlocks the guard and drops it once no holder remains.
+func (r *Reconciler) release(sessionID string, guard *sessionGuard) {
+	guard.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	guard.waiters--
+	if guard.waiters == 0 {
+		delete(r.guards, sessionID)
+	}
 }
 
 // claimRow is one durable settle claim.
@@ -297,6 +346,7 @@ type claimRow struct {
 	overCap          bool
 	overCapAlerted   bool
 	recordingMediaID string
+	timelineMediaID  string
 	recordingURL     string
 	timelineURL      string
 }
@@ -332,22 +382,28 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 	if contentType == "" {
 		contentType = DefaultRecordingContentType
 	}
+	timelineType := cfg.TimelineContentType
+	if timelineType == "" {
+		timelineType = DefaultTimelineContentType
+	}
 	maxBytes := cfg.FetchMaxBytes
 	if maxBytes <= 0 {
 		maxBytes = DefaultFetchMaxBytes
 	}
 	r := &Reconciler{
-		db:          cfg.DB,
-		sessions:    cfg.Sessions,
-		artifacts:   cfg.Artifacts,
-		budgets:     cfg.Budgets,
-		leases:      cfg.Leases,
-		diary:       cfg.Diary,
-		media:       cfg.Media,
-		alerter:     cfg.Alerter,
-		margin:      cfg.MarginSeconds,
-		contentType: contentType,
-		maxBytes:    maxBytes,
+		db:           cfg.DB,
+		sessions:     cfg.Sessions,
+		artifacts:    cfg.Artifacts,
+		budgets:      cfg.Budgets,
+		leases:       cfg.Leases,
+		diary:        cfg.Diary,
+		media:        cfg.Media,
+		alerter:      cfg.Alerter,
+		margin:       cfg.MarginSeconds,
+		contentType:  contentType,
+		timelineType: timelineType,
+		maxBytes:     maxBytes,
+		guards:       map[string]*sessionGuard{},
 	}
 	const schema = `CREATE TABLE IF NOT EXISTS reconcile_state (
 		session_id TEXT PRIMARY KEY,
@@ -358,6 +414,7 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 		over_cap INTEGER NOT NULL DEFAULT 0,
 		over_cap_alerted INTEGER NOT NULL DEFAULT 0,
 		recording_media_id TEXT NOT NULL DEFAULT '',
+		timeline_media_id TEXT NOT NULL DEFAULT '',
 		recording_url TEXT NOT NULL DEFAULT '',
 		timeline_url TEXT NOT NULL DEFAULT '',
 		updated_at INTEGER NOT NULL DEFAULT 0
@@ -365,16 +422,21 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 	if _, err := r.db.Writer().ExecContext(context.Background(), schema); err != nil {
 		return nil, fmt.Errorf("broker: create reconcile state: %w", ErrState)
 	}
-	if err := r.ensureAlertColumn(context.Background()); err != nil {
+	if err := r.ensureColumn(context.Background(),
+		"over_cap_alerted", "over_cap_alerted INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return nil, err
+	}
+	if err := r.ensureColumn(context.Background(),
+		"timeline_media_id", "timeline_media_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
 	return r, nil
 }
 
-// ensureAlertColumn adds the over cap alert flag to claim tables written
-// before the flag existed. Fresh tables already carry it from the schema,
-// so the common path changes nothing.
-func (r *Reconciler) ensureAlertColumn(ctx context.Context) error {
+// ensureColumn adds one column to claim tables written before it
+// existed. Fresh tables already carry every column from the schema, so
+// the common path changes nothing.
+func (r *Reconciler) ensureColumn(ctx context.Context, name, definition string) error {
 	rows, err := r.db.Reader().QueryContext(ctx, `PRAGMA table_info(reconcile_state)`)
 	if err != nil {
 		return fmt.Errorf("broker: read reconcile columns: %w", ErrState)
@@ -382,12 +444,12 @@ func (r *Reconciler) ensureAlertColumn(ctx context.Context) error {
 	defer rows.Close()
 	for rows.Next() {
 		var cid, notNull, pk int
-		var name, ctype string
+		var column, ctype string
 		var dflt any
-		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dflt, &pk); err != nil {
+		if err := rows.Scan(&cid, &column, &ctype, &notNull, &dflt, &pk); err != nil {
 			return fmt.Errorf("broker: read reconcile columns: %w", ErrState)
 		}
-		if name == "over_cap_alerted" {
+		if column == name {
 			return nil
 		}
 	}
@@ -395,8 +457,8 @@ func (r *Reconciler) ensureAlertColumn(ctx context.Context) error {
 		return fmt.Errorf("broker: read reconcile columns: %w", ErrState)
 	}
 	if _, err := r.db.Writer().ExecContext(ctx,
-		`ALTER TABLE reconcile_state ADD COLUMN over_cap_alerted INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return fmt.Errorf("broker: add reconcile alert column: %w", ErrState)
+		`ALTER TABLE reconcile_state ADD COLUMN `+definition); err != nil {
+		return fmt.Errorf("broker: add reconcile column: %w", ErrState)
 	}
 	return nil
 }
@@ -511,11 +573,12 @@ func (r *Reconciler) readRow(ctx context.Context, sessionID string) (claimRow, e
 	var row claimRow
 	var claimed, settled, overCap, overCapAlerted int
 	var seconds int
-	var mediaID, recordingURL, timelineURL string
+	var recordingID, timelineID, recordingURL, timelineURL string
 	err := r.db.Reader().QueryRowContext(ctx,
-		`SELECT claimed, settled, connected_seconds, over_cap, over_cap_alerted, recording_media_id, recording_url, timeline_url
+		`SELECT claimed, settled, connected_seconds, over_cap, over_cap_alerted, recording_media_id,
+			timeline_media_id, recording_url, timeline_url
 		FROM reconcile_state WHERE session_id = ?`, sessionID).Scan(
-		&claimed, &settled, &seconds, &overCap, &overCapAlerted, &mediaID, &recordingURL, &timelineURL)
+		&claimed, &settled, &seconds, &overCap, &overCapAlerted, &recordingID, &timelineID, &recordingURL, &timelineURL)
 	if err != nil {
 		return claimRow{}, fmt.Errorf("broker: read reconcile row: %w", ErrState)
 	}
@@ -524,7 +587,8 @@ func (r *Reconciler) readRow(ctx context.Context, sessionID string) (claimRow, e
 	row.connectedSeconds = seconds
 	row.overCap = overCap != 0
 	row.overCapAlerted = overCapAlerted != 0
-	row.recordingMediaID = mediaID
+	row.recordingMediaID = recordingID
+	row.timelineMediaID = timelineID
 	row.recordingURL = recordingURL
 	row.timelineURL = timelineURL
 	return row, nil
@@ -583,6 +647,16 @@ func (r *Reconciler) markRecording(ctx context.Context, sessionID, mediaID strin
 	return nil
 }
 
+// markTimeline records the persisted timeline id.
+func (r *Reconciler) markTimeline(ctx context.Context, sessionID, mediaID string) error {
+	if _, err := r.db.Writer().ExecContext(ctx,
+		`UPDATE reconcile_state SET timeline_media_id = ?, updated_at = ? WHERE session_id = ?`,
+		mediaID, time.Now().UnixMilli(), sessionID); err != nil {
+		return fmt.Errorf("broker: mark reconcile timeline: %w", ErrState)
+	}
+	return nil
+}
+
 // markOverCapAlerted records that the over cap alert fired. Later runs
 // skip it, so one session alerts once no matter how often it retries.
 func (r *Reconciler) markOverCapAlerted(ctx context.Context, sessionID string) error {
@@ -615,15 +689,19 @@ func (r *Reconciler) review(ctx context.Context, in Input, detail string) (Resul
 }
 
 // Reconcile settles one session against provider truth. It reads the
-// provider duration, settles the mint time hold to the real cost on both
-// ceilings, closes the lease at the provider number, writes the duration
-// on the session row, and persists the stereo recording privately. A
-// repeat after a crash settles money at most once. Artifact retries skip
-// settled money and finish the bytes.
+// provider duration and settles the mint hold to that cost on both
+// ceilings. It closes the lease at the provider number, writes the
+// duration on the session row, and persists the recording and timeline.
+// One session runs here under its own lock, so a repeated end waits
+// and then stores nothing new. A repeat after a crash settles money
+// at most once. Artifact retries skip settled money and finish the bytes.
 func (r *Reconciler) Reconcile(ctx context.Context, in Input) (Result, error) {
 	if err := validate(in); err != nil {
 		return Result{}, err
 	}
+	guard := r.hold(in.SessionID)
+	guard.mu.Lock()
+	defer r.release(in.SessionID, guard)
 	if err := r.ensureRow(ctx, in.SessionID); err != nil {
 		return Result{}, err
 	}
@@ -674,6 +752,9 @@ func (r *Reconciler) ReconcileAbandoned(ctx context.Context, in Input, abandoned
 	if abandoned.DurationSeconds < 0 {
 		return Result{}, fmt.Errorf("broker: reconcile abandoned: %w: provider duration is negative", ErrRead)
 	}
+	guard := r.hold(in.SessionID)
+	guard.mu.Lock()
+	defer r.release(in.SessionID, guard)
 	if err := r.ensureRow(ctx, in.SessionID); err != nil {
 		return Result{}, err
 	}
@@ -848,15 +929,18 @@ func (r *Reconciler) completeExpiredTail(ctx context.Context, in Input, read Pro
 }
 
 // finishArtifacts completes the idempotent tail: the session row update,
-// the recording persist, and the over cap alert. The alert fires once per
-// session on its durable flag, so retries stay silent. Money never moves
-// here, so retries finish the bytes without spending twice.
+// the recording and timeline persists, and the over cap alert. Stored
+// media ids stay, so a repeat run fetches nothing and stores nothing.
+// The alert fires once per session on its durable flag, so retries stay
+// silent. Money never moves here, so retries finish the bytes without
+// spending twice.
 func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow) (Result, error) {
 	res := Result{
 		SessionID:        in.SessionID,
 		ConnectedSeconds: row.connectedSeconds,
 		TimelineURL:      row.timelineURL,
 		RecordingMediaID: row.recordingMediaID,
+		TimelineMediaID:  row.timelineMediaID,
 	}
 	price, err := priceForSeconds(row.connectedSeconds)
 	if err != nil {
@@ -874,6 +958,13 @@ func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow
 		}
 		res.RecordingMediaID = mediaID
 	}
+	if row.timelineURL != "" && row.timelineMediaID == "" {
+		mediaID, err := r.persistTimeline(ctx, in, row.timelineURL)
+		if err != nil {
+			return res, err
+		}
+		res.TimelineMediaID = mediaID
+	}
 	if res.OverCap && !row.overCapAlerted {
 		r.alert(ctx, &res, AlertOverCap, in.OwnerID,
 			fmt.Sprintf("session ran %d seconds past a %d second cap", res.ConnectedSeconds, in.TokenCapSeconds))
@@ -890,26 +981,50 @@ func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow
 // persistRecording fetches the stereo recording and stores it privately.
 // Artifact URLs expire, so the bytes land in the media store on receipt.
 func (r *Reconciler) persistRecording(ctx context.Context, in Input, recordingURL string) (string, error) {
-	body, err := r.artifacts.Fetch(ctx, recordingURL)
+	mediaID, err := r.persistArtifact(ctx, in, "recording", recordingURL, r.contentType)
 	if err != nil {
-		return "", fmt.Errorf("broker: fetch recording: %w: %w", ErrRead, err)
+		return "", err
+	}
+	if err := r.markRecording(ctx, in.SessionID, mediaID); err != nil {
+		return "", err
+	}
+	return mediaID, nil
+}
+
+// persistTimeline fetches the timeline and stores it privately beside the
+// recording. Artifact URLs expire, so the bytes land in the media store
+// on receipt.
+func (r *Reconciler) persistTimeline(ctx context.Context, in Input, timelineURL string) (string, error) {
+	mediaID, err := r.persistArtifact(ctx, in, "timeline", timelineURL, r.timelineType)
+	if err != nil {
+		return "", err
+	}
+	if err := r.markTimeline(ctx, in.SessionID, mediaID); err != nil {
+		return "", err
+	}
+	return mediaID, nil
+}
+
+// persistArtifact fetches one artifact URL and stores it privately under
+// the episode. kind names the artifact in errors.
+func (r *Reconciler) persistArtifact(ctx context.Context, in Input, kind, artifactURL, contentType string) (string, error) {
+	body, err := r.artifacts.Fetch(ctx, artifactURL)
+	if err != nil {
+		return "", fmt.Errorf("broker: fetch %s: %w: %w", kind, ErrRead, err)
 	}
 	defer body.Close()
 	capped := &cappedReader{inner: body, left: r.maxBytes + 1}
 	mediaID, err := r.media.Persist(ctx, capped, mediastore.Put{
-		ContentType: r.contentType,
+		ContentType: contentType,
 		Owner:       in.OwnerID,
 		Group:       in.EpisodeID,
 		Visibility:  mediastore.Private,
 	})
 	if err != nil {
 		if errors.Is(err, errArtifactTooLarge) {
-			return "", fmt.Errorf("broker: fetch recording: %w: artifact passes the byte cap", ErrRead)
+			return "", fmt.Errorf("broker: fetch %s: %w: artifact passes the byte cap", kind, ErrRead)
 		}
-		return "", fmt.Errorf("broker: persist recording: %w: %w", ErrState, err)
-	}
-	if err := r.markRecording(ctx, in.SessionID, mediaID); err != nil {
-		return "", err
+		return "", fmt.Errorf("broker: persist %s: %w: %w", kind, ErrState, err)
 	}
 	return mediaID, nil
 }

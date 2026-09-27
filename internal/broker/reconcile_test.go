@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,6 +49,12 @@ const (
 var recAudioA = bytes.Repeat([]byte{0x4f, 0x67, 0x67, 0x53, 0x01, 0x02, 0x03, 0x04}, 512)
 var recAudioC = bytes.Repeat([]byte{0x4f, 0x67, 0x67, 0x53, 0x05, 0x06, 0x07, 0x08}, 512)
 var recAudioShort = bytes.Repeat([]byte{0x4f, 0x67, 0x67, 0x53, 0x09, 0x0a, 0x0b, 0x0c}, 512)
+
+// Recorded timeline bodies. The provider names a timeline beside every
+// recording, and the reconciler stores both, because both URLs expire.
+var recTimelineA = []byte(`{"session":"prov-a","turns":[{"speaker":"host","start_ms":0}]}`)
+var recTimelineC = []byte(`{"session":"prov-c","turns":[]}`)
+var recTimelineShort = []byte(`{"session":"prov-short","turns":[]}`)
 
 // recReader replays recorded bodies through the real decoder, so the decode
 // stays pinned while no test touches the network.
@@ -186,7 +193,7 @@ func newRecFixtureClock(t *testing.T, nowFn func() time.Time, leaseCap time.Dura
 	media, err := mediastore.Open(t.Context(), mediastore.Config{
 		Dir:          mediaDir,
 		Index:        mediaIndex,
-		ContentTypes: []string{"audio/ogg"},
+		ContentTypes: []string{"audio/ogg", "application/json"},
 	})
 	if err != nil {
 		t.Fatalf("open media store: %v", err)
@@ -208,8 +215,11 @@ func newRecFixtureClock(t *testing.T, nowFn func() time.Time, leaseCap time.Dura
 		}},
 		Artifacts: recFetcher{blobs: map[string][]byte{
 			"https://artifacts.example/rec-a.ogg":     recAudioA,
+			"https://artifacts.example/tl-a.json":     recTimelineA,
 			"https://artifacts.example/rec-c.ogg":     recAudioC,
+			"https://artifacts.example/tl-c.json":     recTimelineC,
 			"https://artifacts.example/rec-short.ogg": recAudioShort,
+			"https://artifacts.example/tl-short.json": recTimelineShort,
 		}},
 		Budgets:              budgets,
 		Leases:               manager,
@@ -401,8 +411,24 @@ func TestReconcileSettlesEveryHold(t *testing.T) {
 	if !bytes.Equal(raw, recAudioA) {
 		t.Fatalf("stored recording holds %d bytes, want the artifact bytes", len(raw))
 	}
+	if resA.TimelineMediaID == "" {
+		t.Fatalf("session A stored no timeline")
+	}
+	timeline, err := os.ReadFile(filepath.Join(fx.mediaDir, resA.TimelineMediaID))
+	if err != nil {
+		t.Fatalf("read stored timeline: %v", err)
+	}
+	if !bytes.Equal(timeline, recTimelineA) {
+		t.Fatalf("stored timeline holds %d bytes, want the artifact bytes", len(timeline))
+	}
 	if resB.RecordingMediaID != "" {
 		t.Fatalf("session B without a recording URL stored %q", resB.RecordingMediaID)
+	}
+	if resB.TimelineMediaID != "" {
+		t.Fatalf("session B without a timeline URL stored %q", resB.TimelineMediaID)
+	}
+	if resC.TimelineMediaID == "" {
+		t.Fatalf("session C stored no timeline")
 	}
 	if resC.TimelineURL != "https://artifacts.example/tl-c.json" {
 		t.Fatalf("session C timeline %q is wrong", resC.TimelineURL)
@@ -429,6 +455,167 @@ func TestReconcileSecondRunSettlesOnce(t *testing.T) {
 	}
 	if second != first {
 		t.Fatalf("retry result %+v differs from %+v", second, first)
+	}
+}
+
+// countingFetcher serves artifact bytes and counts every fetch per URL.
+// The counts pin that a repeated end fetches nothing new.
+type countingFetcher struct {
+	mu      sync.Mutex
+	blobs   map[string][]byte
+	fetches map[string]int
+}
+
+func (f *countingFetcher) Fetch(_ context.Context, artifactURL string) (io.ReadCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	raw, ok := f.blobs[artifactURL]
+	if !ok {
+		return nil, fmt.Errorf("countingFetcher: unknown artifact: %w", ErrRead)
+	}
+	if f.fetches == nil {
+		f.fetches = map[string]int{}
+	}
+	f.fetches[artifactURL]++
+	return io.NopCloser(bytes.NewReader(raw)), nil
+}
+
+func (f *countingFetcher) count(artifactURL string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.fetches[artifactURL]
+}
+
+// recMediaTypes counts the stored blobs for one episode by content type.
+// The episode group holds the recording and the timeline beside it.
+func recMediaTypes(t *testing.T, db *sqlite.DB, episodeID string) map[string]int {
+	t.Helper()
+	rows, err := db.Reader().QueryContext(t.Context(),
+		`SELECT content_type, COUNT(*) FROM media WHERE media_group = ? GROUP BY content_type`, episodeID)
+	if err != nil {
+		t.Fatalf("list episode media: %v", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var contentType string
+		var held int
+		if err := rows.Scan(&contentType, &held); err != nil {
+			t.Fatalf("scan episode media: %v", err)
+		}
+		out[contentType] = held
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("list episode media: %v", err)
+	}
+	return out
+}
+
+// TestReconcileRepeatEndStoresNothingNew posts the end twice for one
+// session. The first reconcile settles and stores one recording and one
+// timeline. The second returns the stored ids without fetching,
+// spending, or storing again.
+func TestReconcileRepeatEndStoresNothingNew(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-a")
+	fetcher := &countingFetcher{blobs: map[string][]byte{
+		"https://artifacts.example/rec-a.ogg": recAudioA,
+		"https://artifacts.example/tl-a.json": recTimelineA,
+	}}
+	fx.rec.artifacts = fetcher
+
+	first, err := fx.rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	if first.RecordingMediaID == "" || first.TimelineMediaID == "" {
+		t.Fatalf("first result %+v stored no recording and timeline pair", first)
+	}
+	if first.RecordingMediaID == first.TimelineMediaID {
+		t.Fatalf("recording and timeline share media %q, want two blobs", first.RecordingMediaID)
+	}
+	spent := recSpent(t, fx.costs)
+
+	second, err := fx.rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if second != first {
+		t.Fatalf("second result %+v differs from %+v", second, first)
+	}
+	if got := fetcher.count("https://artifacts.example/rec-a.ogg"); got != 1 {
+		t.Fatalf("recording fetched %d times, want exactly once", got)
+	}
+	if got := fetcher.count("https://artifacts.example/tl-a.json"); got != 1 {
+		t.Fatalf("timeline fetched %d times, want exactly once", got)
+	}
+	if got := recSpent(t, fx.costs); got != spent {
+		t.Fatalf("spent moved %d to %d on a repeat end", spent, got)
+	}
+	if held := recReserved(t, fx.costs); held != 0 {
+		t.Fatalf("held %d after a repeat end, want none held", held)
+	}
+	held := recMediaTypes(t, fx.db, in.EpisodeID)
+	if held["audio/ogg"] != 1 || held["application/json"] != 1 || len(held) != 2 {
+		t.Fatalf("episode media %v, want one recording and one timeline", held)
+	}
+}
+
+// TestReconcileConcurrentEndsStoreOnce runs two reconciles for one
+// session at once, the way two end posts start two jobs. One pass
+// settles and stores, the other waits and then reuses the stored rows,
+// so the media table holds one recording and one timeline.
+func TestReconcileConcurrentEndsStoreOnce(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-a")
+	fetcher := &countingFetcher{blobs: map[string][]byte{
+		"https://artifacts.example/rec-a.ogg": recAudioA,
+		"https://artifacts.example/tl-a.json": recTimelineA,
+	}}
+	fx.rec.artifacts = fetcher
+
+	const ends = 2
+	results := make([]Result, ends)
+	errs := make([]error, ends)
+	ready := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-ready
+			res, err := fx.rec.Reconcile(t.Context(), in)
+			results[i], errs[i] = res, err
+		}()
+	}
+	close(ready)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("end %d: %v", i, err)
+		}
+	}
+	if results[0] != results[1] {
+		t.Fatalf("concurrent results %+v and %+v differ", results[0], results[1])
+	}
+	if results[0].RecordingMediaID == "" || results[0].TimelineMediaID == "" {
+		t.Fatalf("concurrent result %+v stored no recording and timeline pair", results[0])
+	}
+	if got := fetcher.count("https://artifacts.example/rec-a.ogg"); got != 1 {
+		t.Fatalf("recording fetched %d times, want exactly once", got)
+	}
+	if got := fetcher.count("https://artifacts.example/tl-a.json"); got != 1 {
+		t.Fatalf("timeline fetched %d times, want exactly once", got)
+	}
+	if got := recSpent(t, fx.costs); got != recRate*372 {
+		t.Fatalf("spent %d, want exactly one settle at %d", got, recRate*372)
+	}
+	if held := recReserved(t, fx.costs); held != 0 {
+		t.Fatalf("held %d after concurrent ends, want none held", held)
+	}
+	held := recMediaTypes(t, fx.db, in.EpisodeID)
+	if held["audio/ogg"] != 1 || held["application/json"] != 1 || len(held) != 2 {
+		t.Fatalf("episode media %v, want one recording and one timeline", held)
 	}
 }
 
@@ -555,6 +742,41 @@ func TestReconcileAlertColumnMigrates(t *testing.T) {
 	}
 	if !restored {
 		t.Fatalf("alert column is missing after reopen")
+	}
+}
+
+func TestReconcileTimelineColumnMigrates(t *testing.T) {
+	fx := newRecFixture(t)
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`ALTER TABLE reconcile_state DROP COLUMN timeline_media_id`); err != nil {
+		t.Fatalf("drop timeline column: %v", err)
+	}
+	rec, err := NewReconciler(ReconcilerConfig{
+		DB:       fx.db,
+		Sessions: recReader{docs: map[string]string{"prov-a": recDocA}},
+		Artifacts: recFetcher{blobs: map[string][]byte{
+			"https://artifacts.example/rec-a.ogg": recAudioA,
+			"https://artifacts.example/tl-a.json": recTimelineA,
+		}},
+		Budgets: fx.budgets,
+		Leases:  fx.leases,
+		Diary:   fx.diary,
+		Media:   fx.media,
+	})
+	if err != nil {
+		t.Fatalf("reopen reconciler: %v", err)
+	}
+	in := fx.mintSession("prov-a")
+	res, err := rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("reconcile on migrated table: %v", err)
+	}
+	if res.RecordingMediaID == "" || res.TimelineMediaID == "" {
+		t.Fatalf("migrated result %+v stored no recording and timeline pair", res)
+	}
+	held := recMediaTypes(t, fx.db, in.EpisodeID)
+	if held["audio/ogg"] != 1 || held["application/json"] != 1 || len(held) != 2 {
+		t.Fatalf("episode media %v, want one recording and one timeline", held)
 	}
 }
 
