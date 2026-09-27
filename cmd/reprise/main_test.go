@@ -1410,3 +1410,193 @@ func TestCompletionUnknownIDsNameMissing(t *testing.T) {
 		}
 	}
 }
+
+// scriptedTranscript answers one batch pass. The first fetch is the
+// completed guest word. The fetch after delete is the deletion marker.
+func scriptedTranscript() *httptest.Server {
+	var mu sync.Mutex
+	gets := 0
+	completed := `{"id":"tx-host","status":"completed","text":"guest","audio_duration":1,` +
+		`"words":[{"text":"guest","start":100,"end":250,"confidence":0.9,"speaker":null}]}`
+	deleted := `{"id":"tx-host","status":"completed","text":"Deleted by user.",` +
+		`"audio_url":"http://deleted_by_user","confidence":null,"words":null}`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"upload_url":"http://`+r.Host+`/audio/host"}`)
+	})
+	mux.HandleFunc("/v2/transcript", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"tx-host","status":"queued"}`)
+	})
+	mux.HandleFunc("/v2/transcript/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		mu.Lock()
+		gets++
+		body := deleted
+		if gets == 1 {
+			body = completed
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	})
+	return httptest.NewServer(mux)
+}
+
+// waitWireJobs waits until id is done and no job is still running.
+func waitWireJobs(t *testing.T, store job.Store, id string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		rec, err := store.Get(t.Context(), id)
+		if err != nil {
+			t.Fatalf("read job: %v", err)
+		}
+		switch rec.Status {
+		case job.StatusDone:
+		case job.StatusError, job.StatusCancelled, job.StatusInterrupted:
+			t.Fatalf("job %s ended %s: %v", id, rec.Status, rec.Err)
+		default:
+			if time.Now().After(deadline) {
+				t.Fatalf("job %s stayed %s", id, rec.Status)
+			}
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		left, err := store.Unfinished(t.Context())
+		if err != nil {
+			t.Fatalf("list jobs: %v", err)
+		}
+		if len(left) == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("jobs still running: %d", len(left))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestTranscriptStoresHostWordsAtReplyTimes runs one transcript for an
+// episode whose timeline holds two host replies. The stored host words
+// sit on those reply spans, shifted by the stem offsets. Passing no
+// host replies leaves only the guest word, so this test fails.
+func TestTranscriptStoresHostWordsAtReplyTimes(t *testing.T) {
+	fx := openWireFixture(t)
+	const owner = "owner-host-replies"
+	insertWireUser(t, fx, owner)
+	diary, err := broker.NewSQLiteDiary(fx.db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	episodeID, sessionID, err := diary.CreateEpisodeAndSession(t.Context(), owner, 1800)
+	if err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+	body := sineWAV()
+	userID := persistStemAudio(t, fx, owner, episodeID, body)
+	hostID := persistStemAudio(t, fx, owner, episodeID, body)
+	stems := []struct {
+		role   string
+		media  string
+		offset int64
+	}{
+		{transcript.RoleUser, userID, 20},
+		{transcript.RoleHost, hostID, 50},
+	}
+	for _, row := range stems {
+		if _, err := fx.db.Writer().ExecContext(t.Context(),
+			`INSERT INTO stems (id, owner_id, episode_id, media_id, role, sample_rate, start_offset_ms)
+			 VALUES (?, ?, ?, ?, ?, 8000, ?)`,
+			"stem-"+row.role, owner, episodeID, row.media, row.role, row.offset); err != nil {
+			t.Fatalf("link %s stem: %v", row.role, err)
+		}
+	}
+	const sessionStart int64 = 5_000_000
+	timeline, err := json.Marshal(map[string]any{
+		"started_at_unix_ms": sessionStart,
+		"turns": []any{
+			map[string]any{
+				"agent_text":                "Alpha Beta",
+				"agent_reply_started_at_ms": sessionStart + 1000,
+				"agent_reply_ended_at_ms":   sessionStart + 1600,
+			},
+			map[string]any{
+				"user_transcript": "not-host",
+			},
+			map[string]any{
+				"agent_text":                "Gamma",
+				"agent_reply_started_at_ms": sessionStart + 4000,
+				"agent_reply_ended_at_ms":   sessionStart + 4800,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode timeline: %v", err)
+	}
+	timelineID, err := fx.media.Persist(t.Context(), bytes.NewReader(timeline), mediastore.Put{
+		ContentType: "application/json",
+		Owner:       owner,
+		Group:       episodeID,
+		Visibility:  mediastore.Private,
+	})
+	if err != nil {
+		t.Fatalf("persist timeline: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`CREATE TABLE IF NOT EXISTS reconcile_state (
+			session_id TEXT PRIMARY KEY,
+			timeline_media_id TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create claim table: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`INSERT INTO reconcile_state (session_id, timeline_media_id) VALUES (?, ?)`,
+		sessionID, timelineID); err != nil {
+		t.Fatalf("store timeline id: %v", err)
+	}
+	server := scriptedTranscript()
+	t.Cleanup(server.Close)
+	batch, err := assemblyai.NewBatchClient(assemblyai.Config{
+		BaseURL: server.URL,
+		APIKey:  "probe-key",
+		Model:   "test-transcription",
+		Client:  server.Client(),
+	})
+	if err != nil {
+		t.Fatalf("open batch client: %v", err)
+	}
+	fx.pipe.batch = batch
+	drafts := openDraftJobs(t, fx)
+	jobID, started, err := drafts.startTranscript(t.Context(), owner, episodeID)
+	if err != nil || !started || jobID == "" {
+		t.Fatalf("start transcript = %q %v err %v, want a job", jobID, started, err)
+	}
+	waitWireJobs(t, drafts.store, jobID)
+	stored, err := transcript.Load(t.Context(), fx.db.Writer(), episodeID)
+	if err != nil {
+		t.Fatalf("load words: %v", err)
+	}
+	// Guest 100 to 250 plus the user offset of 20.
+	// Alpha Beta runs 1000 to 1600 on the host stem, two equal slices,
+	// then the host offset of 50. Gamma runs 4000 to 4800, plus 50.
+	want := []transcript.Stored{
+		{Text: "guest", StartMs: 120, EndMs: 270},
+		{Text: "Alpha", StartMs: 1050, EndMs: 1350},
+		{Text: "Beta", StartMs: 1350, EndMs: 1650},
+		{Text: "Gamma", StartMs: 4050, EndMs: 4850},
+	}
+	if len(stored) != len(want) {
+		t.Fatalf("stored = %+v, want %d words at the reply times", stored, len(want))
+	}
+	for i := range want {
+		if stored[i].Text != want[i].Text || stored[i].StartMs != want[i].StartMs || stored[i].EndMs != want[i].EndMs {
+			t.Fatalf("word %d = %+v, want %+v", i, stored[i], want[i])
+		}
+	}
+}

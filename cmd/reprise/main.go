@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -2200,10 +2201,8 @@ func probeHeadedAudio(ctx context.Context, audio []byte) (float64, error) {
 }
 
 // editInputs reads both stem blobs and probes the user stem length for one
-// transcript or editorial run. Host replies stay empty and offsets stay
-// zero, because the live pass stores no host word timings and no alignment
-// pass has landed. The merge then carries the user timeline the editor cuts
-// against.
+// transcript or editorial run. Reply timings and stem offsets are not in
+// this result. The transcript start reads those on its own.
 func (j *jobs) editInputs(ctx context.Context, ownerID, episodeID string) (userAudio, hostAudio []byte, durationSecs float64, err error) {
 	userPath, hostPath, _, _, err := j.pipe.locateStems(ctx, ownerID, episodeID)
 	if err != nil {
@@ -2349,16 +2348,200 @@ func (j *jobs) settleTranscript(ctx context.Context, ownerID, episodeID string, 
 	return out, nil
 }
 
+// timelineFile is the persisted provider timeline. Turns carry each host
+// reply as text with absolute times. Per-word offsets are not in this file.
+type timelineFile struct {
+	StartedAtUnixMs int64           `json:"started_at_unix_ms"`
+	Turns           json.RawMessage `json:"turns"`
+}
+
+// timelineTurn is one provider turn. A host reply has text and a start.
+// An end or an interrupt bounds how long the reply played.
+type timelineTurn struct {
+	AgentText             string `json:"agent_text"`
+	AgentReplyStartedAtMs *int64 `json:"agent_reply_started_at_ms"`
+	AgentReplyEndedAtMs   *int64 `json:"agent_reply_ended_at_ms"`
+	InterruptedAtMs       *int64 `json:"interrupted_at_ms"`
+}
+
+// hostReplies reads the persisted provider timeline for one episode and
+// returns each host reply. No stored timeline returns no replies. A
+// timeline that cannot be read or parsed returns an error, so the job
+// does not start without the host side.
+func (j *jobs) hostReplies(ctx context.Context, ownerID, episodeID string) ([]transcript.HostReply, error) {
+	mediaID, err := j.timelineMediaID(ctx, ownerID, episodeID)
+	if err != nil {
+		return nil, err
+	}
+	if mediaID == "" {
+		return nil, nil
+	}
+	raw, err := j.readMediaFile(mediaID)
+	if err != nil {
+		return nil, err
+	}
+	replies, err := repliesFromTimeline(raw)
+	if err != nil {
+		return nil, err
+	}
+	return replies, nil
+}
+
+// timelineMediaID returns the stored provider timeline blob for one
+// episode, or empty when none was kept. The claim row names that blob.
+func (j *jobs) timelineMediaID(ctx context.Context, ownerID, episodeID string) (string, error) {
+	var tables int
+	if err := j.pipe.db.Reader().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'reconcile_state'`).Scan(&tables); err != nil {
+		return "", fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	if tables == 0 {
+		return "", nil
+	}
+	var mediaID string
+	err := j.pipe.db.Reader().QueryRowContext(ctx,
+		`SELECT r.timeline_media_id FROM sessions s
+		 JOIN reconcile_state r ON r.session_id = s.id
+		 WHERE s.owner_id = ? AND s.episode_id = ? AND r.timeline_media_id != ''
+		 ORDER BY s.rowid DESC LIMIT 1`, ownerID, episodeID).Scan(&mediaID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	return mediaID, nil
+}
+
+// readMediaFile reads one blob from the media directory by id.
+func (j *jobs) readMediaFile(mediaID string) ([]byte, error) {
+	root, err := os.OpenRoot(j.pipe.mediaDir)
+	if err != nil {
+		return nil, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	defer root.Close()
+	f, err := root.Open(mediaID)
+	if err != nil {
+		return nil, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("reprise: read timeline: %w", err)
+	}
+	return raw, nil
+}
+
+// repliesFromTimeline turns one provider timeline into host replies.
+// Turns with no host text are skipped. A reply start is milliseconds
+// from the session start, which is the host stem clock.
+func repliesFromTimeline(raw []byte) ([]transcript.HostReply, error) {
+	var doc timelineFile
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("reprise: host replies: %w", err)
+	}
+	turnsRaw := bytes.TrimSpace(doc.Turns)
+	if len(turnsRaw) == 0 || bytes.Equal(turnsRaw, []byte("null")) {
+		return nil, fmt.Errorf("reprise: host replies: timeline has no turns")
+	}
+	var turns []timelineTurn
+	if err := json.Unmarshal(turnsRaw, &turns); err != nil {
+		return nil, fmt.Errorf("reprise: host replies: %w", err)
+	}
+	var replies []transcript.HostReply
+	for _, turn := range turns {
+		parts := strings.Fields(turn.AgentText)
+		if len(parts) == 0 || turn.AgentReplyStartedAtMs == nil {
+			continue
+		}
+		if doc.StartedAtUnixMs <= 0 {
+			return nil, fmt.Errorf("reprise: host replies: timeline has no session start")
+		}
+		start := *turn.AgentReplyStartedAtMs - doc.StartedAtUnixMs
+		if start < 0 {
+			return nil, fmt.Errorf("reprise: host replies: reply starts before the session")
+		}
+		end, err := replyEnd(turn, doc.StartedAtUnixMs, start)
+		if err != nil {
+			return nil, err
+		}
+		replies = append(replies, transcript.HostReply{
+			StartMs: start,
+			Words:   wordsOnReply(parts, end-start),
+		})
+	}
+	return replies, nil
+}
+
+// replyEnd returns the reply end on the session clock. An interrupt
+// stops the reply early when it lands before the planned end. A reply
+// with neither end uses its start, so the words sit on that instant.
+func replyEnd(turn timelineTurn, sessionStart, start int64) (int64, error) {
+	endAbs := turn.AgentReplyEndedAtMs
+	if turn.InterruptedAtMs != nil && (endAbs == nil || *turn.InterruptedAtMs < *endAbs) {
+		endAbs = turn.InterruptedAtMs
+	}
+	if endAbs == nil {
+		return start, nil
+	}
+	end := *endAbs - sessionStart
+	if end < start {
+		return 0, fmt.Errorf("reprise: host replies: reply ends before it starts")
+	}
+	return end, nil
+}
+
+// wordsOnReply places words across a reply in equal slices. The stored
+// timeline records the reply text and its bounds, not a time per word.
+// The first word starts with the reply. The last word ends with it.
+func wordsOnReply(parts []string, span int64) []transcript.HostWord {
+	words := make([]transcript.HostWord, len(parts))
+	n := int64(len(parts))
+	for i, part := range parts {
+		words[i] = transcript.HostWord{
+			Text:    part,
+			StartMs: span * int64(i) / n,
+			EndMs:   span * int64(i+1) / n,
+		}
+	}
+	return words
+}
+
+// stemOffsets reads the alignment shift each stem row records. The
+// transcript merge adds these to put both stems on the episode clock.
+func (j *jobs) stemOffsets(ctx context.Context, ownerID, episodeID string) (transcript.Offsets, error) {
+	found, err := linkedStemFiles(ctx, j.pipe.db, ownerID, episodeID)
+	if err != nil {
+		return transcript.Offsets{}, err
+	}
+	user, userOK := found[transcript.RoleUser]
+	host, hostOK := found[transcript.RoleHost]
+	if !userOK || !hostOK {
+		return transcript.Offsets{}, fmt.Errorf("reprise: stem offsets: missing stem")
+	}
+	return transcript.Offsets{UserMs: user.offset, HostMs: host.offset}, nil
+}
+
 // startTranscript reads both stems and starts one transcript job chained to
-// its settlement. It stamps the episode on the job before returning, so
-// a repeat completion meets a described job. A stamp failure cancels the job
-// and reports the error, so no silent job keeps running.
+// its settlement. Host replies come from the stored provider timeline.
+// Stem offsets come from the stem rows. It stamps the episode on the job
+// before returning, so a repeat completion meets a described job. A stamp
+// failure cancels the job and reports the error, so no silent job keeps
+// running.
 func (j *jobs) startTranscript(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
 	userAudio, _, durationSecs, err := j.editInputs(ctx, ownerID, episodeID)
 	if err != nil {
 		return "", false, err
 	}
-	inner := j.pipe.editTranscriptFunc(ownerID, episodeID, userAudio, durationSecs, nil, transcript.Offsets{})
+	replies, err := j.hostReplies(ctx, ownerID, episodeID)
+	if err != nil {
+		return "", false, err
+	}
+	offsets, err := j.stemOffsets(ctx, ownerID, episodeID)
+	if err != nil {
+		return "", false, err
+	}
+	inner := j.pipe.editTranscriptFunc(ownerID, episodeID, userAudio, durationSecs, replies, offsets)
 	chained := func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
 		out, runErr := inner(ctx, progress)
 		return j.settleTranscript(ctx, ownerID, episodeID, out, runErr)
