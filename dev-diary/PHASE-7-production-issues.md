@@ -974,7 +974,7 @@ requires:   T7.35
 fixture-ok: yes
 size:       S · mid
 owns:       internal/render/
-status:     in-progress:implement:t7.37-impl
+status:     in-progress:review-r1:t7.37-rev-r1@bea98ae4278af4ba5c1ffd8cfe5d0b02d98b3a5e
 ```
 Capture keeps noise suppression off by design, because `voice_focus`
 cleans what the provider hears. Nothing cleans the stem the render
@@ -998,7 +998,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/gemini/
-status:     in-progress:implement:t7.38-impl
+status:     in-progress:review-r1:t7.38-rev-r1@2804f0403a53edc0650da6e6144cea7d7cd92786
 ```
 A 142 second live take fell back to "Untitled episode (76 words)". The
 box logged `editorial: decode: editorial: model failed: unexpected
@@ -1021,7 +1021,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · mid
 owns:       internal/broker/
-status:     in-progress:implement:t7.39-impl
+status:     in-progress:review-r1:t7.39-rev-r1@d5c80154332920aaf1f059ef7ecfb70774d7da5d
 ```
 Every live take on 2026-09-27 ran two reconcile jobs for one session.
 On the Firefox take each job stored its own copy of the provider
