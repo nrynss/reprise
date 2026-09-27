@@ -916,7 +916,7 @@ requires:   T7.26, T7.27
 fixture-ok: yes
 size:       L · frontier
 owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/host-stem.ts, web/src/lib/voice/host-stem.test.ts, web/src/lib/voice/session-calls.ts, web/src/lib/voice/socket.ts, web/package.json, web/package-lock.json, README.md
-status:     in-progress:review-r1:t7.36-rev-r1@19be55d5f154ee5c0569e224ce2b057b1e2ff1b3
+status:     in-progress:land:t7.36-land@19be55d5f154ee5c0569e224ce2b057b1e2ff1b3
 ```
 The host stem appends each block as it arrives, so the silence between
 replies never reaches it. A live Chrome take put host speech at 4.66,
