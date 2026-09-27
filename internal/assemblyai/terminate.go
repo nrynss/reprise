@@ -1,7 +1,8 @@
 // Session records beside one Voice Agent session live here. Fetching reads
-// the record, terminating deletes it. Deleting removes the record while a
-// connected socket stays open and billable, so deletion never stands in
-// for ending the call. The caller ends the socket first, then deletes.
+// the record. EndSession writes session.end on the live socket, then
+// deletes the record. A delete alone leaves a connected socket open and
+// billable. A socket that is already gone still deletes. A second end
+// does not open a new socket.
 package assemblyai
 
 import (
@@ -12,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -65,20 +67,33 @@ type SessionStatus struct {
 	Artifacts []SessionArtifact `json:"artifacts"`
 }
 
-// TerminateResult is one session record delete.
+// TerminateResult is one session end. The delete is the record removal.
+// SocketEnded reports whether the end frame was written first.
 type TerminateResult struct {
 	// Deleted reports the provider removed the record on this call. False
 	// means the record was already gone, which still counts as success.
 	Deleted bool `json:"deleted"`
+	// SocketEnded reports session.end was written on a live socket before
+	// the delete. False means no socket took the frame.
+	SocketEnded bool `json:"socket_ended"`
 }
 
 // SessionsClient reads and deletes provider session records over plain
-// HTTPS. Create it with NewSessionsClient, because the zero value has no
-// key and no transport. A SessionsClient is safe for concurrent use.
+// HTTPS, and it ends a live voice socket before that delete. Create it
+// with NewSessionsClient, because the zero value has no key and no
+// transport. A SessionsClient is safe for concurrent use.
 type SessionsClient struct {
 	base string
 	key  string
 	http *http.Client
+
+	// mu guards gates and dial. The per session gate is held across a dial
+	// so two ends of one session cannot open two sockets.
+	mu    sync.Mutex
+	gates map[string]*endGate
+	// dial opens a voice socket when no live socket is held. Nil skips
+	// the dial and treats the socket as already gone.
+	dial func(context.Context, string) (LiveSocket, error)
 }
 
 // NewSessionsClient returns a SessionsClient that reads against baseURL
@@ -91,7 +106,14 @@ func NewSessionsClient(baseURL, apiKey string, transport *http.Client) (*Session
 	if transport == nil {
 		transport = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &SessionsClient{base: strings.TrimSuffix(baseURL, "/"), key: apiKey, http: transport}, nil
+	client := &SessionsClient{
+		base:  strings.TrimSuffix(baseURL, "/"),
+		key:   apiKey,
+		http:  transport,
+		gates: map[string]*endGate{},
+	}
+	client.dial = client.dialVoice
+	return client, nil
 }
 
 // FetchSession returns the provider record for a session id. A record the
@@ -132,10 +154,9 @@ func (c *SessionsClient) FetchSession(ctx context.Context, sessionID string) (Se
 }
 
 // TerminateSession deletes the provider record for a session id. Deleting
-// removes the record while a connected socket stays open and billable, so
-// the caller settles first and deletes after. A record that is already
-// gone reports success with Deleted false, because ending an ended
-// session stays safe.
+// alone leaves a connected socket open and billable. EndSession writes
+// the end frame first. A record that is already gone reports success
+// with Deleted false, because ending an ended session stays safe.
 func (c *SessionsClient) TerminateSession(ctx context.Context, sessionID string) (TerminateResult, error) {
 	if sessionID == "" {
 		return TerminateResult{}, fmt.Errorf("assemblyai: terminate session: %w: session id must not be empty", ErrInvalid)

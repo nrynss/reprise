@@ -192,9 +192,9 @@ func NewSessionsAdapter(client *assemblyai.SessionsClient) (*SessionsAdapter, er
 
 // ReadSession returns the provider session for the reconciler. A record
 // the provider no longer keeps reports ErrRead, because a settle prices
-// nothing without a duration. An open record with no duration yet
-// reports ErrRead for the same reason, and the sweep path measures open
-// sessions from their start time instead.
+// nothing without a duration. An open record reports ErrSessionOpen,
+// which wraps ErrRead. The sweep measures open sessions from their start
+// time instead of this read.
 func (a *SessionsAdapter) ReadSession(ctx context.Context, providerSessionID string) (ProviderSession, error) {
 	if a == nil || a.client == nil {
 		return ProviderSession{}, fmt.Errorf("broker: read session: %w: adapter has no client", ErrInvalid)
@@ -206,7 +206,10 @@ func (a *SessionsAdapter) ReadSession(ctx context.Context, providerSessionID str
 	if err != nil {
 		return ProviderSession{}, fmt.Errorf("broker: read session %s: %w: %w", providerSessionID, ErrRead, err)
 	}
-	if status.DurationSeconds == nil || *status.DurationSeconds < 0 {
+	if status.DurationSeconds == nil {
+		return ProviderSession{}, fmt.Errorf("broker: read session %s: %w", providerSessionID, ErrSessionOpen)
+	}
+	if *status.DurationSeconds < 0 {
 		return ProviderSession{}, fmt.Errorf("broker: read session %s: %w: duration is missing", providerSessionID, ErrRead)
 	}
 	return ProviderSession{
@@ -253,21 +256,39 @@ func (a *SessionsAdapter) ReadStatus(ctx context.Context, providerSessionID stri
 	return out, nil
 }
 
-// EndSession deletes the provider record after the settle. A record
-// already gone reports success without a delete, because ending an
-// ended session stays safe.
+// StopSocket writes session.end on the live socket and does not delete
+// the record. A socket that is already gone returns no error. A second
+// call does not open a new socket.
+func (a *SessionsAdapter) StopSocket(ctx context.Context, providerSessionID string) error {
+	if a == nil || a.client == nil {
+		return fmt.Errorf("broker: stop socket: %w: adapter has no client", ErrInvalid)
+	}
+	if _, err := a.client.StopSocket(ctx, providerSessionID); err != nil {
+		return fmt.Errorf("broker: stop socket %s: %w", providerSessionID, err)
+	}
+	return nil
+}
+
+// EndSession writes session.end on a live socket, then deletes the
+// provider record. A socket that is already gone still deletes. A second
+// end does not open a new socket. A record that is already gone reports
+// success with Deleted false.
 func (a *SessionsAdapter) EndSession(ctx context.Context, providerSessionID string) (EndResult, error) {
 	if a == nil || a.client == nil {
 		return EndResult{}, fmt.Errorf("broker: end session: %w: adapter has no client", ErrInvalid)
 	}
-	res, err := a.client.TerminateSession(ctx, providerSessionID)
+	res, err := a.client.EndSession(ctx, providerSessionID)
 	if err != nil {
 		return EndResult{}, fmt.Errorf("broker: end session %s: %w: %w", providerSessionID, ErrSweep, err)
 	}
 	if !res.Deleted {
-		return EndResult{Deleted: false, Detail: "provider record already gone"}, nil
+		return EndResult{Deleted: false, SocketEnded: res.SocketEnded, Detail: "provider record already gone"}, nil
 	}
-	return EndResult{Deleted: true, Detail: "provider record deleted"}, nil
+	detail := "provider record deleted"
+	if res.SocketEnded {
+		detail = "socket ended, provider record deleted"
+	}
+	return EndResult{Deleted: true, SocketEnded: res.SocketEnded, Detail: detail}, nil
 }
 
 // artifactURL picks the download URL of the first artifact of one type.

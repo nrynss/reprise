@@ -67,6 +67,10 @@ var (
 	// ErrRead reports a provider session read or artifact fetch that
 	// failed. Reads repeat safely, so the job retries them.
 	ErrRead = errors.New("broker: read provider session")
+	// ErrSessionOpen reports a provider session that is still running.
+	// It wraps ErrRead, so a caller that only retries reads still matches.
+	// The reconcile stops the live socket and reads once more.
+	ErrSessionOpen = fmt.Errorf("broker: provider session is still open: %w", ErrRead)
 	// ErrSettle reports a budget settle or lease close that failed after
 	// the claim was taken. The claim stays, so a resume reviews instead
 	// of spending twice.
@@ -759,9 +763,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, in Input) (Result, error) {
 	if row.claimed {
 		return r.resumeClaimed(ctx, in)
 	}
-	read, err := r.sessions.ReadSession(ctx, in.ProviderSessionID)
+	read, err := r.readForSettle(ctx, in.ProviderSessionID)
 	if err != nil {
-		return Result{}, fmt.Errorf("broker: reconcile: read session %s: %w", in.ProviderSessionID, err)
+		return Result{}, err
 	}
 	if read.DurationSeconds < 0 {
 		return Result{}, fmt.Errorf("broker: reconcile: %w: provider duration is negative", ErrRead)
@@ -836,6 +840,52 @@ func (r *Reconciler) IsSettled(ctx context.Context, sessionID string) (bool, err
 		return false, fmt.Errorf("broker: read settle state: %w", ErrState)
 	}
 	return settled != 0, nil
+}
+
+// socketStopper writes session.end on a live socket and does not delete
+// the provider record. Reconcile uses it when a read finds the session
+// still open, so the next read can see a duration.
+type socketStopper interface {
+	StopSocket(ctx context.Context, providerSessionID string) error
+}
+
+// readForSettle reads the provider duration. An open session is ended
+// first, then read once more, so the settle prices the closed call.
+// The delete waits until the artifacts are stored.
+func (r *Reconciler) readForSettle(ctx context.Context, providerSessionID string) (ProviderSession, error) {
+	read, err := r.sessions.ReadSession(ctx, providerSessionID)
+	if err == nil {
+		return read, nil
+	}
+	if !errors.Is(err, ErrSessionOpen) {
+		return ProviderSession{}, fmt.Errorf("broker: reconcile: read session %s: %w", providerSessionID, err)
+	}
+	stop, ok := r.sessions.(socketStopper)
+	if !ok {
+		return ProviderSession{}, fmt.Errorf("broker: reconcile: read session %s: %w", providerSessionID, err)
+	}
+	if serr := stop.StopSocket(ctx, providerSessionID); serr != nil {
+		return ProviderSession{}, fmt.Errorf("broker: reconcile: end live socket %s: %w", providerSessionID, serr)
+	}
+	read, err = r.sessions.ReadSession(ctx, providerSessionID)
+	if err != nil {
+		return ProviderSession{}, fmt.Errorf("broker: reconcile: read session %s: %w", providerSessionID, err)
+	}
+	return read, nil
+}
+
+// endProvider deletes the provider record after the artifacts are stored.
+// The end writes session.end before that delete when a socket is live.
+// A reader that cannot end is left for the sweep, which uses the same end.
+func (r *Reconciler) endProvider(ctx context.Context, providerSessionID string) error {
+	ender, ok := r.sessions.(SessionEnder)
+	if !ok || providerSessionID == "" {
+		return nil
+	}
+	if _, err := ender.EndSession(ctx, providerSessionID); err != nil {
+		return fmt.Errorf("broker: end provider session %s: %w", providerSessionID, err)
+	}
+	return nil
 }
 
 // settleRead books one provider duration: the price at the session rate,
@@ -1011,11 +1061,17 @@ func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow
 		r.alert(ctx, &res, AlertOverCap, in.OwnerID,
 			fmt.Sprintf("session ran %d seconds past a %d second cap", res.ConnectedSeconds, in.TokenCapSeconds))
 		if res.AlertError != "" {
+			if err := r.endProvider(ctx, in.ProviderSessionID); err != nil {
+				return res, err
+			}
 			return res, nil
 		}
 		if err := r.markOverCapAlerted(ctx, in.SessionID); err != nil {
 			return res, err
 		}
+	}
+	if err := r.endProvider(ctx, in.ProviderSessionID); err != nil {
+		return res, err
 	}
 	return res, nil
 }

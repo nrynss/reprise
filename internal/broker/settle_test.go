@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,7 +149,12 @@ func jsonNumber(f float64) string {
 func sessionsServer(t *testing.T, docs map[string]string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Path[len("/v1/sessions/"):]
+		const prefix = "/v1/sessions/"
+		if !strings.HasPrefix(r.URL.Path, prefix) || len(r.URL.Path) == len(prefix) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		id := r.URL.Path[len(prefix):]
 		switch r.Method {
 		case http.MethodGet:
 			doc, ok := docs[id]
@@ -219,11 +225,13 @@ func TestAdapterRefusesOpenAndGoneReads(t *testing.T) {
 	})
 	defer srv.Close()
 	adapter := testAdapter(t, srv)
-	if _, err := adapter.ReadSession(context.Background(), "prov-open"); !errors.Is(err, ErrRead) {
-		t.Fatalf("open read err %v, want ErrRead", err)
+	_, err := adapter.ReadSession(context.Background(), "prov-open")
+	if !errors.Is(err, ErrSessionOpen) || !errors.Is(err, ErrRead) {
+		t.Fatalf("open read err %v, want ErrSessionOpen wrapping ErrRead", err)
 	}
-	if _, err := adapter.ReadSession(context.Background(), "prov-gone"); !errors.Is(err, ErrRead) {
-		t.Fatalf("gone read err %v, want ErrRead", err)
+	_, err = adapter.ReadSession(context.Background(), "prov-gone")
+	if !errors.Is(err, ErrRead) || errors.Is(err, ErrSessionOpen) {
+		t.Fatalf("gone read err %v, want ErrRead and not ErrSessionOpen", err)
 	}
 }
 

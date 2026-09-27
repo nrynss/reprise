@@ -1,11 +1,10 @@
-// Abandoned sessions end here. No server call ends a live session: the
-// provider record deletes while the socket stays open and billable. The
-// sweep therefore settles first and deletes after. It reads every session
-// row still open past its cap plus a margin, books the accrued cost on
-// both ceilings through the reconciler, removes the provider record, and
-// records the outcome on its own row. The kind is idempotent, because
-// ending an ended session stays safe. A second pass over a swept session
-// moves no money and raises no alert.
+// Abandoned sessions end here. The sweep settles first, then ends the
+// provider session. The end writes session.end on a live socket before
+// the delete. A socket that is already gone still deletes, and a second
+// end does not open a new socket. The sweep reads every session row still
+// open past its cap plus a margin, books the accrued cost on both
+// ceilings, and records the outcome. The kind is idempotent. A second
+// pass moves no money and raises no alert.
 package broker
 
 import (
@@ -82,13 +81,16 @@ type ProviderStatus struct {
 	TimelineURL string `json:"timeline_url"`
 }
 
-// EndResult is one provider record delete. Deleted reports the provider
+// EndResult is one provider session end. Deleted reports the provider
 // removed the record on this call. False means the record was already
 // gone, which still counts as success.
 type EndResult struct {
 	// Deleted reports the record was removed on this call.
 	Deleted bool `json:"deleted"`
-	// Detail says what the delete did in plain words.
+	// SocketEnded reports session.end was written on a live socket
+	// before the delete.
+	SocketEnded bool `json:"socket_ended"`
+	// Detail says what the end did in plain words.
 	Detail string `json:"detail"`
 }
 
@@ -109,10 +111,11 @@ type StatusReader interface {
 	ReadStatus(ctx context.Context, providerSessionID string) (ProviderStatus, error)
 }
 
-// SessionEnder deletes one provider session record. Ending an ended
-// session succeeds, so a repeated sweep never fails on a swept session.
+// SessionEnder ends one provider session. It writes session.end on a
+// live socket before deleting the record. A missing socket still deletes.
+// A repeated end does not open a new socket, and it still succeeds.
 type SessionEnder interface {
-	// EndSession deletes the provider record for a provider session id.
+	// EndSession ends the provider session for a provider session id.
 	EndSession(ctx context.Context, providerSessionID string) (EndResult, error)
 }
 
@@ -126,8 +129,8 @@ type SweepOutcome struct {
 	ConnectedSeconds int `json:"connected_seconds"`
 	// Cost is the booked price at the session rate.
 	Cost cost.Price `json:"cost_nd"`
-	// ServerEnded reports a server call ended the session. No server call
-	// does today, so this stays false and the detail says so.
+	// ServerEnded reports the end wrote session.end on a live socket
+	// before the delete. False means no socket took the frame.
 	ServerEnded bool `json:"server_ended"`
 	// Skipped reports the sweep left the session alone, with the reason
 	// in Detail.
@@ -145,7 +148,8 @@ type SweeperConfig struct {
 	Source SweepSource
 	// Statuses reads provider session statuses. It must not be nil.
 	Statuses StatusReader
-	// Ender deletes provider session records. It must not be nil.
+	// Ender ends provider sessions. It must not be nil. The end writes
+	// session.end before the delete when a live socket is held.
 	Ender SessionEnder
 	// Reconciler settles the mint time holds. It must not be nil.
 	Reconciler *Reconciler
@@ -368,13 +372,16 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 		return SweepOutcome{}, fmt.Errorf("broker: sweep: end session %s: %w: %w", candidate.ProviderSessionID, ErrSweep, err)
 	}
 	detail := fmt.Sprintf("settled %d seconds at %s, provider record %s", res.ConnectedSeconds, res.Cost, ended.Detail)
+	if ended.SocketEnded {
+		detail += ", socket ended before the delete"
+	}
 	if stillOpen {
 		detail += ", session still open at settle so spend may run on"
 		if err := s.alert(ctx, candidate, AlertSweepOpen, detail); err != nil {
 			detail += " (alert failed: " + err.Error() + ")"
 		}
 	}
-	if err := s.markSwept(ctx, candidate.SessionID, status.Status, res.ConnectedSeconds, false, detail); err != nil {
+	if err := s.markSwept(ctx, candidate.SessionID, status.Status, res.ConnectedSeconds, ended.SocketEnded, detail); err != nil {
 		return SweepOutcome{}, err
 	}
 	return SweepOutcome{
@@ -382,7 +389,7 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 		ProviderStatus:   status.Status,
 		ConnectedSeconds: res.ConnectedSeconds,
 		Cost:             res.Cost,
-		ServerEnded:      false,
+		ServerEnded:      ended.SocketEnded,
 		Detail:           detail,
 	}, nil
 }
