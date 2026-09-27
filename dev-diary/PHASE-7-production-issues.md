@@ -998,7 +998,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/gemini/
-status:     in-progress:land:t7.38-land@2804f0403a53edc0650da6e6144cea7d7cd92786
+status:     done:25cd697e99d7a9420426e2d28048b66e48b3a379
 ```
 A 142 second live take fell back to "Untitled episode (76 words)". The
 box logged `editorial: decode: editorial: model failed: unexpected
@@ -1021,7 +1021,7 @@ requires:   T7.2
 fixture-ok: yes
 size:       S · mid
 owns:       internal/broker/
-status:     in-progress:review-r1:t7.39-rev-r1@d5c80154332920aaf1f059ef7ecfb70774d7da5d
+status:     in-progress:remediate-r1:t7.39-rem-r1
 ```
 Every live take on 2026-09-27 ran two reconcile jobs for one session.
 On the Firefox take each job stored its own copy of the provider
@@ -1105,7 +1105,7 @@ requires:   T7.38
 fixture-ok: yes
 size:       S · mid
 owns:       internal/editorial/, internal/memory/
-status:     not-started
+status:     in-progress:implement:t7.42-impl
 ```
 T7.38 round 1 approved the truncation sentinel. The same round
 recorded two out of scope H findings. A capped call returns
@@ -1142,6 +1142,13 @@ not release. Releasing and recording price 0 fails those tests.
 
 ### What exists now
 
+T7.38 landed at 25cd697 after round 1 APPROVE with zero in-scope
+findings. The gemini diff matches reviewed commit 2804f04. Main had
+moved, so the landing rebased. The gemini race tests passed on the
+rebased commit. The full gate still stops because ffmpeg is 9.0.2
+and the pin is 9.0.1. A capped call returns `ErrTruncated`.
+Editorial and memory still release that billed call. T7.42 owns
+the settlement.
 T7.34 landed at 72bee67 after round 3 APPROVE with zero residue. CI is
 green on `main` again. Review probes under `dev-diary/probes/` now
 live in their own Go module, so `go list ./...` skips them. The editor
@@ -1245,6 +1252,9 @@ T7.2 lands, so dogfood sparingly.
 
 ### What surprised us
 
+T7.38's truncation sentinel makes a billed call look unspent.
+`editorial.Run`, `MarkEpisode`, and `ResolveEpisode` release it.
+A decode failure of received text still settles. T7.42 owns that fix.
 T7.28 took four rounds. Each round found another state the gallery
 card had never met: a pending editorial pass, a restart mid pass, and
 a render the detail cannot see. The binary still spells the editorial
