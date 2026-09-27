@@ -974,7 +974,7 @@ requires:   T7.35
 fixture-ok: yes
 size:       S · mid
 owns:       internal/render/
-status:     in-progress:review-r2:t7.37-rev-r2@bc88251251679ea2028a7349bf61288ab4e62cda
+status:     in-progress:land:t7.37-land@bc88251251679ea2028a7349bf61288ab4e62cda
 ```
 Capture keeps noise suppression off by design, because `voice_focus`
 cleans what the provider hears. Nothing cleans the stem the render
