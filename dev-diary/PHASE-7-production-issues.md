@@ -1629,7 +1629,7 @@ owns:       internal/broker/settle.go, internal/broker/sweep.go, internal/broker
              internal/broker/reconcile_test.go, internal/episode/sessions.go,
              internal/episode/service_test.go, internal/api/session_end.go,
              internal/api/respond.go, internal/api/handlers_test.go
-status:     in-progress:remediate-r1:t7.57-rem-r1
+status:     in-progress:review-r2:t7.57-rev-r2@87d3f61b6917b92f4b6aaba343b0f06badf8c3cf
 ```
 **Defect.** The browser reports the provider session id, and the server never checks it. Two
 paths then settle nothing, and the reservation expires with no charge.
