@@ -1721,7 +1721,7 @@ size:       XS · light
 owns:       web/src/routes/record/stems-complete.spec.ts, web/src/routes/record/cap.spec.ts,
              web/src/routes/record/confirm-processing.spec.ts, web/src/routes/record/end-control.spec.ts,
              web/src/routes/record/gallery-link.spec.ts, web/src/routes/record/mock-session.spec.ts
-status:     in-progress:implement:t7.60-impl
+status:     in-progress:review-r1:t7.60-rev-r1@d47755685ada3e443bf88ffe9ccc6230bf8be198
 ```
 T7.58 round 1 recorded an out of scope M finding. `a repeat
 completion reports the standing outcome` fails under full-suite
@@ -1808,7 +1808,7 @@ requires:   T7.40
 fixture-ok: yes
 size:       XS · mid
 owns:       web/src/routes/record/+page.svelte, web/tests/start-gesture.spec.ts
-status:     in-progress:implement:t7.62-impl
+status:     in-progress:review-r1:t7.62-rev-r1@57e545bc9169df533f4e2698b023d6476bd2f802
 ```
 **Defect.** The record page is prerendered, so the Start button renders enabled before the page's
 script runs. The click handler is attached later, inside `$effect`, through
@@ -1898,8 +1898,9 @@ size:       M · frontier
 owns:       config/reprise.box.toml, config/reprise.local.toml, internal/settings/settings.go,
              internal/settings/settings_test.go, internal/editorial/run.go,
              internal/editorial/run_test.go, internal/cover/cover.go, internal/cover/cover_test.go,
-             cmd/reprise/main.go, cmd/reprise/finish.go, cmd/reprise/main_test.go
-status:     in-progress:implement:t7.66-impl
+             cmd/reprise/main.go, cmd/reprise/finish.go, cmd/reprise/main_test.go,
+             cmd/reprise/boot_test.go
+status:     in-progress:review-r1:t7.66-rev-r1@f9e1eda25bf8b5b90e7cdd5739ee456f600a2f4a
 ```
 **Findings.** A probe on 2026-09-28 used the project's own service account against Vertex.
 
