@@ -2376,6 +2376,14 @@ and stored both recordings. Their leases had already expired at
 tables do carry it. The opener also misread history twice (T7.51).
 Takes closed mid-take leave their episode in `recording`.
 
+On 2026-09-28 the first sweep after T7.57 deployed charged the full
+cap to 14 old test sessions with no provider id, $31.50 in all. That
+passed the $20 ceiling and blocked the owner. The ceiling also never
+resets, because Keel v0.3.0 budgets have no period. That gap is
+https://github.com/nrynss/keel/issues/2. The owner ruled that the cap
+guarded build spend only, so `daily_spend_cents` went to 100000 at
+a0a9339. Owner limits stay at $20 each.
+
 ### Notes for the next developer
 
 Real-take findings, 2026-09-20, all measured on the live edge with
