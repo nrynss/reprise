@@ -2182,7 +2182,7 @@ owns:       web/src/lib/voice/socket.ts, web/src/lib/voice/socket.test.ts, web/s
              web/src/lib/voice/mock.test.ts, web/src/lib/voice/record-state.ts,
              web/src/lib/voice/testdata/session-update.golden.json,
              internal/assemblyai/voice_live_test.go
-status:     in-progress:review-r2:t7.72-rev-r2@550ee61389bf7372339d36666d1d9bf26c91b2f5
+status:     in-progress:land:t7.72-rem-r1@550ee61389bf7372339d36666d1d9bf26c91b2f5
 ```
 **Defect.** In both live takes of 2026-09-28 at 19:38 and 19:40 UTC, the host never greeted. The
 guest spoke first. The host then introduced itself as a generic voice assistant that could
@@ -2526,7 +2526,7 @@ size:       S · frontier
 owns:       internal/assemblyai/batch.go, internal/assemblyai/batch_test.go,
              internal/assemblyai/batch_live_test.go, internal/analysis/run.go,
              internal/analysis/run_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:implement:t7.78-impl
+status:     in-progress:review-r1:t7.78-rev-r1@2263f54c31e29df590e77bd048673e7723b450ff
 ```
 **Defect.** The Threads page read "Nothing threads yet" after several episodes about testing.
 Production holds 8 mentions, all of kind `callback` from the editorial pass. The one stored
