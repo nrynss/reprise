@@ -1433,7 +1433,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:review-r1:t7.52-rev-r1@94445e2e7a50fd5ea3aa7503c687ee4dee4cd7ff
+status:     in-progress:land:t7.52-impl@94445e2e7a50fd5ea3aa7503c687ee4dee4cd7ff
 ```
 The owner used the editor on both T6.4b round 2 drafts. Seven defects turned up. Fix each one
 separately, and pin each one with its own test.
