@@ -1839,7 +1839,7 @@ requires:   T7.47
 fixture-ok: yes
 size:       XS · light
 owns:       tools/check.sh
-status:     in-progress:review-r1:t7.63-rev-r1@00fe2393442028143d20bbcc3d495e083b95b9ec
+status:     in-progress:land:t7.63-impl@00fe2393442028143d20bbcc3d495e083b95b9ec
 ```
 **Defect.** `tools/check.sh` runs `npm run test:e2e >/dev/null`. A failing run therefore prints only
 `FAIL [playwright] end-to-end tests failed`. No CI log names the spec. T7.58 landed on red CI, and
