@@ -119,6 +119,12 @@ export class VoiceSocket {
 			this.handle.send(JSON.stringify(sessionUpdateFrame(config)));
 		});
 		this.handle.onMessage((text: string) => this.route(text));
+		// A transport close inside the setup window must fail the start, not
+		// strand it. The end control only acts from live, so without this the
+		// waiter hangs and the guest must reload.
+		this.handle.onClose(() => {
+			if (!this.setupSettled) this.failSetup();
+		});
 	}
 
 	/** How many audio blocks never reached a closed socket. */

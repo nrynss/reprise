@@ -35,6 +35,9 @@ class FakeHandle implements SocketHandle {
 	receive(text: string): void {
 		for (const task of this.messageTasks) task(text);
 	}
+	peerClose(): void {
+		for (const task of this.closeTasks) task();
+	}
 }
 
 const CONFIG: SessionConfig = { system_prompt: 'prompt', greeting: 'hello', keyterms: ['Mara'] };
@@ -405,6 +408,16 @@ describe('setup verification', () => {
 			param: 'session'
 		});
 		expect(seen.errors).toEqual([{ code: 'invalid_format', message: 'the setup shape is wrong' }]);
+	});
+
+	it('fails the start when the socket closes before any setup frame', async () => {
+		const handle = new FakeHandle();
+		const { socket } = wire(handle);
+		handle.open();
+		const pending = expect(socket.waitForSetup()).rejects.toThrow(SETUP_FAILURE);
+		handle.peerClose();
+		await pending;
+		expect(handle.closed).toBe(1);
 	});
 
 	it('goes live on a matching echo and only records a later error', async () => {
