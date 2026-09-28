@@ -23,6 +23,8 @@ type word struct {
 	StartMs int64
 	// EndMs is the word end in milliseconds on the episode clock.
 	EndMs int64
+	// Speaker names who said the word. Empty means the stored row named none.
+	Speaker string
 }
 
 // draft holds the validated proposals one run stores. Ranges are timeline
@@ -115,15 +117,21 @@ func validate(log *slog.Logger, words []word, got answer) draft {
 	return out
 }
 
-// timeline numbers every word by its offset with its timing, in the order
-// the proposals point at. The prompt carries this text beside the stems,
-// so the model reads the words and hears the delivery together.
+// timeline numbers every word by its offset with its timing and its
+// speaker, in the order the proposals point at. The prompt carries this
+// text beside the stems, so the model reads the words and hears the
+// delivery together. A word with no stored speaker keeps the old shape,
+// so older rows still read.
 //
 // The indexing is positional and starts from zero.
 func timeline(words []word) string {
 	var out strings.Builder
 	for i, w := range words {
-		fmt.Fprintf(&out, "[%d] %s (%d-%d)\n", i, w.Text, w.StartMs, w.EndMs)
+		if w.Speaker == "" {
+			fmt.Fprintf(&out, "[%d] %s (%d-%d)\n", i, w.Text, w.StartMs, w.EndMs)
+			continue
+		}
+		fmt.Fprintf(&out, "[%d] %s: %s (%d-%d)\n", i, w.Speaker, w.Text, w.StartMs, w.EndMs)
 	}
 	return out.String()
 }

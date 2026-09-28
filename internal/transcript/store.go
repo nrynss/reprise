@@ -8,9 +8,8 @@ import (
 	"github.com/nrynss/keel/id"
 )
 
-// Stored is one persisted timeline word. The words table carries no
-// speaker column, so the speaker lives in the turns rows the live pass
-// wrote. Readers join by time when they need styling per speaker.
+// Stored is one persisted timeline word. The speaker travels with the
+// word, so readers never guess it from timing or position.
 type Stored struct {
 	// ID is the row id Replace minted.
 	ID string
@@ -20,6 +19,8 @@ type Stored struct {
 	StartMs int64
 	// EndMs is the word end in milliseconds on the episode clock.
 	EndMs int64
+	// Role names the speaker, either RoleUser or RoleHost.
+	Role string
 }
 
 // Replace swaps the episode edit words for words in one transaction. A rerun
@@ -52,8 +53,8 @@ func Replace(ctx context.Context, db *sql.DB, ownerID, episodeID string, words [
 			return fmt.Errorf("transcript: replace: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO words (id, owner_id, episode_id, text, start_ms, end_ms, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			wordID, ownerID, episodeID, w.Text, w.StartMs, w.EndMs, SourceEdit); err != nil {
+			"INSERT INTO words (id, owner_id, episode_id, text, start_ms, end_ms, source, speaker) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			wordID, ownerID, episodeID, w.Text, w.StartMs, w.EndMs, SourceEdit, w.Role); err != nil {
 			return fmt.Errorf("transcript: replace: %w", err)
 		}
 	}
@@ -64,13 +65,13 @@ func Replace(ctx context.Context, db *sql.DB, ownerID, episodeID string, words [
 }
 
 // Load reads the episode edit words ordered by start. The editor and the
-// editorial pass read the same order Merge wrote.
+// editorial pass read the same order Merge wrote, with each speaker kept.
 func Load(ctx context.Context, db *sql.DB, episodeID string) ([]Stored, error) {
 	if db == nil || episodeID == "" {
 		return nil, fmt.Errorf("transcript: load: %w", ErrInvalid)
 	}
 	rows, err := db.QueryContext(ctx,
-		"SELECT id, text, start_ms, end_ms FROM words WHERE episode_id = ? AND source = ? ORDER BY start_ms ASC, rowid ASC",
+		"SELECT id, text, start_ms, end_ms, speaker FROM words WHERE episode_id = ? AND source = ? ORDER BY start_ms ASC, rowid ASC",
 		episodeID, SourceEdit)
 	if err != nil {
 		return nil, fmt.Errorf("transcript: load: %w", err)
@@ -79,7 +80,7 @@ func Load(ctx context.Context, db *sql.DB, episodeID string) ([]Stored, error) {
 	var out []Stored
 	for rows.Next() {
 		var word Stored
-		if err := rows.Scan(&word.ID, &word.Text, &word.StartMs, &word.EndMs); err != nil {
+		if err := rows.Scan(&word.ID, &word.Text, &word.StartMs, &word.EndMs, &word.Role); err != nil {
 			return nil, fmt.Errorf("transcript: load: %w", err)
 		}
 		out = append(out, word)

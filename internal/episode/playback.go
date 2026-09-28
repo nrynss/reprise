@@ -13,7 +13,7 @@ import (
 
 // EditWord is one stored word. Edit words sit on the episode clock and
 // rendered words sit on the render clock. Start and End are seconds,
-// converted from the stored milliseconds.
+// converted from the stored milliseconds. Speaker names who said the word.
 type EditWord struct {
 	// Text is the word as stored.
 	Text string
@@ -21,6 +21,8 @@ type EditWord struct {
 	Start float64
 	// End is the word end in seconds.
 	End float64
+	// Speaker names the stored speaker. A host word never reads as the guest.
+	Speaker string
 }
 
 // EditWords returns edit-source words for an episode the owner holds,
@@ -68,7 +70,7 @@ func (s *Service) storedWords(ctx context.Context, ownerID, episodeID, source st
 		return nil, err
 	}
 	rows, err := s.db.Reader().QueryContext(ctx,
-		`SELECT text, start_ms, end_ms FROM words
+		`SELECT text, start_ms, end_ms, speaker FROM words
 		 WHERE episode_id = ? AND owner_id = ? AND source = ?
 		 ORDER BY start_ms ASC, rowid ASC`,
 		episodeID, ownerID, source)
@@ -80,7 +82,7 @@ func (s *Service) storedWords(ctx context.Context, ownerID, episodeID, source st
 	for rows.Next() {
 		var word EditWord
 		var startMs, endMs int64
-		if err := rows.Scan(&word.Text, &startMs, &endMs); err != nil {
+		if err := rows.Scan(&word.Text, &startMs, &endMs, &word.Speaker); err != nil {
 			return nil, fmt.Errorf("episode: %s words %q: %w", source, episodeID, err)
 		}
 		word.Start = float64(startMs) / 1000

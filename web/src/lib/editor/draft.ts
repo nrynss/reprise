@@ -205,6 +205,16 @@ function numberOf(body: Record<string, unknown>, name: string): number {
 	return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
+// The speaker label a stored word carries. The backend stores user for
+// the guest and host for the host. Older rows carry neither, and an
+// unknown speaker stays unknown instead of reading as the guest.
+function speakerOf(item: Record<string, unknown>): string {
+	const raw = textOf(item, 'speaker');
+	if (raw === 'host') return 'host';
+	if (raw === 'user' || raw === 'you') return 'you';
+	return '';
+}
+
 // Read one detail body. Words and cut ranges use the stored indexes.
 // A body with no episode is not a detail. A detail with no words is
 // still a draft, and the caller keeps it empty.
@@ -220,7 +230,7 @@ function readStoredDraft(value: unknown, episodeId: string): StoredDraft {
 			start: numberOf(item, 'start'),
 			end: numberOf(item, 'end'),
 			text: textOf(item, 'text'),
-			speaker: textOf(item, 'speaker') || 'you'
+			speaker: speakerOf(item)
 		});
 	}
 	const rawProposals = Array.isArray(value['proposals']) ? value['proposals'] : [];

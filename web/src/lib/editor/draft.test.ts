@@ -227,6 +227,42 @@ describe('draft controller', () => {
 		}
 	});
 
+	it('keeps each stored speaker and never labels a host word as the guest', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				Response.json({
+					episode: {
+						id: 'live-1',
+						number: 2,
+						title: 'Live take',
+						state: 'draft',
+						visibility: 'private'
+					},
+					proposals: [],
+					words: [
+						{ text: 'Hello', start: 0, end: 0.4, speaker: 'host' },
+						{ text: 'there', start: 0.4, end: 0.9, speaker: 'user' },
+						{ text: 'again', start: 0.9, end: 1.2 }
+					],
+					audio_url: '/media/user-stem',
+					render_audio_url: ''
+				})
+			)
+		);
+		try {
+			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.ready).toBe(true);
+			});
+			expect(controller.snapshot.words.map((word) => word.speaker)).toEqual(['host', 'you', '']);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it('stays an empty live draft when the detail has no words', async () => {
 		vi.stubGlobal(
 			'fetch',
