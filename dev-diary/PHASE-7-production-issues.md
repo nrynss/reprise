@@ -2182,7 +2182,7 @@ owns:       web/src/lib/voice/socket.ts, web/src/lib/voice/socket.test.ts, web/s
              web/src/lib/voice/mock.test.ts, web/src/lib/voice/record-state.ts,
              web/src/lib/voice/testdata/session-update.golden.json,
              internal/assemblyai/voice_live_test.go
-status:     in-progress:implement:t7.72-impl
+status:     in-progress:review-r1:t7.72-rev-r1@62184fc9d641099c9fe1785e5a5d171fa7f729f5
 ```
 **Defect.** In both live takes of 2026-09-28 at 19:38 and 19:40 UTC, the host never greeted. The
 guest spoke first. The host then introduced itself as a generic voice assistant that could
@@ -2294,7 +2294,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:implement:t7.74-impl
+status:     in-progress:review-r1:t7.74-rev-r1@fb3256dd3fb8491648f81c52d553105c6520c9f2
 ```
 **Defect.** On 2026-09-28 at 19:44:51 UTC, the owner pressed Mark done on episode 10. Traefik logged
 `POST /api/episodes/61ac5b47…/done` answering 202. The render, cover, analysis and marking all
@@ -2453,7 +2453,7 @@ requires:   T7.68
 fixture-ok: yes
 size:       XS · frontier
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.79-impl@184c258e356f43a28d0df3d009a9408e130ba169
+status:     done:cec8c50
 ```
 **Defect.** On 2026-09-28 at 19:53 UTC, `GET /api/episodes` answered 429 with `retry-after: 51`. The
 owner's gallery hung on "Loading the live season." Traefik logged only 25 episode requests in
@@ -2545,6 +2545,12 @@ name or a topic before a row forms. Say so in the handoff.
 
 ### What exists now
 
+T7.79 landed at cec8c50 after round 1 APPROVE with zero findings.
+Take rate limit buckets refill their whole burst once a minute:
+episodes 120, media 240, mint 6 per minute. The tree matches
+reviewed commit 184c258. Main had moved, so the landing rebased.
+Race tests on cmd/reprise passed on the rebased commit. T7.78
+unblocks on this landing.
 T7.68 landed at e394372 after round 1 APPROVE with zero findings.
 The reconcile waits out late artifact links, keeps the provider
 record behind a pending flag until both artifacts store, and
