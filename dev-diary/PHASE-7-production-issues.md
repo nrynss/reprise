@@ -1629,7 +1629,7 @@ owns:       internal/broker/settle.go, internal/broker/sweep.go, internal/broker
              internal/broker/reconcile_test.go, internal/episode/sessions.go,
              internal/episode/service_test.go, internal/api/session_end.go,
              internal/api/respond.go, internal/api/handlers_test.go
-status:     in-progress:review-r1:t7.57-rev-r1@73618809c0e7cda925dbe612eaea17a24a9483f5
+status:     in-progress:remediate-r1:t7.57-rem-r1
 ```
 **Defect.** The browser reports the provider session id, and the server never checks it. Two
 paths then settle nothing, and the reservation expires with no charge.
@@ -1693,7 +1693,7 @@ size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/edit.playwright.config.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts, web/src/lib/editor/draft.ts,
              web/src/routes/episode/[id]/edit/+page.svelte, .github/workflows/ci.yml
-status:     in-progress:implement:t7.58-impl
+status:     in-progress:review-r1:t7.58-rev-r1@0dd823a5c528a37f15e2729c1dcc23433d96e337
 ```
 **Defect.** In T6.4b round 2 the owner reverted both cuts on the Firefox draft. Play and the
 slider then stopped answering until a reload. T7.52 could not reproduce it, because every editor
@@ -1719,7 +1719,7 @@ requires:   T7.53
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:implement:t7.59-impl
+status:     in-progress:review-r1:t7.59-rev-r1@1fca47d83e869536ae8a9919cee1e75cd78e1a1d
 ```
 **Defect.** `awaitHostReplies` (`cmd/reprise/main.go`) polls every `timelinePoll` (20 ms) until
 the provider timeline is stored, or until a reconcile for the episode has ended. It has no
