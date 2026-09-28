@@ -4,7 +4,7 @@
 // clock beyond the audio element itself. This spec runs with the suite
 // beside the route:
 // npx playwright test -c src/routes/episode/[id]/edit/edit.playwright.config.ts
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const DRAFT = '/episode/draft-1/edit?fixture=1';
 
@@ -80,6 +80,118 @@ async function serveLiveDraft(page: Page): Promise<void> {
 	await page.goto('/episode/live-9/edit');
 	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('1 cuts applied');
 }
+
+// Whether a bright playhead column stands near the expected bitmap x.
+// The readout rounds to whole seconds while the line draws at the exact
+// position, so the scan covers the rounding window. Only the playhead
+// ink passes: peaks, regions and the tint all stay below the threshold.
+async function brightColumnNear(canvas: Locator, x: number): Promise<boolean> {
+	return canvas.evaluate((el, px) => {
+		const node = el as HTMLCanvasElement;
+		const drawing = node.getContext('2d');
+		if (!drawing) return false;
+		const from = Math.max(0, px - 13);
+		const to = Math.min(node.width - 1, px + 13);
+		const stride = to - from + 1;
+		const data = drawing.getImageData(from, 0, stride, node.height).data;
+		for (let col = 0; col < stride; col += 1) {
+			let bright = 0;
+			for (let row = 0; row < node.height; row += 1) {
+				const at = (row * stride + col) * 4;
+				if ((data[at] ?? 0) > 200 && (data[at + 1] ?? 0) > 200 && (data[at + 2] ?? 0) > 200) {
+					bright += 1;
+				}
+			}
+			if (bright >= node.height / 2) return true;
+		}
+		return false;
+	}, x);
+}
+
+// The playhead column in bitmap pixels, from the slider values alone.
+async function playheadX(page: Page): Promise<number> {
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	const now = Number(await canvas.getAttribute('aria-valuenow'));
+	const max = Number(await canvas.getAttribute('aria-valuemax'));
+	return Math.max(0, Math.min(599, Math.round((now / Math.max(1, max)) * 600)));
+}
+
+test('playing moves the playhead line across the waveform', async ({ page }) => {
+	await page.goto(DRAFT);
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	await page.getByRole('button', { name: 'Play draft' }).click();
+	await expect
+		.poll(async () => Number(await canvas.getAttribute('aria-valuenow')), { timeout: 15_000 })
+		.toBeGreaterThan(0);
+	await page.getByRole('button', { name: 'Pause draft' }).click();
+	const x = await playheadX(page);
+	expect(await brightColumnNear(canvas, x)).toBe(true);
+	await canvas.focus();
+	await page.keyboard.press('Home');
+	await expect(page.getByRole('status', { name: 'Playback position' })).toHaveText('0:00 of 0:24');
+	expect(await brightColumnNear(canvas, x)).toBe(false);
+});
+
+test('a pointer seek parks the playhead line near the middle', async ({ page }) => {
+	await page.goto(DRAFT);
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error('waveform has no box');
+	await canvas.click({ position: { x: Math.floor(box.width / 2), y: 5 } });
+	await expect(page.getByRole('status', { name: 'Playback position' })).toHaveText('0:12 of 0:24');
+	const bright = await canvas.evaluate((el) => {
+		const node = el as HTMLCanvasElement;
+		const drawing = node.getContext('2d');
+		if (!drawing) return false;
+		const middle = Math.floor(node.width / 2);
+		const data = drawing.getImageData(middle - 4, 0, 9, node.height).data;
+		for (let index = 0; index < data.length; index += 4) {
+			if ((data[index] ?? 0) > 200 && (data[index + 1] ?? 0) > 200 && (data[index + 2] ?? 0) > 200) {
+				return true;
+			}
+		}
+		return false;
+	});
+	expect(bright).toBe(true);
+});
+
+test('a live draft draws peaks away from the centre line', async ({ page }) => {
+	await serveLiveDraft(page);
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	await expect
+		.poll(
+			async () =>
+				canvas.evaluate((el) => {
+					const node = el as HTMLCanvasElement;
+					const drawing = node.getContext('2d');
+					if (!drawing) return 0;
+					const top = drawing.getImageData(60, 0, 530, 26).data;
+					let lit = 0;
+					for (let index = 3; index < top.length; index += 4) {
+						if ((top[index] ?? 0) > 0) lit += 1;
+					}
+					return lit;
+				}),
+			{ timeout: 15_000 }
+		)
+		.toBeGreaterThan(0);
+});
+
+test('the seekbar and the back control share the waveform position', async ({ page }) => {
+	await page.goto(DRAFT);
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error('waveform has no box');
+	await canvas.click({ position: { x: Math.floor(box.width / 2), y: 5 } });
+	const seek = page.getByRole('slider', { name: 'Seek through the draft' });
+	await expect(seek).toHaveValue('12');
+	await page.getByRole('button', { name: 'Back fifteen seconds' }).click();
+	await expect(page.getByRole('status', { name: 'Playback position' })).toHaveText('0:00 of 0:24');
+	await expect(seek).toHaveValue('0');
+});
 
 test('reverting a cut writes its decision row', async ({ page }) => {
 	await page.goto(DRAFT);

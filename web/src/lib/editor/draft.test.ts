@@ -3,6 +3,7 @@
 // cold open preview parks the playhead where the open starts.
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { DraftController, formatTime, queryValue, type DraftSnapshot } from './draft';
+import { encodeWavBytes } from './fixture';
 
 beforeAll(() => {
 	if (typeof URL.createObjectURL !== 'function') {
@@ -591,5 +592,112 @@ describe('draft controller', () => {
 		controller.player.duration = 30;
 		controller.syncDuration();
 		expect(controller.snapshot.duration).toBe(30);
+	});
+
+	it('loads live peaks from the audio the draft plays', async () => {
+		const channel = new Float32Array(8000);
+		for (let frame = 0; frame < channel.length; frame += 1) {
+			channel[frame] = Math.sin((2 * Math.PI * 220 * frame) / 8000) * 0.5;
+		}
+		const bytes = encodeWavBytes(channel, 8000);
+		vi.stubGlobal('fetch', async (input: unknown) => {
+			const url = typeof input === 'string' ? input : String((input as Request)?.url ?? input);
+			if (url === '/media/take') return new Response(bytes.buffer as ArrayBuffer, { status: 200 });
+			return Response.json({
+				episode: {
+					id: 'live-2',
+					number: 2,
+					title: 'Live take',
+					state: 'draft',
+					visibility: 'private'
+				},
+				proposals: [],
+				words: [{ text: 'Hello', start: 0, end: 0.4 }],
+				audio_url: '/media/take',
+				render_audio_url: ''
+			});
+		});
+		vi.stubGlobal(
+			'OfflineAudioContext',
+			class {
+				async decodeAudioData(raw: ArrayBuffer): Promise<{
+					numberOfChannels: number;
+					getChannelData(index: number): Float32Array;
+				}> {
+					const view = new DataView(raw);
+					const count = view.getUint32(40, true) / 2;
+					const out = new Float32Array(count);
+					for (let frame = 0; frame < count; frame += 1) {
+						out[frame] = view.getInt16(44 + frame * 2, true) / 32768;
+					}
+					return { numberOfChannels: 1, getChannelData: () => out };
+				}
+			}
+		);
+		try {
+			const controller = new DraftController({ episodeId: 'live-2', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.ready).toBe(true);
+			});
+			await vi.waitFor(() => {
+				expect(controller.snapshot.peaks).not.toBeNull();
+			});
+			const peaks = controller.snapshot.peaks;
+			expect(peaks?.max.length).toBeGreaterThan(0);
+			expect(Math.max(...Array.from(peaks?.max ?? []))).toBeGreaterThan(0.1);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('keeps the flat line and still plays when the live decode fails', async () => {
+		vi.stubGlobal('fetch', async (input: unknown) => {
+			const url = typeof input === 'string' ? input : String((input as Request)?.url ?? input);
+			if (url === '/media/take')
+				return new Response(new Uint8Array([1, 2, 3]).buffer as ArrayBuffer, { status: 200 });
+			return Response.json({
+				episode: {
+					id: 'live-3',
+					number: 3,
+					title: 'Live take',
+					state: 'draft',
+					visibility: 'private'
+				},
+				proposals: [],
+				words: [{ text: 'Hello', start: 0, end: 0.4 }],
+				audio_url: '/media/take',
+				render_audio_url: ''
+			});
+		});
+		vi.stubGlobal(
+			'OfflineAudioContext',
+			class {
+				async decodeAudioData(): Promise<never> {
+					throw new Error('unreadable');
+				}
+			}
+		);
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			const controller = new DraftController({ episodeId: 'live-3', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.ready).toBe(true);
+			});
+			const play = vi.spyOn(controller.player, 'play').mockResolvedValue(true);
+			await controller.togglePlay();
+			await vi.waitFor(() => {
+				expect(warn).toHaveBeenCalledTimes(1);
+			});
+			expect(controller.snapshot.peaks).toBeNull();
+			expect(controller.snapshot.playing).toBe(true);
+			expect(play).toHaveBeenCalledTimes(1);
+			controller.destroy();
+		} finally {
+			warn.mockRestore();
+			vi.unstubAllGlobals();
+		}
 	});
 });

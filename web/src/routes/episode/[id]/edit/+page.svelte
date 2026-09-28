@@ -9,6 +9,7 @@
 	let snap = $state(emptyDraft(page.params.id ?? 'draft'));
 	let controller = $state<DraftController | null>(null);
 	let wave = $state<HTMLCanvasElement | null>(null);
+	let dragging = $state(false);
 
 	$effect(() => {
 		if (!browser) return;
@@ -47,11 +48,23 @@
 		if (clock.playing) controller.follower?.update();
 	});
 
-	// Draw peaks once the worker answers, with removed ranges shaded over
-	// them. Regions come from the cuts, so the marks never drift from the
-	// transcript.
+	// One position drives the readout, the playhead and the seekbar,
+	// so the waveform and the range never disagree. It clamps to the
+	// adopted length, which follows the element once it reports one.
+	let position = $derived.by(() => {
+		const raw = controller ? controller.player.currentTime || snap.position : 0;
+		return Math.min(raw, snap.duration);
+	});
+
+	// Draw peaks once the worker answers, with the played span under
+	// them and the removed ranges over them. The playhead line and its
+	// handle sit on top, so one glance shows the audio, the position
+	// and what a drag would move. Regions come from the cuts, so the
+	// marks never drift from the transcript.
 	$effect(() => {
 		if (!browser || !wave || !controller) return;
+		void controller.player.currentTime;
+		void controller.player.duration;
 		const current = snap;
 		if (!current.ready) return;
 		const canvas = wave;
@@ -59,7 +72,11 @@
 		const height = (canvas.height = 64);
 		const drawing = canvas.getContext('2d');
 		if (!drawing) return;
+		const span = current.duration > 0 ? Math.max(0, Math.min(1, position / current.duration)) : 0;
+		const head = span * width;
 		drawing.clearRect(0, 0, width, height);
+		drawing.fillStyle = 'rgba(232, 163, 61, 0.22)';
+		drawing.fillRect(0, 0, head, height);
 		drawing.fillStyle = '#e8a33d';
 		const buckets = current.peaks?.max.length ?? 0;
 		if (buckets > 0 && current.peaks) {
@@ -78,6 +95,12 @@
 			const to = (region.end / current.duration) * width;
 			drawing.fillRect(from, 0, Math.max(2, to - from), height);
 		}
+		const line = Math.max(0, Math.min(width - 1, head));
+		drawing.fillStyle = '#f4edde';
+		drawing.fillRect(line - 1, 0, 2, height);
+		drawing.beginPath();
+		drawing.arc(Math.max(5, Math.min(width - 5, line)), 6, 5, 0, Math.PI * 2);
+		drawing.fill();
 	});
 
 	let liveWord = $derived.by(
@@ -87,11 +110,6 @@
 					activeWordAt(snap.words, snap.cuts, snap.position))
 				: null
 	);
-
-	let position = $derived.by(() => {
-		const raw = controller ? controller.player.currentTime || snap.position : 0;
-		return Math.min(raw, snap.duration);
-	});
 </script>
 
 <svelte:head>
@@ -120,6 +138,7 @@
 			</button>
 			<canvas
 				bind:this={wave}
+				class:dragging
 				role="slider"
 				tabindex="0"
 				aria-label="Draft waveform. Arrow keys seek."
@@ -134,6 +153,7 @@
 					else if (event.key === 'End') controller?.seekTo(snap.duration);
 				}}
 				onpointerdown={(event) => {
+					dragging = true;
 					wave?.setPointerCapture(event.pointerId);
 					const width = wave?.clientWidth || 1;
 					controller?.seekTo((event.offsetX / width) * snap.duration);
@@ -144,7 +164,25 @@
 						controller?.seekTo((event.offsetX / width) * snap.duration);
 					}
 				}}
+				onpointerup={() => {
+					dragging = false;
+				}}
+				onpointercancel={() => {
+					dragging = false;
+				}}
 			></canvas>
+			<button onclick={() => controller?.seekTo(position - 15)} aria-label="Back fifteen seconds">
+				Back 15
+			</button>
+			<input
+				type="range"
+				min={0}
+				max={snap.duration}
+				step={1}
+				value={Math.round(position)}
+				oninput={(event) => controller?.seekTo(Number(event.currentTarget.value))}
+				aria-label="Seek through the draft"
+			/>
 			<p role="status" aria-label="Playback position">{formatTime(position)} of {formatTime(snap.duration)}</p>
 		</section>
 
@@ -385,10 +423,19 @@
 		margin-top: 1rem;
 		border: 1px solid var(--line);
 		border-radius: 0.5rem;
+		cursor: pointer;
+	}
+	canvas.dragging {
+		cursor: grabbing;
 	}
 	canvas:focus-visible {
 		outline: 3px solid var(--ink);
 		outline-offset: 2px;
+	}
+	input[type='range'] {
+		width: 100%;
+		margin: 0.75rem 0;
+		accent-color: var(--accent);
 	}
 	blockquote {
 		border-left: 2px solid var(--accent);

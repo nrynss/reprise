@@ -165,6 +165,13 @@ function waitSeconds(seconds: number): Promise<void> {
 	});
 }
 
+// Decode stored audio bytes without touching the playback element. An
+// offline context decodes with no gesture and no audible output.
+function decodeAudioBytes(bytes: ArrayBuffer): Promise<AudioBuffer> {
+	const context = new OfflineAudioContext(1, 1, 44100);
+	return context.decodeAudioData(bytes);
+}
+
 // Fixture proposal ids follow one pattern: prop-<cut id> for cuts, and
 // a fixed id per kind for the rest. Live ids come from the stored rows.
 function fixtureProposalId(cutId: string): string {
@@ -301,6 +308,7 @@ export class DraftController {
 	private cleanups: Array<() => void> = [];
 	private followTimer: number | null = null;
 	private followWarned = false;
+	private peaksWarned = false;
 	private followedJob = '';
 	private snap: DraftSnapshot;
 	private readonly onChange: (snap: DraftSnapshot) => void;
@@ -587,6 +595,32 @@ export class DraftController {
 					this.emit();
 				}
 			);
+		} else if (args.audioUrl) {
+			void this.loadLivePeaks(args.audioUrl);
+		}
+	}
+
+	// Peaks for a stored draft. The detail carries no buckets, so the
+	// screen fetches the same bytes the element plays and decodes them
+	// away from the main thread. A failure keeps the flat line, warns
+	// once, and never blocks playback.
+	private async loadLivePeaks(audioUrl: string): Promise<void> {
+		try {
+			const response = await fetch(audioUrl);
+			if (!response.ok) throw new Error(`peaks ${response.status}`);
+			const decoded = await decodeAudioBytes(await response.arrayBuffer());
+			const channels: Float32Array[] = [];
+			for (let index = 0; index < decoded.numberOfChannels; index += 1) {
+				channels.push(decoded.getChannelData(index).slice());
+			}
+			const peaks = await computePeaksInWorker(channels, PEAK_BUCKETS);
+			this.snap = { ...this.snap, peaks };
+			this.emit();
+		} catch (error) {
+			if (!this.peaksWarned) {
+				this.peaksWarned = true;
+				console.warn('Live peaks unavailable. The waveform keeps its flat line.', error);
+			}
 		}
 	}
 
