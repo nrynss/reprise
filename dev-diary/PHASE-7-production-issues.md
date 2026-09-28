@@ -1768,6 +1768,100 @@ host replies. Neither test asserts a wall-clock duration.
 **Done when:** The tests pass under `go test -race`, and the gate passes in a fresh worktree.
 Removing the bound makes the first test hang, and the test's own context timeout fails it.
 
+### T7.61: The draft knows it is playing in Firefox
+```yaml
+requires:   T7.58
+fixture-ok: yes
+size:       S · frontier
+owns:       web/src/lib/editor/draft.ts, web/src/routes/episode/[id]/edit/+page.svelte,
+             web/src/routes/episode/[id]/edit/edit.spec.ts, web/src/lib/editor/draft.test.ts
+status:     not-started
+```
+**Defect.** In Firefox the draft plays, but the page never learns it is playing. The button keeps
+reading "Play draft", so the owner cannot pause, and a second press only calls play again. The
+owner hit this on the Firefox draft in T6.4b round 2. It is the dead Play that T7.52 and T7.58
+could not reproduce.
+
+A probe on 2026-09-28 ran the fixture draft in `mcr.microsoft.com/playwright:v1.63.0-noble`, the
+CI image. It pressed Play with no revert. The position advanced in both browsers. Chromium's button
+then read "Pause draft", and Firefox's still read "Play draft". The three Firefox specs T7.58 added
+fail the same way in CI, at `getByRole('button', { name: 'Pause draft' })`. T7.58 landed while
+CI was red on them.
+
+**Suspected cause, unproven.** The page reads `controller.player.playing` from the Chaaya
+`AudioPlayer` (`@nrynss/chaaya` 0.2.1, `src/lib/audio/playback/player.svelte.ts`). That flag
+follows the element's `play` and `pause` events. The first play runs `unlock()`, whose `#prime`
+plays a silent clip and then calls `pause()`. If Firefox delivers that `pause` event after the
+real `play` event, `playing` ends false while audio runs.
+
+**Change.**
+1. Add a Firefox spec that presses Play with no revert and expects "Pause draft". It must fail
+   on `main` in the CI image. Run it with
+   `docker run --rm --ipc=host -v "$PWD":/w -w /w/web mcr.microsoft.com/playwright:v1.63.0-noble`,
+   because WebKit and some Firefox builds do not launch on the workstation.
+2. Confirm or refute the event order above. Log the element events through a spec init script,
+   and write the finding in the handoff.
+3. If Chaaya is at fault, write the smallest reproduction in Chaaya's own terms in the handoff.
+   The orchestrator files it on `nrynss/chaaya`. Work around it in `draft.ts`. Either call
+   `player.unlock()` once in the first gesture before any real play, or drive the button from a
+   state the controller sets when `play()` resolves true and clears on pause, end and error.
+   Keep the workaround small, and name the issue URL beside it once filed.
+4. Keep the three T7.58 revert specs. They must pass in Firefox once the state is right.
+
+**Done when:** The whole editor suite passes in Chromium and Firefox in the CI image, three runs in
+a row. The review file records the three exit codes. Removing the workaround fails the new spec.
+
+### T7.62: Start answers the first tap
+```yaml
+requires:   T7.40
+fixture-ok: yes
+size:       XS · mid
+owns:       web/src/routes/record/+page.svelte, web/tests/start-gesture.spec.ts
+status:     not-started
+```
+**Defect.** The record page is prerendered, so the Start button renders enabled before the page's
+script runs. The click handler is attached later, inside `$effect`, through
+`document.getElementById('record-start')` and `addEventListener`. A tap in that gap does nothing,
+with no message. On a slow phone the first tap on the product's main control is lost.
+
+`tests/start-gesture.spec.ts` catches this gap by accident. It clicks right after `page.goto`. In
+the CI image it failed 1 run in 3 in Chromium on 2026-09-28, with the capture marks empty, because
+nothing had run. That failure has turned CI red on commits that changed only planning files.
+
+**Change.**
+1. Bind the handler with Svelte, `onclick={() => void activeController?.start()}`, and delete the
+   `getElementById` and `addEventListener` pair and its cleanup. A delegated Svelte handler still
+   runs inside the user gesture, which WebKit requires.
+2. Keep the button disabled until the controller exists:
+   `disabled={activeController === null || snap.phase !== 'preflight'}`. The prerendered HTML then
+   ships a disabled button, and Playwright's click waits for it to enable.
+3. Leave the spec's assertions as they are. The order `context`, `resume`, `microphone` must
+   still hold.
+
+**Done when:** `start-gesture.spec.ts` passes twenty runs in a row in Chromium and WebKit in the CI
+image, and the gate passes in a fresh worktree. Moving the handler back to `addEventListener` in
+the effect brings the flake back under repetition.
+
+### T7.63: The gate names the failing spec
+```yaml
+requires:   T7.47
+fixture-ok: yes
+size:       XS · light
+owns:       tools/check.sh
+status:     not-started
+```
+**Defect.** `tools/check.sh` runs `npm run test:e2e >/dev/null`. A failing run therefore prints only
+`FAIL [playwright] end-to-end tests failed`. No CI log names the spec. T7.58 landed on red CI, and
+finding the cause took a local rerun in the CI image.
+
+**Change.** Send the Playwright output to a temporary file. Print it only when the step fails,
+then fail as now. A passing run stays quiet. Do the same for any other step in `check.sh` that
+discards output with `>/dev/null`.
+
+**Done when:** A deliberately broken spec in a scratch branch makes the gate print that spec's
+name and error. The gate passes in a fresh worktree three times in a row, and the review file
+records the three exit codes.
+
 ---
 
 ## Exit criteria
