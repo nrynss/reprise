@@ -1047,7 +1047,7 @@ requires:   T7.36
 fixture-ok: yes
 size:       L · frontier
 owns:       web/src/routes/processing/, web/src/lib/voice/processing-state.ts, web/src/lib/voice/record-state.ts, web/src/routes/record/
-status:     in-progress:remediate-r2:t7.40-rem-r2
+status:     in-progress:review-r3:t7.40-rev-r3@7623334f82d5c9a4afac7757580fa247a51044a7
 ```
 The live handoff to `/processing` carries no job ids. So transcription
 and the editorial pass read "Waiting" forever, while the draft reads
