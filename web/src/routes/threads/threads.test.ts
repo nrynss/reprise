@@ -1019,3 +1019,72 @@ describe('share link release', () => {
 		}
 	});
 });
+
+describe('episode first press', () => {
+	async function mountPlayableEpisode(): Promise<{
+		controller: EpisodeController;
+		snaps: Array<ReturnType<typeof emptyScreen>>;
+	}> {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'ep-9', number: 3, title: 'Heard', state: 'ready', visibility: 'private' },
+					proposals: [],
+					words: [{ text: 'One', start: 0, end: 1.2 }],
+					audio_url: '/media/stem',
+					render_audio_url: '/media/opus-9'
+				});
+			})
+		);
+		const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+		const controller = new EpisodeController('ep-9', (snap) => snaps.push(snap));
+		controller.mount('');
+		await vi.waitFor(() => {
+			expect(snaps.at(-1)?.audioUrl).toBe('/media/opus-9');
+		});
+		return { controller, snaps };
+	}
+
+	function episodePlayer(controller: EpisodeController): {
+		play(): Promise<boolean>;
+		lastPlayError: { name: string; message: string } | null;
+	} {
+		return (controller as unknown as { player: { play(): Promise<boolean>; lastPlayError: { name: string; message: string } | null } }).player;
+	}
+
+	it('plays after one press when the retry answers', async () => {
+		const { controller, snaps } = await mountPlayableEpisode();
+		const play = vi
+			.spyOn(episodePlayer(controller), 'play')
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true);
+		try {
+			await controller.togglePlay();
+			expect(play).toHaveBeenCalledTimes(2);
+			expect(snaps.at(-1)?.playing).toBe(true);
+			expect(snaps.at(-1)?.notice).not.toContain('refused');
+		} finally {
+			controller.destroy();
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('shows the refusal only after the retry also fails', async () => {
+		const { controller, snaps } = await mountPlayableEpisode();
+		const play = vi.spyOn(episodePlayer(controller), 'play').mockResolvedValue(false);
+		try {
+			await controller.togglePlay();
+			expect(play).toHaveBeenCalledTimes(2);
+			expect(snaps.at(-1)?.playing).toBe(false);
+			expect(snaps.at(-1)?.notice).toContain('refused');
+		} finally {
+			controller.destroy();
+			vi.unstubAllGlobals();
+		}
+	});
+});

@@ -868,6 +868,19 @@ export class DraftController {
 		this.emit();
 	}
 
+	// Name the refusal behind one play call. The player stores the
+	// browser reason on every refused call and clears it on success.
+	// The log carries the page and which call refused, so the next
+	// live run shows whether the retry cures the first press.
+	private logPlayRefusal(attempt: string): void {
+		const refusal = this.player.lastPlayError;
+		if (refusal) {
+			console.warn(`Draft playback refused on ${attempt} call: ${refusal.name}: ${refusal.message}`);
+		} else {
+			console.warn(`Draft playback refused on ${attempt} call with no reason stored.`);
+		}
+	}
+
 	// Adopt the element length once it reports one. The install length
 	// comes from the last word end, which can sit short of or past the
 	// stored audio. Regions follow the adopted length, and the playhead
@@ -903,7 +916,16 @@ export class DraftController {
 		this.player.seek(start);
 		this.snap = { ...this.snap, position: start };
 		this.emit();
-		const ok = await this.player.play();
+		// The first press primes the shared element, so it can refuse
+		// while the gesture still counts. The retry runs at once in the
+		// same handler, so it keeps the gesture. Only a second refusal
+		// shows the notice.
+		let ok = await this.player.play();
+		if (!ok) {
+			this.logPlayRefusal('first');
+			ok = await this.player.play();
+			if (!ok) this.logPlayRefusal('retried');
+		}
 		this.snap = {
 			...this.snap,
 			playing: ok,
@@ -920,7 +942,16 @@ export class DraftController {
 			this.emit();
 			return;
 		}
-		const ok = await this.player.play();
+		// The first press primes the shared element, so it can refuse
+		// while the gesture still counts. The retry runs at once in the
+		// same handler, so it keeps the gesture. Only a second refusal
+		// shows the notice.
+		let ok = await this.player.play();
+		if (!ok) {
+			this.logPlayRefusal('first');
+			ok = await this.player.play();
+			if (!ok) this.logPlayRefusal('retried');
+		}
 		this.snap = {
 			...this.snap,
 			playing: ok,

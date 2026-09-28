@@ -417,18 +417,41 @@ export class WelcomeController {
 			this.emit();
 			return;
 		}
-		const ok = await this.player.play();
+		// The first press primes the shared element, so it can refuse
+		// while the gesture still counts. The retry runs at once in the
+		// same handler, so it keeps the gesture. Only a second refusal
+		// shows the notice.
+		const player = this.player;
+		let ok = await player.play();
+		if (!ok) {
+			this.logPlayRefusal(player, 'first');
+			ok = await player.play();
+			if (!ok) this.logPlayRefusal(player, 'retried');
+		}
 		const playingNotice = this.snap.capped
 			? `Playing thirty seconds of episode ${this.snap.teaser.episodeNumber}.`
 			: `Playing episode ${this.snap.teaser.episodeNumber}.`;
 		this.snap = {
 			...this.snap,
 			playing: ok,
-			position: this.player.currentTime || this.snap.position,
+			position: player.currentTime || this.snap.position,
 			notice: ok ? playingNotice : 'Playback refused. Press play again.'
 		};
 		this.emit();
 		if (ok) this.startTicker();
+	}
+
+	// Name the refusal behind one play call. The player stores the
+	// browser reason on every refused call and clears it on success.
+	// The log carries the page and which call refused, so the next
+	// live run shows whether the retry cures the first press.
+	private logPlayRefusal(player: AudioPlayer, attempt: string): void {
+		const refusal = player.lastPlayError;
+		if (refusal) {
+			console.warn(`Welcome playback refused on ${attempt} call: ${refusal.name}: ${refusal.message}`);
+		} else {
+			console.warn(`Welcome playback refused on ${attempt} call with no reason stored.`);
+		}
 	}
 
 	private emit(): void {

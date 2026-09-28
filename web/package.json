@@ -31,7 +31,7 @@
 		"vitest": "^5.0.1"
 	},
 	"dependencies": {
-		"@nrynss/chaaya": "0.2.2",
+		"@nrynss/chaaya": "0.2.3",
 		"bits-ui": "^2.0.0"
 	}
 }

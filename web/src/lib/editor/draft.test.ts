@@ -701,3 +701,51 @@ describe('draft controller', () => {
 		}
 	});
 });
+
+describe('draft first press', () => {
+	it('plays after one press when the retry answers', async () => {
+		const { controller } = openDraft();
+		const play = vi
+			.spyOn(controller.player, 'play')
+			.mockResolvedValueOnce(false)
+			.mockResolvedValueOnce(true);
+		try {
+			await controller.togglePlay();
+			expect(play).toHaveBeenCalledTimes(2);
+			expect(controller.snapshot.playing).toBe(true);
+			expect(controller.snapshot.notice).not.toContain('refused');
+		} finally {
+			controller.destroy();
+		}
+	});
+
+	it('shows the refusal only after the retry also fails', async () => {
+		const { controller } = openDraft();
+		const play = vi.spyOn(controller.player, 'play').mockResolvedValue(false);
+		try {
+			await controller.togglePlay();
+			expect(play).toHaveBeenCalledTimes(2);
+			expect(controller.snapshot.playing).toBe(false);
+			expect(controller.snapshot.notice).toContain('refused');
+		} finally {
+			controller.destroy();
+		}
+	});
+
+	it('logs the stored refusal name once per refused call', async () => {
+		const { controller } = openDraft();
+		vi.spyOn(controller.player, 'play').mockResolvedValue(false);
+		controller.player.lastPlayError = { name: 'NotAllowedError', message: 'x' };
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		try {
+			await controller.togglePlay();
+			expect(warn).toHaveBeenCalledTimes(2);
+			const joined = warn.mock.calls.map((call) => String(call[0])).join('\n');
+			expect(joined.split('NotAllowedError').length - 1).toBe(2);
+			expect(joined).toContain('x');
+		} finally {
+			warn.mockRestore();
+			controller.destroy();
+		}
+	});
+});
