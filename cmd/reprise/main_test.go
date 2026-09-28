@@ -626,6 +626,9 @@ func openTestReconciler(t *testing.T, fx *wireFixture, diary broker.SessionStore
 		Diary:         diary,
 		Media:         fakeMediaWriter{t: t},
 		MarginSeconds: broker.DefaultMarginSeconds,
+		// The recorded close carries no links, so a wait only burns the
+		// artifact backoff these tests never pin.
+		Wait: func(context.Context, time.Duration) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("open reconciler: %v", err)
@@ -2417,6 +2420,19 @@ func TestHostWaitRunsTheGuestBatchAlone(t *testing.T) {
 	}
 	if len(replies) != 0 {
 		t.Fatalf("await = %v, want empty replies", replies)
+	}
+}
+
+// TestHostRepliesWaitCoversSettleWaits keeps the transcript host wait
+// past both reconcile backoffs with room, so the batch still sees a
+// timeline the settle stored late. The two sums mirror the close and
+// artifact backoffs the broker waits through.
+func TestHostRepliesWaitCoversSettleWaits(t *testing.T) {
+	const closeBackoff = 500*time.Millisecond + time.Second + 2*time.Second + 4*time.Second + 8*time.Second + 8*time.Second
+	const artifactBackoff = time.Second + 2*time.Second + 4*time.Second + 8*time.Second + 16*time.Second + 16*time.Second
+	const want = closeBackoff + artifactBackoff + 10*time.Second
+	if hostRepliesWait < want {
+		t.Fatalf("host wait %s, want at least %s", hostRepliesWait, want)
 	}
 }
 

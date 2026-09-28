@@ -2468,10 +2468,10 @@ func (j *jobs) settleTranscript(ctx context.Context, ownerID, episodeID string, 
 }
 
 // hostRepliesWait caps how long a transcript job waits for host
-// replies. A minute covers a normal close with margin, because the
-// reconcile backoff tops out at 23.5 seconds. It stays under the 100
-// second limit.
-const hostRepliesWait = 60 * time.Second
+// replies. Ninety seconds covers the reconcile link wait with margin,
+// because the close backoff tops out at 23.5 seconds and the artifact
+// link backoff adds 47 seconds. It stays under the 100 second limit.
+const hostRepliesWait = 90 * time.Second
 
 // timelinePoll is the gap between claim reads while a transcript job
 // waits for the provider timeline. The batch stays idle until the read

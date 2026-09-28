@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -467,6 +468,7 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 		recording_url TEXT NOT NULL DEFAULT '',
 		timeline_url TEXT NOT NULL DEFAULT '',
 		end_pending INTEGER NOT NULL DEFAULT 0,
+		artifacts_pending INTEGER NOT NULL DEFAULT 0,
 		updated_at INTEGER NOT NULL DEFAULT 0
 	)`
 	if _, err := r.db.Writer().ExecContext(context.Background(), schema); err != nil {
@@ -482,6 +484,10 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 	}
 	if err := r.ensureColumn(context.Background(),
 		"end_pending", "end_pending INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return nil, err
+	}
+	if err := r.ensureColumn(context.Background(),
+		"artifacts_pending", "artifacts_pending INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return nil, err
 	}
 	return r, nil
@@ -913,17 +919,34 @@ var settleReadBackoff = [...]time.Duration{
 	8 * time.Second,
 }
 
+// artifactReadBackoff pauses between provider reads while a closed
+// session still names no artifact links. The provider attaches the
+// recording and timeline links a moment after it reports the duration,
+// so the first settle straight after the end usually reads neither.
+// The steps total 47 seconds. Together with the close backoff above
+// the waits total 70.5 seconds, inside the process budget for one
+// request.
+var artifactReadBackoff = [...]time.Duration{
+	time.Second,
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
+	16 * time.Second,
+	16 * time.Second,
+}
+
 // readForSettle reads the provider duration. An open session is ended
 // first, then read again after each backoff step until the read succeeds
 // or fails with something other than an open session. When every step
 // still finds the session open, the error wraps ErrSessionOpen and the
-// caller settles nothing. The sweep settles that session later, once the
-// provider has closed it. The settle never prices a guessed duration.
-// The delete waits until the artifacts are stored.
+// caller settles nothing. The settle never prices a guessed duration.
+// A read that carries a duration but no links waits those links out
+// through waitForArtifacts. The delete waits until the artifacts are
+// stored.
 func (r *Reconciler) readForSettle(ctx context.Context, providerSessionID string) (ProviderSession, error) {
 	read, err := r.sessions.ReadSession(ctx, providerSessionID)
 	if err == nil {
-		return read, nil
+		return r.waitForArtifacts(ctx, providerSessionID, read)
 	}
 	if !errors.Is(err, ErrSessionOpen) {
 		return ProviderSession{}, fmt.Errorf("broker: reconcile: read session %s: %w", providerSessionID, err)
@@ -941,13 +964,42 @@ func (r *Reconciler) readForSettle(ctx context.Context, providerSessionID string
 		}
 		read, err = r.sessions.ReadSession(ctx, providerSessionID)
 		if err == nil {
-			return read, nil
+			return r.waitForArtifacts(ctx, providerSessionID, read)
 		}
 		if !errors.Is(err, ErrSessionOpen) {
 			return ProviderSession{}, fmt.Errorf("broker: reconcile: read session %s: %w", providerSessionID, err)
 		}
 	}
 	return ProviderSession{}, fmt.Errorf("broker: reconcile: read session %s: %w", providerSessionID, ErrSessionOpen)
+}
+
+// waitForArtifacts keeps reading while the provider names no artifact
+// links. It returns the last read whether or not both links arrived, so
+// the settle always prices a known duration. A read error keeps the
+// last good read instead of failing the settle, because the later sweep
+// still fetches what this pass missed. The first read that carries both
+// links logs how long they took to appear after the close.
+func (r *Reconciler) waitForArtifacts(ctx context.Context, providerSessionID string, read ProviderSession) (ProviderSession, error) {
+	start := time.Now()
+	if read.RecordingURL != "" && read.TimelineURL != "" {
+		log.Printf("broker: reconcile: session %s carried both artifact links after %s", providerSessionID, time.Since(start))
+		return read, nil
+	}
+	for _, backoff := range artifactReadBackoff {
+		if werr := r.wait(ctx, backoff); werr != nil {
+			return read, fmt.Errorf("broker: reconcile: wait for provider artifacts %s: %w", providerSessionID, werr)
+		}
+		next, err := r.sessions.ReadSession(ctx, providerSessionID)
+		if err != nil {
+			return read, nil
+		}
+		read = next
+		if read.RecordingURL != "" && read.TimelineURL != "" {
+			log.Printf("broker: reconcile: session %s carried both artifact links after %s", providerSessionID, time.Since(start))
+			return read, nil
+		}
+	}
+	return read, nil
 }
 
 // endProvider deletes the provider record after the artifacts are stored.
@@ -1004,6 +1056,44 @@ func (r *Reconciler) setEndPending(ctx context.Context, sessionID string, pendin
 		`UPDATE reconcile_state SET end_pending = ?, updated_at = ? WHERE session_id = ?`,
 		flag, time.Now().UnixMilli(), sessionID); err != nil {
 		return fmt.Errorf("broker: mark provider end: %w", ErrState)
+	}
+	return nil
+}
+
+// artifactsPending reports whether a settled session still waits on its
+// provider artifacts. The sweep fetches them on a later pass and keeps
+// the provider record until both are stored.
+func (r *Reconciler) artifactsPending(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("broker: provider artifacts: %w: session id must not be empty", ErrInvalid)
+	}
+	var pending int
+	err := r.db.Writer().QueryRowContext(ctx,
+		`SELECT artifacts_pending FROM reconcile_state WHERE session_id = ?`, sessionID).Scan(&pending)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("broker: read provider artifacts: %w", ErrState)
+	}
+	return pending != 0, nil
+}
+
+// setArtifactsPending records whether the provider artifacts still have
+// to land. The flag stays set until both artifacts are stored or the
+// provider record reports gone, so a kept record is never forgotten.
+func (r *Reconciler) setArtifactsPending(ctx context.Context, sessionID string, pending bool) error {
+	if sessionID == "" {
+		return fmt.Errorf("broker: mark provider artifacts: %w: session id must not be empty", ErrInvalid)
+	}
+	flag := 0
+	if pending {
+		flag = 1
+	}
+	if _, err := r.db.Writer().ExecContext(ctx,
+		`UPDATE reconcile_state SET artifacts_pending = ?, updated_at = ? WHERE session_id = ?`,
+		flag, time.Now().UnixMilli(), sessionID); err != nil {
+		return fmt.Errorf("broker: mark provider artifacts: %w", ErrState)
 	}
 	return nil
 }
@@ -1145,7 +1235,10 @@ func (r *Reconciler) completeExpiredTail(ctx context.Context, in Input, read Pro
 // finishArtifacts completes the idempotent tail: the session row update,
 // the recording and timeline persists, and the over cap alert. A claimed
 // media id stays, so a repeat fetches nothing and stores nothing. The
-// alert fires once per session on its durable flag. Money never moves here.
+// alert fires once per session on its durable flag. The provider record
+// ends only once both media ids are stored. Otherwise the flag marks the
+// artifacts pending, the money stays settled, and the record is kept for
+// the sweep to fetch later. Money never moves here.
 func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow) (Result, error) {
 	res := Result{
 		SessionID:        in.SessionID,
@@ -1180,17 +1273,22 @@ func (r *Reconciler) finishArtifacts(ctx context.Context, in Input, row claimRow
 	if res.OverCap && !row.overCapAlerted {
 		r.alert(ctx, &res, AlertOverCap, in.OwnerID,
 			fmt.Sprintf("session ran %d seconds past a %d second cap", res.ConnectedSeconds, in.TokenCapSeconds))
-		if res.AlertError != "" {
-			if err := r.endProvider(ctx, in.SessionID, in.ProviderSessionID); err != nil {
+		if res.AlertError == "" {
+			if err := r.markOverCapAlerted(ctx, in.SessionID); err != nil {
 				return res, err
 			}
-			return res, nil
-		}
-		if err := r.markOverCapAlerted(ctx, in.SessionID); err != nil {
-			return res, err
 		}
 	}
-	if err := r.endProvider(ctx, in.SessionID, in.ProviderSessionID); err != nil {
+	if res.RecordingMediaID != "" && res.TimelineMediaID != "" {
+		if err := r.setArtifactsPending(ctx, in.SessionID, false); err != nil {
+			return res, err
+		}
+		if err := r.endProvider(ctx, in.SessionID, in.ProviderSessionID); err != nil {
+			return res, err
+		}
+		return res, nil
+	}
+	if err := r.setArtifactsPending(ctx, in.SessionID, true); err != nil {
 		return res, err
 	}
 	return res, nil

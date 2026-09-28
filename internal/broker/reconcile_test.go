@@ -229,6 +229,10 @@ func newRecFixtureClock(t *testing.T, nowFn func() time.Time, leaseCap time.Dura
 		MarginSeconds:        DefaultMarginSeconds,
 		RecordingContentType: DefaultRecordingContentType,
 		FetchMaxBytes:        DefaultFetchMaxBytes,
+		// The recorded closes carry their links or none at all, so a
+		// wait only burns the backoff. Tests that pin the waits pass
+		// their own recorder instead.
+		Wait: func(context.Context, time.Duration) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("new reconciler: %v", err)
@@ -1590,6 +1594,163 @@ func equalDurations(got, want []time.Duration) bool {
 		}
 	}
 	return true
+}
+
+// delayedLinksReader reports a duration at once with no artifact links
+// on the first two reads, then both links. It records every provider
+// end, so the test pins that the end runs only after the links land.
+type delayedLinksReader struct {
+	mu    sync.Mutex
+	reads int
+	ends  int
+}
+
+// ReadSession replays the link delay. The duration is present from the
+// first read, while the links arrive on the third.
+func (s *delayedLinksReader) ReadSession(_ context.Context, _ string) (ProviderSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reads++
+	if s.reads <= 2 {
+		return ProviderSession{ID: "prov-links", DurationSeconds: 40}, nil
+	}
+	return ProviderSession{
+		ID:              "prov-links",
+		DurationSeconds: 40,
+		RecordingURL:    "https://artifacts.example/rec-a.ogg",
+		TimelineURL:     "https://artifacts.example/tl-a.json",
+	}, nil
+}
+
+// EndSession records one provider end.
+func (s *delayedLinksReader) EndSession(_ context.Context, _ string) (EndResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ends++
+	return EndResult{Deleted: true, Detail: "record deleted"}, nil
+}
+
+// endCount returns how many provider ends ran.
+func (s *delayedLinksReader) endCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ends
+}
+
+// missingLinksReader reports a duration with no artifact links on every
+// read. It records every provider end, so the test pins that the end
+// never runs while the links are missing.
+type missingLinksReader struct {
+	mu   sync.Mutex
+	ends int
+}
+
+// ReadSession replays a close whose links never arrive.
+func (s *missingLinksReader) ReadSession(_ context.Context, _ string) (ProviderSession, error) {
+	return ProviderSession{ID: "prov-nolinks", DurationSeconds: 40}, nil
+}
+
+// EndSession records one provider end.
+func (s *missingLinksReader) EndSession(_ context.Context, _ string) (EndResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ends++
+	return EndResult{Deleted: true, Detail: "record deleted"}, nil
+}
+
+// endCount returns how many provider ends ran.
+func (s *missingLinksReader) endCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ends
+}
+
+// recArtifactsPending reads the pending artifact flag for one session.
+func recArtifactsPending(t *testing.T, db *sqlite.DB, sessionID string) bool {
+	t.Helper()
+	var pending int
+	if err := db.Reader().QueryRowContext(t.Context(),
+		`SELECT artifacts_pending FROM reconcile_state WHERE session_id = ?`, sessionID).Scan(&pending); err != nil {
+		t.Fatalf("read artifacts pending: %v", err)
+	}
+	return pending != 0
+}
+
+// TestReconcileWaitsForArtifactLinks settles a close whose links arrive
+// on the third read. One reconcile settles once, stores both artifacts,
+// then ends the provider record. The waits saw 1 s and 2 s after the
+// duration read. Skipping the link wait would settle with no links and
+// store nothing, so that change fails this test.
+func TestReconcileWaitsForArtifactLinks(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-links")
+	reader := &delayedLinksReader{}
+	waits := &waitRecorder{}
+	rec := openSettleReconciler(t, fx, reader, waits)
+	res, err := rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.ConnectedSeconds != 40 || res.Cost != recRate*40 {
+		t.Fatalf("settled %+v, want 40 seconds at %d", res, recRate*40)
+	}
+	if res.RecordingMediaID == "" || res.TimelineMediaID == "" {
+		t.Fatalf("result %+v stored no recording and timeline pair", res)
+	}
+	if got := recSpent(t, fx.costs); got != recRate*40 {
+		t.Fatalf("spent %d, want exactly one settle at %d", got, recRate*40)
+	}
+	if held := recReserved(t, fx.costs); held != 0 {
+		t.Fatalf("held %d, want none held", held)
+	}
+	if got := reader.endCount(); got != 1 {
+		t.Fatalf("provider ended %d times, want exactly once", got)
+	}
+	if got := waits.durations(); !equalDurations(got, []time.Duration{time.Second, 2 * time.Second}) {
+		t.Fatalf("waits %v, want 1s then 2s", got)
+	}
+	if recArtifactsPending(t, fx.db, in.SessionID) {
+		t.Fatal("artifacts still read pending after both were stored")
+	}
+	assertClaimedBlob(t, fx.db, fx.mediaDir, res.RecordingMediaID, "audio/ogg", recAudioA)
+	assertClaimedBlob(t, fx.db, fx.mediaDir, res.TimelineMediaID, "application/json", recTimelineA)
+}
+
+// TestReconcileKeepsRecordWhileArtifactsPending settles a close whose
+// links never arrive. The money settles, the flag reads pending, and
+// the provider end never runs. Ending unconditionally here would delete
+// the record before its artifacts land, so that change fails this test.
+func TestReconcileKeepsRecordWhileArtifactsPending(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-nolinks")
+	reader := &missingLinksReader{}
+	waits := &waitRecorder{}
+	rec := openSettleReconciler(t, fx, reader, waits)
+	res, err := rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.ConnectedSeconds != 40 || res.Cost != recRate*40 {
+		t.Fatalf("settled %+v, want 40 seconds at %d", res, recRate*40)
+	}
+	if got := recSpent(t, fx.costs); got != recRate*40 {
+		t.Fatalf("spent %d, want exactly one settle at %d", got, recRate*40)
+	}
+	if held := recReserved(t, fx.costs); held != 0 {
+		t.Fatalf("held %d, want none held", held)
+	}
+	if res.RecordingMediaID != "" || res.TimelineMediaID != "" {
+		t.Fatalf("result %+v stored artifacts with no links", res)
+	}
+	if !recArtifactsPending(t, fx.db, in.SessionID) {
+		t.Fatal("artifacts read clear with neither stored")
+	}
+	if got := reader.endCount(); got != 0 {
+		t.Fatalf("provider ended %d times, want no end before the links land", got)
+	}
+	if got := waits.durations(); !equalDurations(got, artifactReadBackoff[:]) {
+		t.Fatalf("waits %v, want the full artifact backoff", got)
+	}
 }
 
 // TestReconcileWaitsForProviderClose settles a session whose provider

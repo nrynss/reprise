@@ -341,14 +341,25 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 		return SweepOutcome{}, err
 	}
 	if settled {
-		// Money already moved. Retry the provider end when it never landed.
-		// A later pass tries again after a failed end and does not settle.
-		// A session with no provider id has no end to retry.
+		// Money already moved. A kept provider record whose artifacts
+		// never landed is fetched below. A failed provider end is
+		// retried after that. A session with no provider id has no read
+		// and no end to retry.
 		if candidate.ProviderSessionID == "" {
+			if err := s.reconciler.setArtifactsPending(ctx, candidate.SessionID, false); err != nil {
+				return SweepOutcome{}, err
+			}
 			if err := s.markSwept(ctx, candidate.SessionID, "missing", 0, false, "session already settled"); err != nil {
 				return SweepOutcome{}, err
 			}
 			return SweepOutcome{SessionID: candidate.SessionID, Skipped: true, Detail: "session already settled"}, nil
+		}
+		artifacts, err := s.reconciler.artifactsPending(ctx, candidate.SessionID)
+		if err != nil {
+			return SweepOutcome{}, err
+		}
+		if artifacts {
+			return s.fetchPendingArtifacts(ctx, candidate)
 		}
 		pending, err := s.reconciler.endPending(ctx, candidate.SessionID)
 		if err != nil {
@@ -437,6 +448,94 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 		ProviderStatus:   status.Status,
 		ConnectedSeconds: res.ConnectedSeconds,
 		Cost:             res.Cost,
+		ServerEnded:      ended.SocketEnded,
+		Detail:           detail,
+	}, nil
+}
+
+// fetchPendingArtifacts retries the artifact fetch for a settled session
+// whose provider record was kept. It stores whichever links the provider
+// now names through ensureArtifact, clears the flag once both are stored,
+// and only then ends the provider record. Money never moves here, because
+// the settle already ran. A record the provider no longer keeps clears
+// the flag, since nothing is left to fetch.
+func (s *Sweeper) fetchPendingArtifacts(ctx context.Context, candidate Candidate) (SweepOutcome, error) {
+	status, err := s.statuses.ReadStatus(ctx, candidate.ProviderSessionID)
+	if err != nil {
+		if errors.Is(err, ErrProviderGone) {
+			if err := s.reconciler.setArtifactsPending(ctx, candidate.SessionID, false); err != nil {
+				return SweepOutcome{}, err
+			}
+			detail := fmt.Sprintf("provider record for session %s is gone, so no artifacts remain to fetch", candidate.SessionID)
+			if err := s.markSwept(ctx, candidate.SessionID, "gone", 0, false, detail); err != nil {
+				return SweepOutcome{}, err
+			}
+			return SweepOutcome{SessionID: candidate.SessionID, ProviderStatus: "gone", Skipped: true, Detail: detail}, nil
+		}
+		return SweepOutcome{}, fmt.Errorf("broker: sweep: read session %s: %w: %w", candidate.ProviderSessionID, ErrSweep, err)
+	}
+	in := toInput(candidate)
+	recordingID, err := s.reconciler.artifactID(ctx, candidate.SessionID, "recording")
+	if err != nil {
+		return SweepOutcome{}, err
+	}
+	timelineID, err := s.reconciler.artifactID(ctx, candidate.SessionID, "timeline")
+	if err != nil {
+		return SweepOutcome{}, err
+	}
+	if status.RecordingURL != "" {
+		recordingID, err = s.reconciler.ensureArtifact(ctx, in, "recording", status.RecordingURL, s.reconciler.contentType, recordingID)
+		if err != nil {
+			return SweepOutcome{}, err
+		}
+	}
+	if status.TimelineURL != "" {
+		timelineID, err = s.reconciler.ensureArtifact(ctx, in, "timeline", status.TimelineURL, s.reconciler.timelineType, timelineID)
+		if err != nil {
+			return SweepOutcome{}, err
+		}
+	}
+	if recordingID == "" || timelineID == "" {
+		return SweepOutcome{
+			SessionID:      candidate.SessionID,
+			ProviderStatus: status.Status,
+			Skipped:        true,
+			Detail:         "artifacts still pending, provider record kept",
+		}, nil
+	}
+	if err := s.reconciler.setArtifactsPending(ctx, candidate.SessionID, false); err != nil {
+		return SweepOutcome{}, err
+	}
+	if err := s.reconciler.endProvider(ctx, candidate.SessionID, candidate.ProviderSessionID); err != nil {
+		return SweepOutcome{}, err
+	}
+	ended, err := s.ender.EndSession(ctx, candidate.ProviderSessionID)
+	if err != nil {
+		if merr := s.reconciler.setEndPending(ctx, candidate.SessionID, true); merr != nil {
+			return SweepOutcome{}, merr
+		}
+		return SweepOutcome{}, fmt.Errorf("broker: sweep: end session %s: %w: %w", candidate.ProviderSessionID, ErrSweep, err)
+	}
+	row, err := s.reconciler.readRow(ctx, candidate.SessionID)
+	if err != nil {
+		return SweepOutcome{}, err
+	}
+	price, err := priceForSeconds(row.connectedSeconds)
+	if err != nil {
+		return SweepOutcome{}, err
+	}
+	detail := fmt.Sprintf("pending artifacts stored, provider record %s", ended.Detail)
+	if ended.SocketEnded {
+		detail += ", socket ended before the delete"
+	}
+	if err := s.markSwept(ctx, candidate.SessionID, status.Status, row.connectedSeconds, ended.SocketEnded, detail); err != nil {
+		return SweepOutcome{}, err
+	}
+	return SweepOutcome{
+		SessionID:        candidate.SessionID,
+		ProviderStatus:   status.Status,
+		ConnectedSeconds: row.connectedSeconds,
+		Cost:             price,
 		ServerEnded:      ended.SocketEnded,
 		Detail:           detail,
 	}, nil

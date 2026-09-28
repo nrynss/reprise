@@ -353,10 +353,14 @@ func (r *refuseEnd) EndSession(context.Context, string) (EndResult, error) {
 // TestSweepRetriesEndAfterSettledClaim checks a sweep that settled an open
 // session and then failed to end it. The next sweep must end again. It must
 // not report the session already settled, and it must not settle twice.
+// The status carries both links, because the settle ends the provider
+// record only once both artifacts are stored.
 func TestSweepRetriesEndAfterSettledClaim(t *testing.T) {
 	sf := newSweepFixture(t, 4000)
 	sf.statuses.docs["prov-sweep"] = ProviderStatus{
 		ID: "prov-sweep", Status: "created", HasDuration: false, OpenSeconds: 10,
+		RecordingURL: "https://artifacts.example/rec-a.ogg",
+		TimelineURL:  "https://artifacts.example/tl-a.json",
 	}
 	reader := &refuseEnd{}
 	sf.fx.rec.sessions = reader
@@ -630,5 +634,114 @@ func TestReconcilerIsSettled(t *testing.T) {
 	}
 	if _, err := fx.rec.IsSettled(t.Context(), ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty id err %v, want ErrInvalid", err)
+	}
+}
+
+// sweepArtifactsPending reads the pending artifact flag for one session.
+func sweepArtifactsPending(t *testing.T, db *sqlite.DB, sessionID string) bool {
+	t.Helper()
+	var pending int
+	if err := db.Reader().QueryRowContext(t.Context(),
+		`SELECT artifacts_pending FROM reconcile_state WHERE session_id = ?`, sessionID).Scan(&pending); err != nil {
+		t.Fatalf("read artifacts pending: %v", err)
+	}
+	return pending != 0
+}
+
+// TestSweepFetchesPendingArtifactsThenEnds settles first with no links,
+// so the provider record is kept and flagged. The sweep then reads both
+// links, stores both artifacts, clears the flag, and ends the provider
+// record. The owner budget does not move on the sweep pass.
+func TestSweepFetchesPendingArtifactsThenEnds(t *testing.T) {
+	sf := newSweepFixture(t, 4000)
+	links := &missingLinksReader{}
+	sf.fx.rec.sessions = links
+	sf.fx.rec.artifacts = &countingFetcher{blobs: map[string][]byte{
+		"https://artifacts.example/rec-a.ogg": recAudioA,
+		"https://artifacts.example/tl-a.json": recTimelineA,
+	}}
+	pre, err := sf.fx.rec.Reconcile(t.Context(), toInput(sf.candidate))
+	if err != nil {
+		t.Fatalf("pre-settle: %v", err)
+	}
+	if pre.RecordingMediaID != "" || pre.TimelineMediaID != "" {
+		t.Fatalf("pre-settle %+v stored artifacts with no links", pre)
+	}
+	spent := recSpent(t, sf.fx.costs)
+	if spent != recRate*40 {
+		t.Fatalf("spent %d, want one settle at %d", spent, recRate*40)
+	}
+	if !sweepArtifactsPending(t, sf.fx.db, sf.candidate.SessionID) {
+		t.Fatal("pre-settle left no pending flag")
+	}
+	if got := links.endCount(); got != 0 {
+		t.Fatalf("provider ended %d times before the sweep, want none", got)
+	}
+	sf.statuses.docs["prov-sweep"] = ProviderStatus{
+		ID: "prov-sweep", Status: "completed", HasDuration: true, DurationSeconds: 99,
+		RecordingURL: "https://artifacts.example/rec-a.ogg",
+		TimelineURL:  "https://artifacts.example/tl-a.json",
+	}
+	out, err := sf.sweeper.Sweep(t.Context(), SweepInput{MarginSeconds: DefaultMarginSeconds})
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("sweep outcome %+v, want one fetched session", out)
+	}
+	if out[0].ConnectedSeconds != 40 {
+		t.Fatalf("sweep settled %d seconds, want the 40 the first pass booked", out[0].ConnectedSeconds)
+	}
+	media := recMediaTypes(t, sf.fx.db, sf.candidate.EpisodeID)
+	if media["audio/ogg"] != 1 || media["application/json"] != 1 {
+		t.Fatalf("media %v, want one recording and one timeline", media)
+	}
+	if sweepArtifactsPending(t, sf.fx.db, sf.candidate.SessionID) {
+		t.Fatal("pending flag stayed set after both artifacts were stored")
+	}
+	if len(sf.ender.calls) != 1 || sf.ender.calls[0] != "prov-sweep" {
+		t.Fatalf("ender calls %v, want exactly the swept session", sf.ender.calls)
+	}
+	if got := recSpent(t, sf.fx.costs); got != spent {
+		t.Fatalf("spent moved %d to %d, want no second settle", spent, got)
+	}
+	if held := recReserved(t, sf.fx.costs); held != 0 {
+		t.Fatalf("held %d, want none held", held)
+	}
+}
+
+// TestSweepClearsPendingWhenRecordGone settles first with no links, so
+// the provider record is kept and flagged. The sweep then finds the
+// record gone, clears the flag, and settles nothing.
+func TestSweepClearsPendingWhenRecordGone(t *testing.T) {
+	sf := newSweepFixture(t, 4000)
+	links := &missingLinksReader{}
+	sf.fx.rec.sessions = links
+	if _, err := sf.fx.rec.Reconcile(t.Context(), toInput(sf.candidate)); err != nil {
+		t.Fatalf("pre-settle: %v", err)
+	}
+	spent := recSpent(t, sf.fx.costs)
+	if spent != recRate*40 {
+		t.Fatalf("spent %d, want one settle at %d", spent, recRate*40)
+	}
+	if !sweepArtifactsPending(t, sf.fx.db, sf.candidate.SessionID) {
+		t.Fatal("pre-settle left no pending flag")
+	}
+	sf.statuses.gone["prov-sweep"] = true
+	out, err := sf.sweeper.Sweep(t.Context(), SweepInput{MarginSeconds: DefaultMarginSeconds})
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(out) != 1 || !out[0].Skipped {
+		t.Fatalf("sweep outcome %+v, want one skipped session", out)
+	}
+	if sweepArtifactsPending(t, sf.fx.db, sf.candidate.SessionID) {
+		t.Fatal("pending flag stayed set on a gone record")
+	}
+	if got := recSpent(t, sf.fx.costs); got != spent {
+		t.Fatalf("spent moved %d to %d, want no second settle", spent, got)
+	}
+	if len(sf.ender.calls) != 0 {
+		t.Fatalf("ender calls %v for a gone record, want none", sf.ender.calls)
 	}
 }
