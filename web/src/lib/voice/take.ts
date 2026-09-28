@@ -39,6 +39,19 @@ export function drainHostBlock(samples: Float32Array): Uint8Array<ArrayBuffer> {
 }
 
 /**
+ * Seconds of take the clock shows. A pause freezes the reading at the
+ * instant it started, and resume keeps the paused span out of the count.
+ */
+export function elapsedSeconds(
+	now: number,
+	start: number,
+	pausedTotal: number,
+	pausedSince: number | null
+): number {
+	return Math.max(0, Math.floor((pausedSince ?? now) - start - pausedTotal));
+}
+
+/**
  * Count the blocks a synthetic take of one length holds. Tests feed that
  * many blocks through the drain to measure held memory at take scale.
  */

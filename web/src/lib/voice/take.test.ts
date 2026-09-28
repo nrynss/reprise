@@ -4,6 +4,7 @@ import {
 	blockCount,
 	drainHostBlock,
 	drainUserBlock,
+	elapsedSeconds,
 	sliceBlocks,
 	type HostMark
 } from './take';
@@ -79,6 +80,24 @@ describe('blockCount', () => {
 		expect(blockCount(60, 48000, 4096)).toBe(704);
 		expect(blockCount(1200, 48000, 4096)).toBe(14063);
 		expect(blockCount(60, 48000, 4096)).toBeGreaterThan(600);
+	});
+});
+
+describe('elapsedSeconds', () => {
+	it('freezes at the pause instant while paused', () => {
+		expect(elapsedSeconds(30, 0, 0, 20)).toBe(20);
+	});
+
+	it('keeps the paused span out after resume', () => {
+		expect(elapsedSeconds(35, 0, 10, null)).toBe(25);
+	});
+
+	it('counts whole seconds from the start with no pause', () => {
+		expect(elapsedSeconds(7.9, 0, 0, null)).toBe(7);
+	});
+
+	it('never reads below zero', () => {
+		expect(elapsedSeconds(3, 10, 0, null)).toBe(0);
 	});
 });
 

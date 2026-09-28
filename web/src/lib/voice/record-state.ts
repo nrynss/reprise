@@ -36,9 +36,9 @@ import {
 	type StemPair
 } from '../../routes/record/stems-complete';
 import { depositProcessingHandoff } from '$lib/voice/processing-state';
-import { drainUserBlock, type HostMark } from '$lib/voice/take';
+import { drainUserBlock, elapsedSeconds, type HostMark } from '$lib/voice/take';
 import { HostStemWriter } from '$lib/voice/host-stem';
-import { floatToPcm16, pcm16ToBytes } from '$lib/voice/pcm';
+import { bytesToPcm16, decodeBase64, floatToPcm16, pcm16ToBytes } from '$lib/voice/pcm';
 import { makeTestTone } from '$lib/voice/pcm';
 import { socketUrl, type SessionStart } from '$lib/voice/session';
 import { browserSocket, VoiceSocket, type SocketHandle } from '$lib/voice/socket';
@@ -94,6 +94,9 @@ export interface MockVoiceHarness {
 	capWake(): void;
 	capInfo(): { warning: boolean; text: string; remainingSeconds: number };
 	clockRunning(): boolean;
+	clockNow(): number;
+	pausedSocketSamples(): number[];
+	pausedSocketFrames(): number;
 	challengeUrl(part: string): void;
 	clearChallenges(): void;
 	learnProvider(id: string): void;
@@ -228,6 +231,15 @@ export class RecordController {
 	private owner = 'guest';
 	private takeStart = 0;
 	private replyCount = 0;
+	// pausedSince holds the context instant the first End press froze the
+	// take at. pausedTotal holds every finished pause span, so the clock
+	// skips them after resume. Both stay live only while the take is live.
+	private pausedTotal = 0;
+	private pausedSince: number | null = null;
+	// pausedSocketSamples holds the provider audio frames sent while paused.
+	// The pause proof reads them off the harness and expects only silence.
+	private pausedSocketSamples: number[] = [];
+	private pausedSocketFrames = 0;
 	private timer: number | null = null;
 	private marks: HostMark[] = [];
 	private mockServer: MockUploadServer | null = null;
@@ -336,6 +348,10 @@ export class RecordController {
 		this.pendingEnd = null;
 		this.pendingProviderId = '';
 		this.completionPosted = false;
+		this.pausedTotal = 0;
+		this.pausedSince = null;
+		this.pausedSocketSamples = [];
+		this.pausedSocketFrames = 0;
 		this.emit();
 		try {
 			if (this.mockMode) {
@@ -352,7 +368,14 @@ export class RecordController {
 			this.emit();
 			this.timer = window.setInterval(() => {
 				if (this.context !== null) {
-					this.elapsed = formatElapsed(this.context.currentTime, this.takeStart);
+					this.elapsed = formatElapsed(
+						elapsedSeconds(
+							this.context.currentTime,
+							this.takeStart,
+							this.pausedTotal,
+							this.pausedSince
+						)
+					);
 					this.emit();
 				}
 			}, 500);
@@ -369,12 +392,17 @@ export class RecordController {
 		}
 	}
 
-	/** Drive the end control. The first press asks, and confirm ends. */
+	/** Drive the end control. The first press pauses and asks, confirm ends. */
 	endControl(): void {
 		if (this.phase !== 'live') return;
 		if (!this.armed) {
 			this.armed = true;
-			this.notice = 'End this take? Cancel keeps it recording.';
+			// The pause freezes the clock, silences the mic and drops the
+			// host side. The provider connection stays open, so the pause
+			// still bills. The cap timer keeps running.
+			if (this.context !== null) this.pausedSince = this.context.currentTime;
+			this.flushHostStem();
+			this.notice = 'Paused. End this take? Cancel resumes it.';
 			this.emit();
 			return;
 		}
@@ -384,6 +412,10 @@ export class RecordController {
 	/** Drop the end confirmation and keep the take recording. */
 	cancelEnd(): void {
 		if (this.phase !== 'live' || !this.armed) return;
+		if (this.context !== null && this.pausedSince !== null) {
+			this.pausedTotal += this.context.currentTime - this.pausedSince;
+		}
+		this.pausedSince = null;
 		this.armed = false;
 		this.notice = 'On air. The host hears you.';
 		this.emit();
@@ -400,6 +432,7 @@ export class RecordController {
 		this.stopClock();
 		this.phase = 'ending';
 		this.armed = false;
+		this.pausedSince = null;
 		this.notice = 'Ending the session.';
 		this.emit();
 		const voice = this.voice;
@@ -710,6 +743,9 @@ export class RecordController {
 				remainingSeconds: this.cap?.remainingSeconds() ?? 0
 			}),
 			clockRunning: () => this.timer !== null,
+			clockNow: () => this.context?.currentTime ?? 0,
+			pausedSocketSamples: () => [...this.pausedSocketSamples],
+			pausedSocketFrames: () => this.pausedSocketFrames,
 			challengeUrl: (part: string) => {
 				this.mockChallenges.push(part);
 			},
@@ -853,7 +889,10 @@ export class RecordController {
 		this.mockHandle = new MockSocketHandle(mockScript());
 		const inner = this.mockHandle;
 		this.voice = this.wireVoice({
-			send: (text) => inner.send(text),
+			send: (text) => {
+				this.noteSentFrame(text);
+				inner.send(text);
+			},
 			close: () => inner.close(),
 			onOpen: (task) => inner.onOpen(task),
 			onMessage: (task) => {
@@ -943,6 +982,31 @@ export class RecordController {
 		});
 	}
 
+	// noteSentFrame records provider audio frames sent while paused. The
+	// pause proof reads them off the harness and expects only silence. Only
+	// the mock take taps the wire, so production sends nothing extra.
+	private noteSentFrame(text: string): void {
+		if (this.pausedSince === null) return;
+		let message: unknown;
+		try {
+			message = JSON.parse(text);
+		} catch {
+			return;
+		}
+		if (typeof message !== 'object' || message === null || Array.isArray(message)) return;
+		const record = message as Record<string, unknown>;
+		if (record['type'] !== 'input.audio' || typeof record['audio'] !== 'string') return;
+		let bytes: Uint8Array;
+		try {
+			bytes = decodeBase64(record['audio']);
+		} catch {
+			return;
+		}
+		const frames = bytesToPcm16(bytes);
+		this.pausedSocketFrames += 1;
+		for (const frame of frames) this.pausedSocketSamples.push(frame);
+	}
+
 	// reportProviderId stores the provider id while the take still runs. A
 	// crashed or suspended page sends no close at all, so this early record
 	// is what lets the sweep find and settle the session. It never throws,
@@ -1007,6 +1071,15 @@ export class RecordController {
 				if (frames > 0) this.userUpload.append(pcm16ToBytes(new Int16Array(frames)));
 			}
 		}
+		if (this.pausedSince !== null) {
+			// While paused the mic reaches neither the host nor the episode.
+			// Zeros of the same length keep the socket alive and the user
+			// stem on the same clock as the host stem and the provider copy.
+			this.userUpload.append(new Uint8Array(drained.upload.length));
+			this.voice.sendAudio(new Uint8Array(drained.socket.length));
+			this.levelDb = -100;
+			return;
+		}
 		this.userUpload.append(drained.upload);
 		this.voice.sendAudio(drained.socket);
 		this.levelDb = measureBlock(chunk.samples).rmsDb;
@@ -1014,8 +1087,11 @@ export class RecordController {
 
 	// Buffer one played host block with its span on the context clock. The
 	// reply renders into the stem when its done frame lands, so the stored
-	// stem carries the silence the guest heard and only what played.
+	// stem carries the silence the guest heard and only what played. While
+	// paused the host side is dropped, so it neither plays nor reaches
+	// the stem.
 	private handleHostAudio(samples: Float32Array): void {
+		if (this.pausedSince !== null) return;
 		if (this.player === null || this.hostUpload === null) return;
 		const span = this.player.push(samples);
 		if (this.hostStem === null) {
@@ -1152,9 +1228,9 @@ function paceUploads(finishing: Promise<unknown>, windowMs: number): Promise<'re
 	});
 }
 
-function formatElapsed(now: number, start: number): string {
-	const total = Math.max(0, Math.floor(now - start));
-	const minutes = Math.floor(total / 60);
-	const seconds = total % 60;
+function formatElapsed(total: number): string {
+	const floored = Math.max(0, Math.floor(total));
+	const minutes = Math.floor(floored / 60);
+	const seconds = floored % 60;
 	return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
