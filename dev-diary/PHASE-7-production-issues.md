@@ -1158,7 +1158,7 @@ requires:   T7.41
 fixture-ok: yes
 size:       M · mid
 owns:       internal/transcript/, internal/episode/, internal/store/migrations/, internal/editorial/validate.go, web/src/lib/editor/
-status:     not-started
+status:     in-progress:implement:t7.44-impl
 ```
 T7.41 round 1 recorded an out of scope H finding. Host words share
 the edit timeline with the guest. The `words` table has no speaker
@@ -1179,7 +1179,7 @@ requires:   T7.43
 fixture-ok: yes
 size:       S · mid
 owns:       internal/privacy/
-status:     not-started
+status:     in-progress:implement:t7.45-impl
 ```
 T7.43 round 1 recorded an out of scope H finding. Account erase
 deletes the provider record through `TerminateSession`. That call
