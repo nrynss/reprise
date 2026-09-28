@@ -2334,7 +2334,7 @@ fixture-ok: yes
 size:       S · frontier
 owns:       web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts,
              web/src/routes/welcome/welcome.ts, web/src/lib/editor/draft.test.ts,
-             web/src/routes/threads/threads.test.ts
+             web/src/routes/threads/threads.test.ts, web/package.json, web/package-lock.json
 status:     not-started
 ```
 **Defect.** In real Chrome on 2026-09-28, the owner's first Play press on a draft always showed
@@ -2346,15 +2346,19 @@ primes the element with a silent clip, then loads and plays the real source. It 
 and swallows the browser's rejection, so nobody can see why.
 
 It did not reproduce in the Playwright image, where Chromium's autoplay policy is relaxed, with
-the audio served over HTTP as WAV or as Ogg Opus. Chaaya gap: https://github.com/nrynss/chaaya/issues/8
-asks for the rejection to be exposed.
+the audio served over HTTP as WAV or as Ogg Opus. Chaaya 0.2.3 closes
+https://github.com/nrynss/chaaya/issues/8. `AudioPlayer.lastPlayError` is
+`{ name, message } | null`, set on every refused `play()` or `unlock()` and cleared on success.
+The boolean contract is unchanged.
 
 **Change.**
 1. In all three controllers, when the first `play()` returns false, call it once more straight
    away, still inside the same gesture's task. Show the refusal notice only when the retry also
    fails.
-2. Once Chaaya exposes the rejection (issue 8), log its `name` and `message` with the refusal.
-   Until then, log `refused on first play, retried` once per page.
+2. Pin `@nrynss/chaaya` to `0.2.3` exactly in `web/package.json`, and refresh the lock file. After
+   each refused call, log `player.lastPlayError.name` and `.message` once, with the page and
+   whether it was the first or the retried call. The orchestrator updates `dev-diary/libraries.md`
+   at landing.
 3. Record in the handoff what the owner sees on the next live Chrome take. If the retry does not
    cure it, open a follow-up with the logged reason.
 
@@ -2363,6 +2367,8 @@ asks for the rejection to be exposed.
   no refusal notice after one `togglePlay`. One that stays false shows the notice after exactly
   two calls.
 * `threads.test.ts`: the same pair for the episode controller.
+* `draft.test.ts`: a refusal whose player reports `lastPlayError` of
+  `{ name: 'NotAllowedError', message: 'x' }` logs that name once.
 
 **Done when:** The tests pass, and the gate passes in a fresh worktree. Removing the retry fails the
 first test in each file.
