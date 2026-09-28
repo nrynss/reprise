@@ -66,7 +66,8 @@ func bootSettings(t *testing.T, dir string) settings.Settings {
 	signing := write("signing.key", []byte("boot-probe-signing-key"))
 	vertex := write("vertex.json", account)
 	doc := `transcription_model = "universal-3.5-pro"
-editorial_model = "gemini-2.5-flash"
+editorial_model = "gemini-3.8-flash"
+cover_model = "gemini-3.1-flash-image"
 session_max_seconds = 1800
 guest_max_sessions = 10
 guest_max_episodes = 10

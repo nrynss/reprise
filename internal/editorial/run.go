@@ -55,6 +55,9 @@ type Config struct {
 	Budgets Budget
 	// ModelID names the editorial model from settings, never from code.
 	ModelID string
+	// Rates prices the call tokens from the model catalog beside the
+	// model id, the way chapters and marking receive theirs.
+	Rates Rates
 	// OwnerID scopes the words read and the proposals written.
 	OwnerID string
 	// EpisodeID scopes the proposals written.
@@ -63,7 +66,7 @@ type Config struct {
 	UserStem []byte
 	// HostStem holds the host stem audio.
 	HostStem []byte
-	// DurationSecs prices the call at the audio minute rate.
+	// DurationSecs sizes the reservation at the audio token rate.
 	DurationSecs float64
 	// SaveRaw persists the provider response on receipt.
 	SaveRaw RawSink
@@ -80,23 +83,62 @@ type Result struct {
 	Title string
 	// Cuts counts the accepted cut proposals stored.
 	Cuts int
-	// Price is the settled model price for the audio seconds.
+	// Price is the settled model price from the measured token usage.
 	Price cost.Price
 }
 
-// DollarsPerMinute prices one audio minute of the editorial call. The
-// caller reserves this before the provider call and settles the measured
-// audio minutes after.
-const DollarsPerMinute = 0.0025
+// Rates prices editorial tokens in US dollars per million tokens. The
+// wiring fills them from the model catalog beside the model id, so no
+// price lives in code.
+type Rates struct {
+	// PromptPerMillionUSD prices one million input tokens, audio included.
+	PromptPerMillionUSD float64
+	// CompletionPerMillionUSD prices one million output tokens, thinking
+	// included.
+	CompletionPerMillionUSD float64
+}
 
-// Estimate prices audio seconds at the editorial minute rate, rounded up
-// to the nanodollar. The caller reserves this before the provider call.
-func Estimate(audioSeconds float64) cost.Price {
-	if audioSeconds <= 0 {
+// MaxOutputTokens caps the answer length the estimate books. It matches
+// the answer cap the editorial call sends, so the reservation covers the
+// dearest answer the model may return, thinking included.
+const MaxOutputTokens = 8192
+
+// Estimate prices one editorial call before any provider call. Audio
+// bills about 32 tokens a second per stem, and the call carries two
+// stems, so each audio second books 64 input tokens. The timeline books
+// four characters a token. The answer may reach MaxOutputTokens, so the
+// estimate books the full cap at the output rate. The caller reserves
+// this before the provider call.
+func Estimate(audioSeconds float64, timelineChars int, rates Rates) cost.Price {
+	if audioSeconds < 0 {
+		audioSeconds = 0
+	}
+	if timelineChars < 0 {
+		timelineChars = 0
+	}
+	inputTokens := math.Ceil(audioSeconds*64) + float64(timelineChars)/4
+	dollars := inputTokens*rates.PromptPerMillionUSD/1e6 +
+		float64(MaxOutputTokens)*rates.CompletionPerMillionUSD/1e6
+	if dollars <= 0 {
 		return cost.Price(0)
 	}
-	perSecond := float64(cost.USD(DollarsPerMinute)) / 60
-	return cost.Price(math.Ceil(perSecond * audioSeconds))
+	return cost.USD(dollars)
+}
+
+// UsagePrice books one editorial answer from its measured token usage.
+// The prompt tokens price at the input rate. Every other token the call
+// billed prices at the output rate, thinking included.
+func UsagePrice(usage gemini.Usage, rates Rates) cost.Price {
+	completion := usage.Total - usage.Prompt
+	if completion < 0 {
+		completion = 0
+	}
+	dollars := float64(usage.Prompt)*rates.PromptPerMillionUSD/1e6 +
+		float64(completion)*rates.CompletionPerMillionUSD/1e6
+	if dollars <= 0 {
+		return cost.Price(0)
+	}
+	return cost.USD(dollars)
 }
 
 // Run hears both stems, validates every proposal against the word
@@ -128,7 +170,8 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	estimate := Estimate(cfg.DurationSecs)
+	marked := timeline(words)
+	estimate := Estimate(cfg.DurationSecs, len(marked), cfg.Rates)
 	if err := cfg.Budgets.Reserve(estimate); err != nil {
 		return Result{}, fmt.Errorf("editorial: run: %w", err)
 	}
@@ -141,7 +184,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	reply, err := cfg.Model.GenerateEditorial(ctx, cfg.ModelID, gemini.EditorialRequest{
 		UserStem: cfg.UserStem,
 		HostStem: cfg.HostStem,
-		Timeline: timeline(words),
+		Timeline: marked,
 	})
 	if err != nil {
 		log.Warn("editorial: model failed, leaving a renderable draft", "error", err)
@@ -203,11 +246,12 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		settled = true
 		return Result{}, err
 	}
-	if err := cfg.Budgets.Settle(estimate, estimate); err != nil {
+	actual := UsagePrice(reply.Usage, cfg.Rates)
+	if err := cfg.Budgets.Settle(estimate, actual); err != nil {
 		return Result{}, fmt.Errorf("editorial: run: settle: %w", err)
 	}
 	settled = true
-	return Result{Title: title, Cuts: len(valid.Cuts), Price: estimate}, nil
+	return Result{Title: title, Cuts: len(valid.Cuts), Price: actual}, nil
 }
 
 // loadWords reads the episode edit words ordered by start. The prompt

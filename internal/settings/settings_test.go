@@ -142,7 +142,8 @@ func configDocWithKey(envPath, keyPath string) string {
 		_ = os.WriteFile(keyPath, []byte(dummyGeminiCred), 0o600)
 	}
 	return fmt.Sprintf(`transcription_model = "universal-3.5-pro"
-editorial_model = "gemini-2.5-flash"
+editorial_model = "gemini-3.8-flash"
+cover_model = "gemini-3.1-flash-image"
 session_max_seconds = 1800
 guest_max_sessions = 10
 guest_max_episodes = 10
@@ -152,7 +153,7 @@ data_dir = "./data"
 media_dir = "./media"
 public_origin = "http://localhost:8080"
 vertex_project = "reprise-test"
-vertex_location = "us-central1"
+vertex_location = "global"
 
 [secrets.assemblyai_api_key]
 source = "env_file"
@@ -455,6 +456,63 @@ func TestShippedFilesSetRenderConcurrency(t *testing.T) {
 		if got.RenderConcurrency < 1 {
 			t.Fatalf("%s render concurrency = %d, want room for a render", file.file, got.RenderConcurrency)
 		}
+	}
+}
+
+// TestShippedFilesCarryCoverModel reads both shipped settings files and
+// pins that each one names the image model. A file that drops the key
+// fails the load, so the cover pass would have no model to draw with.
+func TestShippedFilesCarryCoverModel(t *testing.T) {
+	root := repoRoot(t)
+	files := []struct {
+		file    string
+		envPath string
+		keyPath string
+	}{
+		{"config/reprise.local.toml", "/home/nryn/work/reprise/.env", "/home/nryn/.config/reprise/gemini-sa.json"},
+		{"config/reprise.box.toml", "/etc/reprise/env", "/etc/reprise/gemini-sa.json"},
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(filepath.Join(root, file.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), "cover_model") {
+			t.Fatalf("%s carries no cover model", file.file)
+		}
+		envPath := writeEnv(t, fullEnv())
+		keyPath := writeKeyFile(t)
+		doc := strings.ReplaceAll(string(raw), file.envPath, envPath)
+		doc = strings.Replace(doc, file.keyPath, keyPath, 1)
+		t.Setenv(PathVar, writeConfig(t, doc))
+		got, _, err := Load(context.Background())
+		if err != nil {
+			t.Fatalf("tracked file %s does not load: %v", file.file, err)
+		}
+		if got.CoverModel != "gemini-3.1-flash-image" {
+			t.Fatalf("%s cover model = %q, want the image model", file.file, got.CoverModel)
+		}
+		if got.EditorialModel == got.CoverModel {
+			t.Fatalf("%s draws covers with the editorial model", file.file)
+		}
+	}
+}
+
+// TestLoaderRefusesMissingCoverModel drops the cover model from an
+// otherwise valid document. The load must fail, because the key is
+// required and the cover pass names no model of its own.
+func TestLoaderRefusesMissingCoverModel(t *testing.T) {
+	envPath := writeEnv(t, fullEnv())
+	doc := configDoc(envPath)
+	doc = strings.Replace(doc, "cover_model = \"gemini-3.1-flash-image\"\n", "", 1)
+	t.Setenv(PathVar, writeConfig(t, doc))
+
+	_, _, err := Load(context.Background())
+	if err == nil {
+		t.Fatal("load succeeded without a cover model, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "cover_model") {
+		t.Fatalf("load error %q names no cover model", err.Error())
 	}
 }
 

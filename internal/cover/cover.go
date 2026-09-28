@@ -125,10 +125,9 @@ type Result struct {
 	Price cost.Price
 }
 
-// DollarsPerImage prices one image call. The caller reserves this
-// before the provider call and settles it after. The figure is a
-// placeholder until billing data lands.
-const DollarsPerImage = 0.04
+// DollarsPerImage prices one 1K image call at the published image rate.
+// The caller reserves this before the provider call and settles it after.
+const DollarsPerImage = 0.067
 
 // Estimate prices one image call. The caller reserves this before the
 // provider call.

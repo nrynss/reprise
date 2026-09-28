@@ -840,14 +840,15 @@ const sweepInterval = 5 * time.Minute
 // outlives the sweep that frees it.
 const sweepLag = 5 * time.Minute
 
-// Gemini text token rates in dollars per million tokens. The settings
-// catalog should carry these beside the model id, and no catalog
-// exists yet, so the wiring pins the published Vertex rates here
-// until that seam lands. Every paid call still reserves first, so a
-// wrong rate mistates spend instead of spending freely.
+// Gemini 3.8 Flash text token rates in dollars per million tokens. Both
+// rates double on 2027-01-01. The settings catalog should carry these
+// beside the model id, and no catalog exists yet, so the wiring pins the
+// published rates here until that seam lands. Every paid call still
+// reserves first, so a wrong rate mistates spend instead of spending
+// freely.
 const (
-	geminiPromptPerMillionUSD     = 0.30
-	geminiCompletionPerMillionUSD = 2.50
+	geminiPromptPerMillionUSD     = 0.75
+	geminiCompletionPerMillionUSD = 3.75
 )
 
 // memoryMaxOutputTokens caps the marking answer the estimate books. It
@@ -1138,6 +1139,8 @@ type pipeline struct {
 	budgets        *costsqlitestore.KeyedBudget
 	ownerLimit     cost.Price
 	editorialModel string
+	coverModelID   string
+	editorialRates editorial.Rates
 	chapterRates   analysis.Rates
 	markingRates   memory.Rates
 	chapters       geminiChapters
@@ -1154,9 +1157,10 @@ type pipeline struct {
 // newPipeline binds the pipeline over one shared Gemini client. The
 // caller builds the client once from the file credential, and every
 // model backed pass shares it. The editorial settings model drives
-// editorial, chapters, cover, and marking alike, because the settings
-// file names no other Gemini model and the model id never comes from
-// code.
+// editorial, chapters, and marking alike, with the catalog rates beside
+// it. The cover model id starts on the editorial model so a settings
+// free fixture rebuild still runs. The boot sets it from settings right
+// after, and the model id never comes from code.
 func newPipeline(db *sqlite.DB, geminiClient *gemini.Client, batch *assemblyai.BatchClient, budgets *costsqlitestore.KeyedBudget, ownerLimit cost.Price, editorialModel string, media *mediastore.Store, mediaDir, coverDir, renderWorkDir string) *pipeline {
 	return &pipeline{
 		db:             db,
@@ -1165,6 +1169,11 @@ func newPipeline(db *sqlite.DB, geminiClient *gemini.Client, batch *assemblyai.B
 		budgets:        budgets,
 		ownerLimit:     ownerLimit,
 		editorialModel: editorialModel,
+		coverModelID:   editorialModel,
+		editorialRates: editorial.Rates{
+			PromptPerMillionUSD:     geminiPromptPerMillionUSD,
+			CompletionPerMillionUSD: geminiCompletionPerMillionUSD,
+		},
 		chapterRates: analysis.Rates{
 			PromptPerMillionUSD:     geminiPromptPerMillionUSD,
 			CompletionPerMillionUSD: geminiCompletionPerMillionUSD,
@@ -1263,6 +1272,7 @@ func (p *pipeline) editorialFunc(ownerID, episodeID string, userStem, hostStem [
 			Model:        p.gemini,
 			Budgets:      p.budgetsFor(ownerID),
 			ModelID:      p.editorialModel,
+			Rates:        p.editorialRates,
 			OwnerID:      ownerID,
 			EpisodeID:    episodeID,
 			UserStem:     userStem,
@@ -1315,7 +1325,7 @@ func (p *pipeline) coverFunc(ownerID, episodeID string) job.Func {
 			DB:        p.db.Writer(),
 			Model:     p.coverModel,
 			Budgets:   p.budgetsFor(ownerID),
-			ModelID:   p.editorialModel,
+			ModelID:   p.coverModelID,
 			OwnerID:   ownerID,
 			EpisodeID: episodeID,
 			Dir:       p.coverDir,
@@ -1617,6 +1627,9 @@ func openJobs(ctx context.Context, db *sqlite.DB, events *stream.Broker, loaded 
 	if loaded.EditorialModel == "" {
 		return nil, fmt.Errorf("reprise: wire pipeline: editorial model must not be empty")
 	}
+	if loaded.CoverModel == "" {
+		return nil, fmt.Errorf("reprise: wire pipeline: cover model must not be empty")
+	}
 	coverDir := filepath.Join(loaded.MediaDir, "covers")
 	renderWorkDir := filepath.Join(loaded.MediaDir, "render-work")
 	if err := os.MkdirAll(coverDir, 0o755); err != nil {
@@ -1626,6 +1639,7 @@ func openJobs(ctx context.Context, db *sqlite.DB, events *stream.Broker, loaded 
 		return nil, fmt.Errorf("reprise: make render work dir: %w", err)
 	}
 	pipe := newPipeline(db, geminiClient, batch, keyed, ceiling, loaded.EditorialModel, media, loaded.MediaDir, coverDir, renderWorkDir)
+	pipe.coverModelID = loaded.CoverModel
 	resolver := &render.Resolver{
 		DB:      db.Writer(),
 		Media:   renderMedia,

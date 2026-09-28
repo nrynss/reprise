@@ -31,13 +31,37 @@ func seedForty(t *testing.T, db *sql.DB) {
 	addWords(t, db, "owner-a", "ep-1", 40, 300, 200)
 }
 
+// testRates prices tokens at the catalog rates the wiring carries, so
+// the reservation and the settlement in these tests match production.
+func testRates() editorial.Rates {
+	return editorial.Rates{PromptPerMillionUSD: 0.75, CompletionPerMillionUSD: 3.75}
+}
+
+// usageModel wraps the scripted double and reports a fixed token usage,
+// so the settle path prices measured tokens instead of the estimate.
+type usageModel struct {
+	inner *scriptedModel
+	usage gemini.Usage
+}
+
+// GenerateEditorial replays the canned answer with the fixed usage.
+func (m *usageModel) GenerateEditorial(ctx context.Context, model string, req gemini.EditorialRequest) (gemini.EditorialAnswer, error) {
+	answer, err := m.inner.GenerateEditorial(ctx, model, req)
+	if err != nil {
+		return gemini.EditorialAnswer{}, err
+	}
+	answer.Usage = m.usage
+	return answer, nil
+}
+
 // runCfg builds the run inputs the tests share.
-func runCfg(db *sql.DB, model *scriptedModel, budgets *fakeBudget, receipt *[]byte) editorial.Config {
+func runCfg(db *sql.DB, model editorial.Model, budgets *fakeBudget, receipt *[]byte) editorial.Config {
 	return editorial.Config{
 		DB:           db,
 		Model:        model,
 		Budgets:      budgets,
 		ModelID:      "flash",
+		Rates:        testRates(),
 		OwnerID:      "owner-a",
 		EpisodeID:    "ep-1",
 		UserStem:     []byte{0x4f, 0x70, 0x75, 0x73},
@@ -75,9 +99,10 @@ func TestRunStoresDraft(t *testing.T) {
 		`"cuts":[{"start_word":5,"end_word":7,"reason":"false start"}],` +
 		`"title":"Harbor Light","show_notes":"We talked about the ferry.",` +
 		`"callback":{"start_word":10,"end_word":12,"quote":"w10 w11 w12","text":"the debt"}}`}
+	measured := &usageModel{inner: model, usage: gemini.Usage{Prompt: 500, Total: 700}}
 	budgets := &fakeBudget{}
 	var receipt []byte
-	result, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt))
+	result, err := editorial.Run(t.Context(), runCfg(db, measured, budgets, &receipt))
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -144,12 +169,16 @@ func TestRunStoresDraft(t *testing.T) {
 	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
 		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
 	}
-	want := editorial.Estimate(12)
-	if budgets.reserved[0] != want {
-		t.Fatalf("reserved = %v, want %v", budgets.reserved[0], want)
+	reserved := budgets.reserved[0]
+	if reserved == 0 {
+		t.Fatal("reservation is empty, want the token estimate for both sides")
 	}
-	if budgets.settled[0] != [2]cost.Price{want, want} {
-		t.Fatalf("settled = %v, want {%v %v}", budgets.settled[0], want, want)
+	actual := editorial.UsagePrice(gemini.Usage{Prompt: 500, Total: 700}, testRates())
+	if result.Price != actual {
+		t.Fatalf("price = %v, want the measured %v", result.Price, actual)
+	}
+	if budgets.settled[0] != [2]cost.Price{reserved, actual} {
+		t.Fatalf("settled = %v, want {%v %v}", budgets.settled[0], reserved, actual)
 	}
 }
 
@@ -236,9 +265,11 @@ func TestRunSettlesTruncatedAnswer(t *testing.T) {
 	if !result.Fallback || result.Cuts != 0 {
 		t.Fatalf("result = %+v, want a fallback draft with no cuts", result)
 	}
-	want := editorial.Estimate(12)
-	if want == 0 || result.Price != want {
-		t.Fatalf("price = %v, want the estimate %v", result.Price, want)
+	budgets.mu.Lock()
+	reserved := budgets.reserved[0]
+	budgets.mu.Unlock()
+	if reserved == 0 || result.Price != reserved {
+		t.Fatalf("price = %v reserved = %v, want the reserved estimate", result.Price, reserved)
 	}
 	if title := episodeTitle(t, db); title != result.Title || !strings.Contains(title, "Untitled") {
 		t.Fatalf("title = %q, want a plain title", title)
@@ -254,8 +285,8 @@ func TestRunSettlesTruncatedAnswer(t *testing.T) {
 	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
 		t.Fatalf("budget holds %+v, want one settle and no release", budgets)
 	}
-	if budgets.settled[0] != [2]cost.Price{want, want} {
-		t.Fatalf("settled = %v, want {%v %v}", budgets.settled[0], want, want)
+	if budgets.settled[0] != [2]cost.Price{reserved, reserved} {
+		t.Fatalf("settled = %v, want {%v %v}", budgets.settled[0], reserved, reserved)
 	}
 }
 
@@ -424,29 +455,71 @@ func TestRunSettlesTruncationWhenFallbackStoreFails(t *testing.T) {
 	if _, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt)); err == nil {
 		t.Fatal("run succeeded, want the fallback store failure")
 	}
-	want := editorial.Estimate(12)
 	budgets.mu.Lock()
 	defer budgets.mu.Unlock()
 	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
 		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
 	}
-	if want == 0 || budgets.settled[0] != [2]cost.Price{want, want} {
-		t.Fatalf("settled = %v, want the estimate %v", budgets.settled, want)
+	reserved := budgets.reserved[0]
+	if reserved == 0 || budgets.settled[0] != [2]cost.Price{reserved, reserved} {
+		t.Fatalf("settled = %v, want the reserved estimate %v", budgets.settled, reserved)
 	}
 }
 
-// TestEstimatePricesMinuteRate checks one audio minute costs the minute
-// rate and one second rounds up to the nanodollar.
-func TestEstimatePricesMinuteRate(t *testing.T) {
+// TestEstimatePricesBothSides checks a sixty second call with an empty
+// timeline books two stems of audio at the input rate plus the full
+// answer cap at the output rate, to the nanodollar. A forty character
+// timeline adds ten input tokens.
+func TestEstimatePricesBothSides(t *testing.T) {
 	t.Parallel()
-	if got := editorial.Estimate(60); got != cost.USD(0.0025) {
-		t.Fatalf("minute estimate = %v, want the editorial minute rate", got)
+	rates := testRates()
+	if got := editorial.Estimate(60, 0, rates); got != cost.USD(3840*0.75e-6+8192*3.75e-6) {
+		t.Fatalf("estimate = %v, want both sides at the catalog rates", got)
 	}
-	if got := editorial.Estimate(1); got != cost.Price(41667) {
-		t.Fatalf("second estimate = %v, want 41667 nanodollars", got)
+	if got := editorial.Estimate(60, 40, rates); got != cost.USD(3850*0.75e-6+8192*3.75e-6) {
+		t.Fatalf("timeline estimate = %v, want ten more input tokens", got)
 	}
-	if got := editorial.Estimate(0); got != cost.Price(0) {
-		t.Fatalf("zero estimate = %v, want nothing", got)
+	if got := editorial.Estimate(60, 0, editorial.Rates{}); got != cost.Price(0) {
+		t.Fatalf("unrated estimate = %v, want nothing", got)
+	}
+}
+
+// TestRunSettlesMeasuredUsage runs one pass whose scripted usage reports
+// 1000 prompt tokens of 3000 total. The settlement prices the prompt at
+// the input rate and the rest at the output rate, and the result carries
+// that price instead of the estimate.
+func TestRunSettlesMeasuredUsage(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "ep-1", "owner-a", 3)
+	addWords(t, db, "owner-a", "ep-1", 60, 1000, 500)
+	inner := &scriptedModel{answer: `{"cold_open":{"start_word":35,"end_word":49,"reason":"a laugh opens it"},` +
+		`"cuts":[],"title":"Harbor Light","show_notes":"We talked about the ferry.","callback":null}`}
+	model := &usageModel{inner: inner, usage: gemini.Usage{Prompt: 1000, Total: 3000}}
+	budgets := &fakeBudget{}
+	var receipt []byte
+	result, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.Fallback {
+		t.Fatalf("result = %+v, want the stored draft", result)
+	}
+	want := cost.USD(1000*0.75e-6 + 2000*3.75e-6)
+	if result.Price != want {
+		t.Fatalf("price = %v, want the measured %v", result.Price, want)
+	}
+	budgets.mu.Lock()
+	defer budgets.mu.Unlock()
+	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
+		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
+	}
+	if budgets.settled[0][1] != want {
+		t.Fatalf("settled actual = %v, want the measured %v", budgets.settled[0][1], want)
+	}
+	if budgets.settled[0][0] != budgets.reserved[0] {
+		t.Fatalf("settled held = %v, want the reservation %v", budgets.settled[0][0], budgets.reserved[0])
 	}
 }
 

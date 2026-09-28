@@ -467,7 +467,7 @@ func (j *jobs) plainCover(ctx context.Context, ownerID, episodeID string) error 
 		DB:        j.pipe.db.Writer(),
 		Model:     plainArt{},
 		Budgets:   plainArt{},
-		ModelID:   j.pipe.editorialModel,
+		ModelID:   j.pipe.coverModelID,
 		OwnerID:   ownerID,
 		EpisodeID: episodeID,
 		Dir:       j.pipe.coverDir,

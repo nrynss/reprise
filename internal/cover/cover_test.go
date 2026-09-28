@@ -367,10 +367,13 @@ func TestKindNeverResumes(t *testing.T) {
 }
 
 // TestEstimatePricesOneImage checks the reservation matches the per
-// image figure.
+// image figure, which is the published 1K image price in dollars.
 func TestEstimatePricesOneImage(t *testing.T) {
 	t.Parallel()
-	if got := cover.Estimate(); got != cost.USD(cover.DollarsPerImage) {
+	if cover.DollarsPerImage != 0.067 {
+		t.Fatalf("per image figure = %v, want the published image price", cover.DollarsPerImage)
+	}
+	if got := cover.Estimate(); got != cost.USD(0.067) {
 		t.Fatalf("estimate = %v, want the per image figure", got)
 	}
 }

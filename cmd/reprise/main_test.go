@@ -566,6 +566,7 @@ func openWireFixture(t *testing.T) *wireFixture {
 	}
 	pipe := newPipeline(db, scriptedGemini(), batch, budgets, ceiling, "test-editorial",
 		media, mediaDir, t.TempDir(), t.TempDir())
+	pipe.coverModelID = "test-cover"
 	return &wireFixture{db: db, costs: costs, budgets: budgets, media: media, index: mediaIndex, pipe: pipe, ceiling: ceiling}
 }
 
@@ -697,6 +698,12 @@ func TestPipelineKindsShareOneClientWithSettingsModels(t *testing.T) {
 	}
 	if fx.pipe.editorialModel != "test-editorial" {
 		t.Fatalf("editorial model = %q, want the settings value", fx.pipe.editorialModel)
+	}
+	if fx.pipe.coverModelID != "test-cover" {
+		t.Fatalf("cover model = %q, want the cover settings value", fx.pipe.coverModelID)
+	}
+	if fx.pipe.coverModelID == fx.pipe.editorialModel {
+		t.Fatal("cover model matches the editorial model, want the image model")
 	}
 	if fx.pipe.chapters.client != fx.pipe.gemini {
 		t.Fatal("chapters use a different client than editorial")
@@ -1260,6 +1267,94 @@ func TestPipelineCoverAndMemoryRunOffline(t *testing.T) {
 	}
 	if got := wireSpent(t, fx, owner); got <= 0 {
 		t.Fatalf("spent = %s, want both passes booked", got)
+	}
+}
+
+// imageModelProbe answers one image call with bytes the validator
+// rejects and records the model id the call named, so the test reads
+// which settings model the cover pass ran with.
+func imageModelProbe(got *string) *gemini.Client {
+	return gemini.NewTestClient(func(_ context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+		for _, modality := range config.ResponseModalities {
+			if modality == "IMAGE" {
+				*got = model
+				return &genai.GenerateContentResponse{
+					Candidates: []*genai.Candidate{{
+						Content: &genai.Content{Role: "model", Parts: []*genai.Part{{
+							InlineData: &genai.Blob{MIMEType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}},
+						}}},
+					}},
+				}, nil
+			}
+		}
+		return &genai.GenerateContentResponse{
+			Candidates: []*genai.Candidate{{
+				Content:      &genai.Content{Role: "model", Parts: []*genai.Part{{Text: `{"title":"Harbor Light"}`}}},
+				FinishReason: genai.FinishReasonStop,
+			}},
+		}, nil
+	})
+}
+
+// TestCoverFuncReceivesCoverModel runs the cover pass against a client
+// that records the model id. The call must name the cover settings
+// model, never the editorial one. Pointing the pass back at the
+// editorial model fails here.
+func TestCoverFuncReceivesCoverModel(t *testing.T) {
+	fx := openWireFixture(t)
+	const owner = "owner-cover-model"
+	insertWireUser(t, fx, owner)
+	diary, err := broker.NewSQLiteDiary(fx.db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	episodeID, _, err := diary.CreateEpisodeAndSession(t.Context(), owner, 1800)
+	if err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+	var imageModel string
+	fx.pipe.coverModel = geminiCover{client: imageModelProbe(&imageModel)}
+	quiet := func(job.Progress) {}
+	if _, err := fx.pipe.coverFunc(owner, episodeID)(t.Context(), quiet); err != nil {
+		t.Fatalf("cover run: %v", err)
+	}
+	if imageModel != "test-cover" {
+		t.Fatalf("cover model = %q, want the cover settings value", imageModel)
+	}
+	if imageModel == fx.pipe.editorialModel {
+		t.Fatal("cover call named the editorial model, want the image model")
+	}
+}
+
+// TestPlainCoverUsesCoverModel poisons the editorial model id and runs
+// the deterministic cover fallback. The run still stores its panel,
+// which proves the fallback names the cover settings model instead of
+// the editorial one.
+func TestPlainCoverUsesCoverModel(t *testing.T) {
+	fx := openWireFixture(t)
+	const owner = "owner-plain-cover-model"
+	insertWireUser(t, fx, owner)
+	diary, err := broker.NewSQLiteDiary(fx.db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	episodeID, _, err := diary.CreateEpisodeAndSession(t.Context(), owner, 1800)
+	if err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+	fx.pipe.coverModelID = "test-cover"
+	fx.pipe.editorialModel = ""
+	j := &jobs{pipe: fx.pipe}
+	if err := j.plainCover(t.Context(), owner, episodeID); err != nil {
+		t.Fatalf("plain cover: %v", err)
+	}
+	var fallback int
+	if err := fx.db.Reader().QueryRowContext(t.Context(),
+		`SELECT fallback FROM covers WHERE episode_id = ?`, episodeID).Scan(&fallback); err != nil {
+		t.Fatalf("read cover row: %v", err)
+	}
+	if fallback != 1 {
+		t.Fatalf("cover fallback = %d, want the deterministic panel", fallback)
 	}
 }
 

@@ -39,7 +39,9 @@ type Settings struct {
 	// the dashed wire id the provider accepts.
 	TranscriptionModel string `toml:"transcription_model"`
 	// EditorialModel identifies the model that proposes cuts and chapters.
-	EditorialModel string `toml:"editorial_model"`
+	EditorialModel string `toml:"editorial_model" config:"required"`
+	// CoverModel identifies the image model that draws episode covers.
+	CoverModel string `toml:"cover_model" config:"required"`
 	// SessionMaxSeconds caps one live session in seconds.
 	SessionMaxSeconds int `toml:"session_max_seconds"`
 	// GuestMaxSessions caps how many sessions one guest may start.

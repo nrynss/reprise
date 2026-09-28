@@ -2,7 +2,8 @@
 # and never carries a value. The Vertex key is a file at mode 0600, so its
 # reference names the path and the value is the file's contents.
 transcription_model = "universal-3.5-pro"
-editorial_model = "gemini-2.5-flash"
+editorial_model = "gemini-3.8-flash"
+cover_model = "gemini-3.1-flash-image"
 session_max_seconds = 1800
 guest_max_sessions = 10
 guest_max_episodes = 10
@@ -11,7 +12,7 @@ render_concurrency = 1
 data_dir = "/var/lib/reprise/data"
 media_dir = "/var/lib/reprise/media"
 vertex_project = "nryn-personal"
-vertex_location = "us-central1"
+vertex_location = "global"
 public_origin = "https://reprise.nryn.dev"
 
 [secrets.assemblyai_api_key]
