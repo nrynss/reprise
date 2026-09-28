@@ -123,6 +123,10 @@ type wordJSON struct {
 	Start float64 `json:"start"`
 	// End is the word end in seconds.
 	End float64 `json:"end"`
+	// Speaker names who said the word. It always serializes, so a
+	// word with no stored speaker still carries the key the editor
+	// reads as unknown.
+	Speaker string `json:"speaker"`
 }
 
 // episodeDetailJSON carries one episode with its proposals, edit words,
@@ -358,7 +362,7 @@ func outcomeOf(out episode.Outcome) *transcriptOutcomeJSON {
 func wordsOf(stored []episode.EditWord) []wordJSON {
 	out := make([]wordJSON, 0, len(stored))
 	for _, word := range stored {
-		out = append(out, wordJSON{Text: word.Text, Start: word.Start, End: word.End})
+		out = append(out, wordJSON{Text: word.Text, Start: word.Start, End: word.End, Speaker: word.Speaker})
 	}
 	return out
 }
