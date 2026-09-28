@@ -425,6 +425,17 @@ export class ProcessingController {
 		};
 	}
 
+	// pairFromAddress names the stem pair the address carries. A reload has
+	// no uploader left, and the store is empty once both stems finished,
+	// so the address is what still names the pair the draft move needs.
+	private pairFromAddress(): { userId: string; hostId: string } | null {
+		const userId = this.userMediaId;
+		const hostId = this.hostMediaId;
+		if (userId === '' || hostId === '' || userId === hostId) return null;
+		if (this.userSampleRate <= 0 || this.snapshot.episode === '') return null;
+		return { userId, hostId };
+	}
+
 	private async resumeUploads(): Promise<void> {
 		this.snapshot.upload = {
 			...this.snapshot.upload,
@@ -467,13 +478,45 @@ export class ProcessingController {
 			count += 1;
 		}
 		if (count === 0) {
+			const address = this.pairFromAddress();
+			if (address === null) {
+				this.snapshot.upload = {
+					...this.snapshot.upload,
+					state: 'waiting',
+					detail: 'No persisted upload waits.',
+					percent: 0
+				};
+				this.emit();
+				return;
+			}
+			// Both stems finished before the reload, so the store is empty.
+			// Rebuild the finished upload from the address and post the pair
+			// again. A repeat reports the standing outcome instead of
+			// scheduling twice. A refusal marks transcription failed, which
+			// is what offers the retry.
 			this.snapshot.upload = {
-				...this.snapshot.upload,
-				state: 'waiting',
-				detail: 'No persisted upload waits.',
-				percent: 0
+				name: 'Upload',
+				state: 'done',
+				detail: 'Both stems durable.',
+				percent: 100
 			};
 			this.emit();
+			const handoff: ProcessingHandoff = {
+				progress: () => ({ stored: 0, captured: 0 }),
+				settle: async () => {
+					const answer = await postStemsComplete(
+						this.snapshot.episode,
+						completionPair(address.userId, address.hostId, this.userSampleRate)
+					);
+					return { userBytes: 0, hostBytes: 0, transcriptJob: answer.jobId };
+				}
+			};
+			await this.followHandoff(handoff);
+			if (!this.alive || this.snapshot.upload.state !== 'done') return;
+			if (this.snapshot.upload.detail.includes('0 user bytes')) {
+				this.snapshot.upload = { ...this.snapshot.upload, detail: 'Both stems durable.' };
+				this.emit();
+			}
 			return;
 		}
 		const pair = this.pairFromResume(receipts, resumedIds, failedIds);
