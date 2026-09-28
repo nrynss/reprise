@@ -1519,7 +1519,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
              web/src/routes/threads/gallery-finish.test.ts, web/src/routes/episode/[id]/+page.svelte
-status:     in-progress:land:t7.54-impl@11c375212d8c1745431c92bb63baa36259a1e313
+status:     done:0b9acf2
 ```
 Three defects, each pinned by its own test.
 
@@ -1634,6 +1634,12 @@ Record the tokens spent in the handoff.
 
 ### What exists now
 
+T7.54 landed at 0b9acf2 after round 1 APPROVE with zero findings.
+An unfinished take says what it is on its page, its card, and
+its moment link. The tree matches reviewed commit 11c3752. Main
+had moved, so the landing rebased. The threads pin passed on the
+rebased commit. A mid-way closed take cannot resume stems: the
+recorder keeps nothing and unuploaded audio dies with the tab.
 T7.52 landed at b62d2e1 after round 1 APPROVE with zero findings.
 All seven editor defects fixed, each with its own pin. The tree
 matches reviewed commit 94445e2. Main had moved, so the landing
