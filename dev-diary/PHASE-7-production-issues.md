@@ -1987,7 +1987,7 @@ size:       M · frontier
 owns:       internal/broker/reconcile.go, internal/broker/reconcile_test.go,
              internal/broker/sweep.go, internal/broker/sweep_test.go, internal/broker/end_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     not-started
+status:     in-progress:implement:t7.68-impl
 ```
 **Defect.** Both live takes on 2026-09-28 at 18:26 and 18:28 UTC, on `a0a9339`, settled within
 seconds of End. Chrome settled 40 seconds and Firefox 40, against owner timers of 41 and 39. Both
@@ -2054,7 +2054,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/episode/[id]/edit/+page.svelte, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     not-started
+status:     in-progress:implement:t7.69-impl
 ```
 **Defect.** On 2026-09-28 the owner opened the editor for their real Firefox episode `f068cb5e`.
 The page showed "The only place nobody needs anything", with rain above a shop, a bus timetable
@@ -2091,7 +2091,7 @@ size:       S · mid
 owns:       web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts,
              web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
              web/src/routes/threads/gallery-finish.test.ts
-status:     not-started
+status:     in-progress:implement:t7.70-impl
 ```
 **Defect.** The episodes routes allow 48 requests a minute per client (`takeEpisodesBurst` in
 `cmd/reprise/main.go`). On 2026-09-28, after two takes, `GET /api/episodes` answered 429 for the
@@ -2132,7 +2132,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/take.ts, web/src/lib/voice/take.test.ts,
              web/src/routes/record/end-control.spec.ts
-status:     not-started
+status:     in-progress:implement:t7.71-impl
 ```
 **Defect.** In the T6.4b round 3 takes on 2026-09-28, the owner pressed End and the take kept
 running while the confirmation showed. The clock kept counting, the host could keep talking, and
