@@ -2329,7 +2329,7 @@ Removing the runner from `attach` fails the first test.
 
 ### T7.75: The first Play press plays
 ```yaml
-requires:   T7.73
+requires:   T7.73, T7.76
 fixture-ok: yes
 size:       S · frontier
 owns:       web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts,
@@ -2366,6 +2366,44 @@ asks for the rejection to be exposed.
 
 **Done when:** The tests pass, and the gate passes in a fresh worktree. Removing the retry fails the
 first test in each file.
+
+### T7.76: A public episode shows its share link, as a link, every time
+```yaml
+requires:   T7.70
+fixture-ok: yes
+size:       XS · mid
+owns:       internal/api/episodes.go, internal/api/playback_test.go, web/src/routes/threads/threads.ts,
+             web/src/routes/threads/threads.test.ts, web/src/routes/episode/[id]/+page.svelte
+status:     not-started
+```
+**Defect.** On 2026-09-28 the owner published episode 10. The page showed only the notice "Public at
+/share/10770da2…. Only the finished audio opens behind it.", as plain text with a relative path.
+The link could not be clicked or copied as a URL. In `threads.ts` the publish handler builds that
+notice from `publishLink`, which returns the path alone. The share path lives only in that one POST
+answer. The episode detail (`episodeDetailJSON` in `internal/api/episodes.go`) carries `visibility`
+but no share path. So after a reload, a public episode shows "Public" with no link at all.
+
+**Change.**
+1. Add `share_path` to the episode detail JSON. It is `/share/<token>` while the episode is public,
+   and empty otherwise. Only the owner reads the detail, so this exposes nothing new.
+2. The episode controller keeps `sharePath` on its snapshot, from the publish answer and from the
+   detail on load. Revoke clears it.
+3. In the Release section of `web/src/routes/episode/[id]/+page.svelte`, while published, show the
+   absolute URL, `window.location.origin + sharePath`, as an `<a target="_blank" rel="noopener">`.
+   Beside it, add a "Copy link" button that uses `navigator.clipboard.writeText` and confirms with
+   "Link copied." Keep Revoke. Explain it in one line: "Anyone with this link can play the finished
+   episode. Stems and the transcript stay private."
+4. The publish notice names the full URL too.
+
+**Tests.**
+* `playback_test.go`: a public episode's detail carries `share_path`, and a private one's is empty.
+* `threads.test.ts`: a controller loaded on a public detail exposes `sharePath`. Publish sets it and
+  revoke clears it.
+* A spec, or a component check in `threads.test.ts`, finds a link whose `href` ends in the share
+  path and a "Copy link" control while published.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. Dropping `share_path` from
+the detail fails the first test.
 
 ---
 
