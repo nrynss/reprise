@@ -2248,7 +2248,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     not-started
+status:     in-progress:implement:t7.73-impl
 ```
 **Defect.** The owner edited the live drafts of 2026-09-28. The waveform showed no progress and
 nothing that looked draggable. A drag on it still seeked. Two causes, both in the editor.
@@ -2294,7 +2294,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:land:t7.74-impl@fb3256dd3fb8491648f81c52d553105c6520c9f2
+status:     done:1219930
 ```
 **Defect.** On 2026-09-28 at 19:44:51 UTC, the owner pressed Mark done on episode 10. Traefik logged
 `POST /api/episodes/61ac5b47…/done` answering 202. The render, cover, analysis and marking all
@@ -2551,6 +2551,11 @@ name or a topic before a row forms. Say so in the handoff.
 
 ### What exists now
 
+T7.74 landed at 1219930 after round 1 APPROVE with zero findings.
+Mark done follows the started render with an explicit runner
+instead of calling it refused. The tree matches reviewed commit
+fb3256d. Main had moved, so the landing rebased. The draft pin
+passed on the rebased commit. T7.73 unblocks on this landing.
 T7.79 landed at cec8c50 after round 1 APPROVE with zero findings.
 Take rate limit buckets refill their whole burst once a minute:
 episodes 120, media 240, mint 6 per minute. The tree matches
