@@ -2452,7 +2452,7 @@ owns:       web/src/lib/components/GalleryLink.svelte, web/src/lib/components/Ga
              web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
              web/src/routes/episode/[id]/+page.svelte, web/src/routes/episode/[id]/edit/+page.svelte,
              web/src/routes/record/confirm-processing.spec.ts, web/src/routes/record/gallery-link.spec.ts
-status:     in-progress:land:t7.77-impl@8e9e4669520ee268b791b5711bf36b7fc6656f9e
+status:     done:bca9d69
 ```
 **Defect.** On 2026-09-28 the owner noted that "Back to the gallery" renders as a bare link, not as a
 button like the rest of the controls. Every page styles its own buttons, and none styles the way
@@ -2582,6 +2582,11 @@ name or a topic before a row forms. Say so in the handoff.
 
 ### What exists now
 
+T7.77 landed at bca9d69 after round 1 APPROVE with zero findings.
+One styled gallery link and season tabs on every page. The tree
+matches reviewed commit 8e9e466. Main had moved, so the landing
+rebased. Component pins and svelte-check passed on the rebased
+commit.
 T7.75 landed at 68a8e62 after round 1 APPROVE with zero findings.
 The first Play press retries once inside the gesture with the
 refusal reason logged. Chaaya pins to exactly 0.2.3 with the
