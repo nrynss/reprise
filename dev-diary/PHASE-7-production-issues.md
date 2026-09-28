@@ -2182,7 +2182,7 @@ owns:       web/src/lib/voice/socket.ts, web/src/lib/voice/socket.test.ts, web/s
              web/src/lib/voice/mock.test.ts, web/src/lib/voice/record-state.ts,
              web/src/lib/voice/testdata/session-update.golden.json,
              internal/assemblyai/voice_live_test.go
-status:     in-progress:review-r1:t7.72-rev-r1@62184fc9d641099c9fe1785e5a5d171fa7f729f5
+status:     in-progress:remediate-r1:t7.72-rem-r1
 ```
 **Defect.** In both live takes of 2026-09-28 at 19:38 and 19:40 UTC, the host never greeted. The
 guest spoke first. The host then introduced itself as a generic voice assistant that could
