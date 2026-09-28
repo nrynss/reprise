@@ -378,7 +378,7 @@ func TestSweepRetriesEndAfterSettledClaim(t *testing.T) {
 	}
 }
 
-func TestSweepGoneRecordReviews(t *testing.T) {
+func TestSweepGoneRecordSettlesCap(t *testing.T) {
 	sf := newSweepFixture(t, 4000)
 	sf.statuses.gone["prov-sweep"] = true
 
@@ -387,23 +387,134 @@ func TestSweepGoneRecordReviews(t *testing.T) {
 		t.Fatalf("sweep: %v", err)
 	}
 	if len(out) != 1 || out[0].Skipped || out[0].ProviderStatus != "gone" {
-		t.Fatalf("sweep outcome %+v, want one reviewed session", out)
+		t.Fatalf("sweep outcome %+v, want one settled session", out)
 	}
-	if got := recSpent(t, sf.fx.costs); got != 0 {
-		t.Fatalf("spent %d on an unknowable duration, want zero", got)
+	// The provider record is gone but the call still bills, so the full
+	// cap settles. Restoring the zero settle fails this pin.
+	if out[0].ConnectedSeconds != recCapSeconds {
+		t.Fatalf("settled %d seconds, want the full %d second cap", out[0].ConnectedSeconds, recCapSeconds)
 	}
-	if held := recReserved(t, sf.fx.costs); held != sf.fx.estimate {
-		t.Fatalf("held %d, want the untouched estimate", held)
+	if got := recSpent(t, sf.fx.costs); got != recRate*recCapSeconds {
+		t.Fatalf("spent %d, want the cap price %d", got, recRate*recCapSeconds)
+	}
+	if got := sweepOwnerSpent(t, sf.fx.db, recOwner); got != recRate*recCapSeconds {
+		t.Fatalf("owner spent %d, want the cap price %d", got, recRate*recCapSeconds)
+	}
+	if held := recReserved(t, sf.fx.costs); held != 0 {
+		t.Fatalf("held %d, want no hold after the cap settle", held)
+	}
+	if recConnected(t, sf.fx.db, sf.candidate.SessionID) != recCapSeconds {
+		t.Fatalf("session row missed its cap duration")
+	}
+	reviews := sf.fx.alerter.ofKind(AlertNeedsReview)
+	if len(reviews) != 1 || reviews[0].SessionID != sf.candidate.SessionID {
+		t.Fatalf("review alerts %v, want exactly this session", sf.fx.alerter.alerts)
+	}
+	if !strings.Contains(reviews[0].Detail, "cap was charged") {
+		t.Fatalf("review detail %q misses the cap charge", reviews[0].Detail)
+	}
+	if len(sf.ender.calls) != 0 {
+		t.Fatalf("ender calls %v for a gone record, want none", sf.ender.calls)
+	}
+	status, seconds, _, detail := sweepRow(t, sf.fx.db, sf.candidate.SessionID)
+	if status != "gone" || seconds != recCapSeconds || detail == "" {
+		t.Fatalf("sweep row %q/%d/%q, want gone/%d with detail", status, seconds, detail, recCapSeconds)
+	}
+
+	again, err := sf.sweeper.Sweep(t.Context(), SweepInput{MarginSeconds: DefaultMarginSeconds})
+	if err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+	if len(again) != 1 || !again[0].Skipped {
+		t.Fatalf("second sweep %+v, want one skipped outcome", again)
+	}
+	if got := recSpent(t, sf.fx.costs); got != recRate*recCapSeconds {
+		t.Fatalf("spent moved to %d on resweep, want no second settle", got)
+	}
+	if len(sf.fx.alerter.alerts) != 1 {
+		t.Fatalf("alerts %v after resweep, want no second alert", sf.fx.alerter.alerts)
+	}
+}
+
+// countingStatuses records every provider status read. A sweep that never
+// reads the provider leaves this empty.
+type countingStatuses struct {
+	sweepStatuses
+	reads []string
+}
+
+func (s *countingStatuses) ReadStatus(ctx context.Context, providerSessionID string) (ProviderStatus, error) {
+	s.reads = append(s.reads, providerSessionID)
+	return s.sweepStatuses.ReadStatus(ctx, providerSessionID)
+}
+
+// TestSweepEmptyIDSettlesCap checks a candidate the browser never reported
+// settles the full cap with no provider read, while one still under the
+// cap plus the margin is skipped.
+func TestSweepEmptyIDSettlesCap(t *testing.T) {
+	sf := newSweepFixture(t, 4000)
+	sf.candidate.ProviderSessionID = ""
+	sf.source.listed = []Candidate{sf.candidate}
+	counting := &countingStatuses{sweepStatuses: *sf.statuses}
+	sf.sweeper.statuses = counting
+
+	out, err := sf.sweeper.Sweep(t.Context(), SweepInput{MarginSeconds: DefaultMarginSeconds})
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(out) != 1 || out[0].Skipped {
+		t.Fatalf("sweep outcome %+v, want one settled session", out)
+	}
+	if len(counting.reads) != 0 {
+		t.Fatalf("provider reads %v for an empty id, want none", counting.reads)
+	}
+	if out[0].ConnectedSeconds != recCapSeconds {
+		t.Fatalf("settled %d seconds, want the full %d second cap", out[0].ConnectedSeconds, recCapSeconds)
+	}
+	if got := recSpent(t, sf.fx.costs); got != recRate*recCapSeconds {
+		t.Fatalf("spent %d, want the cap price %d", got, recRate*recCapSeconds)
+	}
+	if got := sweepOwnerSpent(t, sf.fx.db, recOwner); got != recRate*recCapSeconds {
+		t.Fatalf("owner spent %d, want the cap price %d", got, recRate*recCapSeconds)
+	}
+	if held := recReserved(t, sf.fx.costs); held != 0 {
+		t.Fatalf("held %d, want no hold after the cap settle", held)
+	}
+	if recConnected(t, sf.fx.db, sf.candidate.SessionID) != recCapSeconds {
+		t.Fatalf("session row missed its cap duration")
 	}
 	reviews := sf.fx.alerter.ofKind(AlertNeedsReview)
 	if len(reviews) != 1 || reviews[0].SessionID != sf.candidate.SessionID {
 		t.Fatalf("review alerts %v, want exactly this session", sf.fx.alerter.alerts)
 	}
 	if len(sf.ender.calls) != 0 {
-		t.Fatalf("ender calls %v for a gone record, want none", sf.ender.calls)
+		t.Fatalf("ender calls %v for an empty id, want none", sf.ender.calls)
 	}
-	if _, _, _, detail := sweepRow(t, sf.fx.db, sf.candidate.SessionID); detail == "" {
-		t.Fatalf("sweep row missed its detail")
+	status, seconds, _, detail := sweepRow(t, sf.fx.db, sf.candidate.SessionID)
+	if seconds != recCapSeconds || detail == "" {
+		t.Fatalf("sweep row %q/%d/%q, want %d seconds with detail", status, seconds, detail, recCapSeconds)
+	}
+
+	young := newSweepFixture(t, 100)
+	young.candidate.ProviderSessionID = ""
+	young.source.listed = []Candidate{young.candidate}
+	youngCounting := &countingStatuses{sweepStatuses: *young.statuses}
+	young.sweeper.statuses = youngCounting
+	youngOut, err := young.sweeper.Sweep(t.Context(), SweepInput{MarginSeconds: DefaultMarginSeconds})
+	if err != nil {
+		t.Fatalf("young sweep: %v", err)
+	}
+	if len(youngOut) != 1 || !youngOut[0].Skipped {
+		t.Fatalf("young sweep %+v, want one skipped session", youngOut)
+	}
+	if len(youngCounting.reads) != 0 {
+		t.Fatalf("provider reads %v for a young empty id, want none", youngCounting.reads)
+	}
+	if got := recSpent(t, young.fx.costs); got != 0 {
+		t.Fatalf("spent %d on a young session, want zero", got)
+	}
+	if held := recReserved(t, young.fx.costs); held != young.fx.estimate {
+		t.Fatalf("held %d, want the untouched estimate", held)
 	}
 }
 

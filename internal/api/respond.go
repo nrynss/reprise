@@ -22,6 +22,10 @@ const (
 	// CodeSessionNotFound answers an unknown diary session or one owned
 	// by somebody else.
 	CodeSessionNotFound = "session_not_found"
+	// CodeProviderConflict answers a provider id report the server cannot
+	// honour: a bad shape, an id the row already replaced, or an id
+	// another session row already holds.
+	CodeProviderConflict = "provider_conflict"
 	// CodeInvalidRequest answers a malformed body or a value the route
 	// cannot honour.
 	CodeInvalidRequest = "invalid_request"

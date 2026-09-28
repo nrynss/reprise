@@ -92,11 +92,11 @@ func TestSettleInputNeedsProviderClose(t *testing.T) {
 	}
 }
 
-// TestListOpenSkipsUnclosedRows checks the sweep source lists only rows
-// with a recorded provider close. An id the source cannot read would
-// fail the whole sweep pass, so unclosed rows age out of their holds
-// by reservation expiry instead.
-func TestListOpenSkipsUnclosedRows(t *testing.T) {
+// TestListOpenIncludesUnclosedRows checks the sweep source lists rows
+// with and without a recorded provider close, oldest first. A row the
+// browser never reported still bills its call, so the sweep must see it
+// instead of leaving its hold to expire with no charge.
+func TestListOpenIncludesUnclosedRows(t *testing.T) {
 	fx := newFixture(t, nil)
 	open := mintLinked(t, fx)
 	closed := mintLinked(t, fx)
@@ -113,20 +113,26 @@ func TestListOpenSkipsUnclosedRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list open: %v", err)
 	}
-	if len(listed) != 1 {
-		t.Fatalf("listed %d candidates, want 1", len(listed))
+	if len(listed) != 2 {
+		t.Fatalf("listed %d candidates, want 2", len(listed))
 	}
-	got := listed[0]
-	if got.SessionID != closed.SessionID || got.ProviderSessionID != "prov-open-1" {
-		t.Fatalf("candidate is %+v, want the closed session", got)
+	first := listed[0]
+	if first.SessionID != closed.SessionID || first.ProviderSessionID != "prov-open-1" {
+		t.Fatalf("first candidate is %+v, want the closed session", first)
 	}
-	if got.OpenSeconds < 80 || got.OpenSeconds > 3600 {
-		t.Fatalf("candidate age %d, want about 90 seconds", got.OpenSeconds)
+	if first.OpenSeconds < 80 || first.OpenSeconds > 3600 {
+		t.Fatalf("first candidate age %d, want about 90 seconds", first.OpenSeconds)
 	}
-	if got.Reservation.ID == "" || got.LeaseID == "" || got.TokenCapSeconds != testCapSeconds {
-		t.Fatalf("candidate misses linkage: %+v", got)
+	if first.Reservation.ID == "" || first.LeaseID == "" || first.TokenCapSeconds != testCapSeconds {
+		t.Fatalf("first candidate misses linkage: %+v", first)
 	}
-	_ = open
+	second := listed[1]
+	if second.SessionID != open.SessionID || second.ProviderSessionID != "" {
+		t.Fatalf("second candidate is %+v, want the unclosed session with an empty provider id", second)
+	}
+	if second.Reservation.ID == "" || second.LeaseID == "" || second.TokenCapSeconds != testCapSeconds {
+		t.Fatalf("second candidate misses linkage: %+v", second)
+	}
 }
 
 // sessionDoc answers one provider session body the way the Sessions API

@@ -83,7 +83,8 @@ func decodeSessionEndBody(w http.ResponseWriter, r *http.Request) (sessionEndReq
 // end answers the end and provider routes by recording the provider id
 // on the diary session. An empty provider id leaves a stored id in place.
 // The answer echoes the id the row holds. Unknown and foreign sessions
-// both answer 404, and a repeat end stays harmless.
+// both answer 404, and a repeat end stays harmless. A report the store
+// cannot honour answers 409, so a bad id never lands silent.
 func (h *SessionEnd) end(w http.ResponseWriter, r *http.Request) {
 	owner, ok := ownerOf(w, r)
 	if !ok {
@@ -101,6 +102,10 @@ func (h *SessionEnd) end(w http.ResponseWriter, r *http.Request) {
 	episodeID, storedID, err := h.store.RecordSessionEnd(r.Context(), owner, sessionID, body.ProviderSessionID)
 	if errors.Is(err, episode.ErrNotFound) {
 		_ = wire.WriteError(w, http.StatusNotFound, CodeSessionNotFound, "no session lives at this id", nil)
+		return
+	}
+	if errors.Is(err, episode.ErrProviderConflict) {
+		_ = wire.WriteError(w, http.StatusConflict, CodeProviderConflict, "this provider report names no call of this session", nil)
 		return
 	}
 	if err != nil {

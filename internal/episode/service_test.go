@@ -338,6 +338,14 @@ func TestRequestRenderRefusals(t *testing.T) {
 	}
 }
 
+// providerIDs for the session end tests. The provider mints this shape,
+// so anything else never names a real call.
+const (
+	sessionEndID      = "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	sessionEndOtherID = "sess_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	sessionEndThirdID = "sess_cccccccccccccccccccccccccccccccc"
+)
+
 // TestRecordSessionEndStoresProviderClose records the provider id, reads
 // it back from the row, and repeats the same end harmlessly.
 func TestRecordSessionEndStoresProviderClose(t *testing.T) {
@@ -350,44 +358,49 @@ func TestRecordSessionEndStoresProviderClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	episodeID, storedID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "prov-9")
+	episodeID, storedID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", sessionEndID)
 	if err != nil {
 		t.Fatalf("record end: %v", err)
 	}
-	if episodeID != "ep-1" || storedID != "prov-9" {
-		t.Fatalf("end = %s %s, want ep-1 prov-9", episodeID, storedID)
+	if episodeID != "ep-1" || storedID != sessionEndID {
+		t.Fatalf("end = %s %s, want ep-1 %s", episodeID, storedID, sessionEndID)
 	}
 	var stored string
 	if err := db.Reader().QueryRowContext(t.Context(),
 		"SELECT provider_session_id FROM sessions WHERE id = 'sess-1'").Scan(&stored); err != nil {
 		t.Fatalf("read provider id: %v", err)
 	}
-	if stored != "prov-9" {
-		t.Fatalf("provider id = %q, want prov-9", stored)
+	if stored != sessionEndID {
+		t.Fatalf("provider id = %q, want %s", stored, sessionEndID)
 	}
-	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "prov-9"); err != nil {
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", sessionEndID); err != nil {
 		t.Fatalf("repeat end: %v", err)
 	}
 	keptEpisode, keptID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "")
 	if err != nil {
 		t.Fatalf("empty end: %v", err)
 	}
-	if keptEpisode != "ep-1" || keptID != "prov-9" {
-		t.Fatalf("empty end = %s %s, want ep-1 prov-9", keptEpisode, keptID)
+	if keptEpisode != "ep-1" || keptID != sessionEndID {
+		t.Fatalf("empty end = %s %s, want ep-1 %s", keptEpisode, keptID, sessionEndID)
 	}
 	if err := db.Reader().QueryRowContext(t.Context(),
 		"SELECT provider_session_id FROM sessions WHERE id = 'sess-1'").Scan(&stored); err != nil {
 		t.Fatalf("read provider id after empty: %v", err)
 	}
-	if stored != "prov-9" {
-		t.Fatalf("provider id = %q, want prov-9 after an empty close", stored)
+	if stored != sessionEndID {
+		t.Fatalf("provider id = %q, want %s after an empty close", stored, sessionEndID)
 	}
-	replacedEpisode, replacedID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", "prov-10")
-	if err != nil {
-		t.Fatalf("replace end: %v", err)
+	// A different id over a stored one rewrites a call this session never
+	// made, so it reports a conflict and the stored id stays.
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", sessionEndOtherID); !errors.Is(err, episode.ErrProviderConflict) {
+		t.Fatalf("replace end error = %v, want ErrProviderConflict", err)
 	}
-	if replacedEpisode != "ep-1" || replacedID != "prov-10" {
-		t.Fatalf("replace end = %s %s, want ep-1 prov-10", replacedEpisode, replacedID)
+	if err := db.Reader().QueryRowContext(t.Context(),
+		"SELECT provider_session_id FROM sessions WHERE id = 'sess-1'").Scan(&stored); err != nil {
+		t.Fatalf("read provider id after replace: %v", err)
+	}
+	if stored != sessionEndID {
+		t.Fatalf("provider id = %q, want %s after a refused replace", stored, sessionEndID)
 	}
 	seedSession(t, db, "sess-2", "owner-1", "ep-1")
 	earlyEpisode, earlyID, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-2", "")
@@ -397,10 +410,52 @@ func TestRecordSessionEndStoresProviderClose(t *testing.T) {
 	if earlyEpisode != "ep-1" || earlyID != "" {
 		t.Fatalf("early end = %s %q, want ep-1 with no provider id", earlyEpisode, earlyID)
 	}
-	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-2", "sess-1", "prov-9"); !errors.Is(err, episode.ErrNotFound) {
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-2", "sess-1", sessionEndID); !errors.Is(err, episode.ErrNotFound) {
 		t.Fatalf("foreign end error = %v, want ErrNotFound", err)
 	}
-	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "missing", "prov-9"); !errors.Is(err, episode.ErrNotFound) {
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "missing", sessionEndID); !errors.Is(err, episode.ErrNotFound) {
 		t.Fatalf("missing end error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestRecordSessionEndRefusesConflictingReports checks each bad report
+// fails with ErrProviderConflict: a bad shape, a different id over a
+// stored one, and an id another session row already holds. An empty id
+// and a repeat of the stored id still succeed.
+func TestRecordSessionEndRefusesConflictingReports(t *testing.T) {
+	t.Parallel()
+	db := openDatabase(t)
+	beginEpisode(t, db, "ep-1", 1)
+	seedSession(t, db, "sess-1", "owner-1", "ep-1")
+	seedSession(t, db, "sess-2", "owner-1", "ep-1")
+	svc, err := episode.NewService(episode.Config{DB: db})
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	for _, bad := range []string{"prov-9", "sess_zzz", "sess_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ""} {
+		if bad == "" {
+			continue
+		}
+		if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", bad); !errors.Is(err, episode.ErrProviderConflict) {
+			t.Fatalf("shape %q error = %v, want ErrProviderConflict", bad, err)
+		}
+	}
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", sessionEndID); err != nil {
+		t.Fatalf("record end: %v", err)
+	}
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", sessionEndOtherID); !errors.Is(err, episode.ErrProviderConflict) {
+		t.Fatalf("replace error = %v, want ErrProviderConflict", err)
+	}
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-2", sessionEndID); !errors.Is(err, episode.ErrProviderConflict) {
+		t.Fatalf("stolen id error = %v, want ErrProviderConflict", err)
+	}
+	if _, _, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-2", sessionEndThirdID); err != nil {
+		t.Fatalf("free id on another session: %v", err)
+	}
+	if _, stored, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", sessionEndID); err != nil || stored != sessionEndID {
+		t.Fatalf("repeat = %q, %v, want %s and no error", stored, err, sessionEndID)
+	}
+	if _, stored, err := svc.RecordSessionEnd(t.Context(), "owner-1", "sess-1", ""); err != nil || stored != sessionEndID {
+		t.Fatalf("empty = %q, %v, want %s and no error", stored, err, sessionEndID)
 	}
 }

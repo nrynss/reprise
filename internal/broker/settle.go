@@ -114,10 +114,11 @@ func (b *Broker) SettleInput(ctx context.Context, sessionID string) (Input, erro
 
 // ListOpen lists the session links the sweep should inspect, oldest
 // first. It carries the mint time linkage each candidate needs, with the
-// age measured from the mint. Rows without a recorded provider close
-// stay out, because the sweep prices provider truth and an id it cannot
-// read would fail the whole pass. Those rows age out of their holds by
-// reservation expiry instead.
+// age measured from the mint. Rows without a recorded provider close are
+// listed too. The sweep never reads the provider for those rows. It
+// settles the full cap once they stay open past the cap plus the margin,
+// because the provider still bills a call the server cannot read while
+// the hold would otherwise expire with no charge.
 func (b *Broker) ListOpen(ctx context.Context) ([]Candidate, error) {
 	if b.db == nil {
 		return nil, fmt.Errorf("broker: list open: %w: database must not be nil", ErrInvalid)
@@ -127,7 +128,6 @@ func (b *Broker) ListOpen(ctx context.Context) ([]Candidate, error) {
 		`SELECT l.session_id, l.owner_id, l.episode_id, s.provider_session_id,
 			l.lease_id, l.reservation, l.token_cap, l.minted_at
 		FROM session_settle l JOIN sessions s ON s.id = l.session_id
-		WHERE s.provider_session_id <> ''
 		ORDER BY l.minted_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("broker: list open: %w: %w", ErrSweep, err)

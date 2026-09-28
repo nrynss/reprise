@@ -46,7 +46,9 @@ type Candidate struct {
 	OwnerID string `json:"owner_id"`
 	// EpisodeID is the episode the session recorded.
 	EpisodeID string `json:"episode_id"`
-	// ProviderSessionID is the provider session to end and settle.
+	// ProviderSessionID is the provider session to end and settle, or
+	// empty when the browser never reported one. An empty id never reads
+	// the provider. The sweep settles the full cap for it instead.
 	ProviderSessionID string `json:"provider_session_id"`
 	// LeaseID is the lease the mint opened.
 	LeaseID string `json:"lease_id"`
@@ -340,6 +342,13 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 	if settled {
 		// Money already moved. Retry the provider end when it never landed.
 		// A later pass tries again after a failed end and does not settle.
+		// A session with no provider id has no end to retry.
+		if candidate.ProviderSessionID == "" {
+			if err := s.markSwept(ctx, candidate.SessionID, "missing", 0, false, "session already settled"); err != nil {
+				return SweepOutcome{}, err
+			}
+			return SweepOutcome{SessionID: candidate.SessionID, Skipped: true, Detail: "session already settled"}, nil
+		}
 		pending, err := s.reconciler.endPending(ctx, candidate.SessionID)
 		if err != nil {
 			return SweepOutcome{}, err
@@ -372,6 +381,12 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 			return SweepOutcome{}, err
 		}
 		return SweepOutcome{SessionID: candidate.SessionID, Skipped: true, Detail: "session already settled"}, nil
+	}
+	// A session with no provider id never reads the provider. The young
+	// check above already waited out the cap plus the margin, so the full
+	// cap settles here with an alert for review.
+	if candidate.ProviderSessionID == "" {
+		return s.settleUnreported(ctx, candidate)
 	}
 	status, err := s.statuses.ReadStatus(ctx, candidate.ProviderSessionID)
 	if err != nil {
@@ -426,18 +441,46 @@ func (s *Sweeper) sweepOne(ctx context.Context, candidate Candidate, margin int)
 	}, nil
 }
 
-// reviewGone stops a sweep whose provider record is already gone. The
-// duration is unknowable, so the sweep settles nothing and asks for
-// review, the same way an ambiguous resume settles nothing.
+// reviewGone settles a sweep whose provider record is already gone. The
+// duration is unknowable and the provider still bills the call, so the
+// sweep charges the full cap and asks for review. The owner refunds from
+// the alert when the call never ran.
 func (s *Sweeper) reviewGone(ctx context.Context, candidate Candidate) (SweepOutcome, error) {
-	detail := fmt.Sprintf("provider record for session %s is gone, duration unknowable so nothing settled", candidate.SessionID)
+	res, err := s.reconciler.ReconcileAbandoned(ctx, toInput(candidate), AbandonedSession{
+		DurationSeconds: candidate.TokenCapSeconds,
+	})
+	if err != nil {
+		return SweepOutcome{}, err
+	}
+	detail := fmt.Sprintf("provider record for session %s is gone, so the full %d second cap was charged at %s", candidate.SessionID, res.ConnectedSeconds, res.Cost)
 	if err := s.alert(ctx, candidate, AlertNeedsReview, detail); err != nil {
 		detail += " (alert failed: " + err.Error() + ")"
 	}
-	if err := s.markSwept(ctx, candidate.SessionID, "gone", 0, false, detail); err != nil {
+	if err := s.markSwept(ctx, candidate.SessionID, "gone", res.ConnectedSeconds, false, detail); err != nil {
 		return SweepOutcome{}, err
 	}
-	return SweepOutcome{SessionID: candidate.SessionID, ProviderStatus: "gone", Detail: detail}, nil
+	return SweepOutcome{SessionID: candidate.SessionID, ProviderStatus: "gone", ConnectedSeconds: res.ConnectedSeconds, Cost: res.Cost, Detail: detail}, nil
+}
+
+// settleUnreported settles a sweep whose session never reported a provider
+// id. The provider still bills the call, so the sweep charges the full cap
+// and asks for review. The owner refunds from the alert when the call
+// never ran. No provider read or end happens here.
+func (s *Sweeper) settleUnreported(ctx context.Context, candidate Candidate) (SweepOutcome, error) {
+	res, err := s.reconciler.ReconcileAbandoned(ctx, toInput(candidate), AbandonedSession{
+		DurationSeconds: candidate.TokenCapSeconds,
+	})
+	if err != nil {
+		return SweepOutcome{}, err
+	}
+	detail := fmt.Sprintf("session %s reported no provider id, so the full %d second cap was charged at %s", candidate.SessionID, res.ConnectedSeconds, res.Cost)
+	if err := s.alert(ctx, candidate, AlertNeedsReview, detail); err != nil {
+		detail += " (alert failed: " + err.Error() + ")"
+	}
+	if err := s.markSwept(ctx, candidate.SessionID, "missing", res.ConnectedSeconds, false, detail); err != nil {
+		return SweepOutcome{}, err
+	}
+	return SweepOutcome{SessionID: candidate.SessionID, ProviderStatus: "missing", ConnectedSeconds: res.ConnectedSeconds, Cost: res.Cost, Detail: detail}, nil
 }
 
 // alert delivers one alert through the alerter when set. It returns the
@@ -469,13 +512,12 @@ func (s *Sweeper) markSwept(ctx context.Context, sessionID, providerStatus strin
 	return nil
 }
 
-// validateCandidate rejects a candidate the sweep cannot settle.
+// validateCandidate rejects a candidate the sweep cannot settle. The
+// provider id may be empty. Such a row never reads the provider and
+// settles the full cap once past it plus the margin.
 func validateCandidate(candidate Candidate) error {
 	if candidate.SessionID == "" || candidate.OwnerID == "" || candidate.EpisodeID == "" {
 		return fmt.Errorf("broker: sweep: %w: session, owner, and episode must not be empty", ErrInvalid)
-	}
-	if candidate.ProviderSessionID == "" {
-		return fmt.Errorf("broker: sweep: %w: provider session id must not be empty", ErrInvalid)
 	}
 	if candidate.LeaseID == "" {
 		return fmt.Errorf("broker: sweep: %w: lease id must not be empty", ErrInvalid)

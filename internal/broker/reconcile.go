@@ -576,13 +576,34 @@ func (r *Reconciler) RunFunc(in Input) job.Func {
 	return r.runFunc(in)
 }
 
-// validate rejects an input the reconciler cannot settle.
+// validate rejects an input the reconciler cannot settle. The provider
+// id must name a real call, because the read prices that record.
 func validate(in Input) error {
 	if in.SessionID == "" || in.OwnerID == "" || in.EpisodeID == "" {
 		return fmt.Errorf("broker: reconcile: %w: session, owner, and episode must not be empty", ErrInvalid)
 	}
 	if in.ProviderSessionID == "" {
 		return fmt.Errorf("broker: reconcile: %w: provider session id must not be empty", ErrInvalid)
+	}
+	if in.LeaseID == "" {
+		return fmt.Errorf("broker: reconcile: %w: lease id must not be empty", ErrInvalid)
+	}
+	if in.Reservation.ID == "" {
+		return fmt.Errorf("broker: reconcile: %w: reservation must name a hold", ErrInvalid)
+	}
+	if in.TokenCapSeconds <= 0 {
+		return fmt.Errorf("broker: reconcile: %w: session cap must be positive", ErrInvalid)
+	}
+	return nil
+}
+
+// validateAbandoned rejects an input the abandoned settle cannot price.
+// The provider id may be empty here: a session the browser never reported
+// still bills its cap, and the caller passes that cap as the duration.
+// Every other linkage must hold, as in validate.
+func validateAbandoned(in Input) error {
+	if in.SessionID == "" || in.OwnerID == "" || in.EpisodeID == "" {
+		return fmt.Errorf("broker: reconcile: %w: session, owner, and episode must not be empty", ErrInvalid)
 	}
 	if in.LeaseID == "" {
 		return fmt.Errorf("broker: reconcile: %w: lease id must not be empty", ErrInvalid)
@@ -820,7 +841,7 @@ type AbandonedSession struct {
 // and artifact tail run as a normal reconcile. A negative duration
 // reports ErrRead, because a settle prices nothing without one.
 func (r *Reconciler) ReconcileAbandoned(ctx context.Context, in Input, abandoned AbandonedSession) (Result, error) {
-	if err := validate(in); err != nil {
+	if err := validateAbandoned(in); err != nil {
 		return Result{}, err
 	}
 	if abandoned.DurationSeconds < 0 {

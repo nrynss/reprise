@@ -478,7 +478,7 @@ func TestSessionEndRecordsProviderClose(t *testing.T) {
 		return serve(guests, handler, cookie, req)
 	}
 
-	rec := end(cookie, "sess-1", `{"provider_session_id":"prov-9"}`)
+	rec := end(cookie, "sess-1", `{"provider_session_id":"sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("end status = %d, want 200", rec.Code)
 	}
@@ -486,30 +486,30 @@ func TestSessionEndRecordsProviderClose(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode end: %v", err)
 	}
-	if body.SessionID != "sess-1" || body.EpisodeID != "ep-1" || body.ProviderSessionID != "prov-9" {
-		t.Fatalf("end = %+v, want sess-1 on ep-1 with prov-9", body)
+	if body.SessionID != "sess-1" || body.EpisodeID != "ep-1" || body.ProviderSessionID != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("end = %+v, want sess-1 on ep-1 with sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", body)
 	}
 	var stored string
 	if err := db.Reader().QueryRowContext(t.Context(),
 		"SELECT provider_session_id FROM sessions WHERE id = 'sess-1'").Scan(&stored); err != nil {
 		t.Fatalf("read provider id: %v", err)
 	}
-	if stored != "prov-9" {
-		t.Fatalf("provider id = %q, want prov-9", stored)
+	if stored != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("provider id = %q, want sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", stored)
 	}
 
-	rec = end(cookie, "sess-1", `{"provider_session_id":"prov-9"}`)
+	rec = end(cookie, "sess-1", `{"provider_session_id":"sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("repeat end status = %d, want 200", rec.Code)
 	}
 
 	foreign, _ := mintGuest(t, guests)
-	rec = end(foreign, "sess-1", `{"provider_session_id":"prov-9"}`)
+	rec = end(foreign, "sess-1", `{"provider_session_id":"sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 	if status, code := envelopeCode(t, rec); status != http.StatusNotFound || code != CodeSessionNotFound {
 		t.Fatalf("foreign end status = %d code = %q, want 404 session_not_found", status, code)
 	}
 
-	rec = end(cookie, "missing", `{"provider_session_id":"prov-9"}`)
+	rec = end(cookie, "missing", `{"provider_session_id":"sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 	if status, code := envelopeCode(t, rec); status != http.StatusNotFound || code != CodeSessionNotFound {
 		t.Fatalf("missing end status = %d code = %q, want 404 session_not_found", status, code)
 	}
@@ -527,7 +527,7 @@ func TestSessionEndProviderRouteRecordsProviderClose(t *testing.T) {
 	handler := NewSessionEnd(newEpisodeService(t, db, nil).svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions/sess-1/provider",
-		strings.NewReader(`{"provider_session_id":"prov-9"}`))
+		strings.NewReader(`{"provider_session_id":"sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
 	rec := serve(guests, handler, cookie, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("provider status = %d, want 200", rec.Code)
@@ -536,21 +536,21 @@ func TestSessionEndProviderRouteRecordsProviderClose(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode provider: %v", err)
 	}
-	if body.SessionID != "sess-1" || body.EpisodeID != "ep-1" || body.ProviderSessionID != "prov-9" {
-		t.Fatalf("provider = %+v, want sess-1 on ep-1 with prov-9", body)
+	if body.SessionID != "sess-1" || body.EpisodeID != "ep-1" || body.ProviderSessionID != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("provider = %+v, want sess-1 on ep-1 with sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", body)
 	}
 	var stored string
 	if err := db.Reader().QueryRowContext(t.Context(),
 		"SELECT provider_session_id FROM sessions WHERE id = 'sess-1'").Scan(&stored); err != nil {
 		t.Fatalf("read provider id: %v", err)
 	}
-	if stored != "prov-9" {
-		t.Fatalf("provider id = %q, want prov-9", stored)
+	if stored != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("provider id = %q, want sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", stored)
 	}
 
 	foreign, _ := mintGuest(t, guests)
 	foreignReq := httptest.NewRequest(http.MethodPost, "/api/sessions/sess-1/provider",
-		strings.NewReader(`{"provider_session_id":"prov-9"}`))
+		strings.NewReader(`{"provider_session_id":"sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
 	rec = serve(guests, handler, foreign, foreignReq)
 	if status, code := envelopeCode(t, rec); status != http.StatusNotFound || code != CodeSessionNotFound {
 		t.Fatalf("foreign provider status = %d code = %q, want 404 session_not_found", status, code)
@@ -796,45 +796,45 @@ func TestSessionEndEmptyCloseKeepsStoredProvider(t *testing.T) {
 		return body
 	}
 
-	rec := end(`{"provider_session_id":"prov-9"}`)
+	rec := end(`{"provider_session_id":"sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("shaped end status = %d, want 200", rec.Code)
 	}
-	if got := echo(rec); got.ProviderSessionID != "prov-9" || got.SessionID != "sess-1" || got.EpisodeID != "ep-1" {
-		t.Fatalf("shaped end = %+v, want prov-9 on sess-1", got)
+	if got := echo(rec); got.ProviderSessionID != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || got.SessionID != "sess-1" || got.EpisodeID != "ep-1" {
+		t.Fatalf("shaped end = %+v, want sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa on sess-1", got)
 	}
-	if got := stored(); got != "prov-9" {
-		t.Fatalf("provider id = %q, want prov-9", got)
+	if got := stored(); got != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("provider id = %q, want sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", got)
 	}
 
 	rec = end("")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("empty end status = %d, want 200", rec.Code)
 	}
-	if got := echo(rec); got.ProviderSessionID != "prov-9" {
-		t.Fatalf("empty echo = %q, want prov-9", got.ProviderSessionID)
+	if got := echo(rec); got.ProviderSessionID != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("empty echo = %q, want sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", got.ProviderSessionID)
 	}
-	if got := stored(); got != "prov-9" {
-		t.Fatalf("provider id = %q, want prov-9 after an empty close", got)
+	if got := stored(); got != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("provider id = %q, want sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa after an empty close", got)
 	}
 
 	rec = end(`{"provider_session_id":""}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("blank id status = %d, want 200", rec.Code)
 	}
-	if got := echo(rec); got.ProviderSessionID != "prov-9" {
-		t.Fatalf("blank id echo = %q, want prov-9", got.ProviderSessionID)
+	if got := echo(rec); got.ProviderSessionID != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("blank id echo = %q, want sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", got.ProviderSessionID)
 	}
-	if got := stored(); got != "prov-9" {
-		t.Fatalf("provider id = %q, want prov-9 after a blank id", got)
+	if got := stored(); got != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("provider id = %q, want sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa after a blank id", got)
 	}
 
 	rec = end("{")
 	if status, code := envelopeCode(t, rec); status != http.StatusBadRequest || code != CodeInvalidRequest {
 		t.Fatalf("malformed status = %d code = %q, want 400 invalid_request", status, code)
 	}
-	if got := stored(); got != "prov-9" {
-		t.Fatalf("provider id = %q, want prov-9 after a refused body", got)
+	if got := stored(); got != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("provider id = %q, want sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa after a refused body", got)
 	}
 }
 
@@ -921,6 +921,56 @@ func TestConnectedCloseStoresProviderForSettle(t *testing.T) {
 	in, err = settled.SettleInput(t.Context(), "sess-live")
 	if err != nil || in.ProviderSessionID != providerID {
 		t.Fatalf("settle after empty close = %q err %v, want %q", in.ProviderSessionID, err, providerID)
+	}
+}
+
+// TestSessionEndRefusesConflictingReports posts a bad provider report
+// to both the end and the provider routes and requires 409 with the
+// provider conflict code. A bad shape, a different id over a stored one,
+// and an id another session row already holds each refuse, while a
+// repeat of the stored id still answers 200.
+func TestSessionEndRefusesConflictingReports(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "recording")
+	seedSessionRow(t, db, "sess-1", owner.ID, "ep-1")
+	seedSessionRow(t, db, "sess-2", owner.ID, "ep-1")
+	handler := NewSessionEnd(newEpisodeService(t, db, nil).svc)
+	post := func(route, sessionID, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/sessions/"+sessionID+route, strings.NewReader(body))
+		return serve(guests, handler, cookie, req)
+	}
+	conflict := func(route, sessionID, body string) {
+		t.Helper()
+		if status, code := envelopeCode(t, post(route, sessionID, body)); status != http.StatusConflict || code != CodeProviderConflict {
+			t.Fatalf("route %s status = %d code = %q, want 409 provider_conflict", route, status, code)
+		}
+	}
+
+	const first = `{"provider_session_id":"sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
+	const other = `{"provider_session_id":"sess_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`
+	if rec := post("/end", "sess-1", first); rec.Code != http.StatusOK {
+		t.Fatalf("record end status = %d, want 200", rec.Code)
+	}
+	conflict("/end", "sess-1", `{"provider_session_id":"prov-9"}`)
+	conflict("/end", "sess-1", other)
+	conflict("/end", "sess-2", first)
+	conflict("/provider", "sess-1", other)
+	conflict("/provider", "sess-2", first)
+	if rec := post("/end", "sess-1", first); rec.Code != http.StatusOK {
+		t.Fatalf("repeat end status = %d, want 200", rec.Code)
+	}
+	if rec := post("/provider", "sess-1", first); rec.Code != http.StatusOK {
+		t.Fatalf("repeat provider status = %d, want 200", rec.Code)
+	}
+	var stored string
+	if err := db.Reader().QueryRowContext(t.Context(),
+		"SELECT provider_session_id FROM sessions WHERE id = 'sess-1'").Scan(&stored); err != nil {
+		t.Fatalf("read provider id: %v", err)
+	}
+	if stored != "sess_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("provider id = %q, want the first id after the refusals", stored)
 	}
 }
 
