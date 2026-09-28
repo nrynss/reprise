@@ -1217,6 +1217,42 @@ as the host either.
 line reads its speaker through the detail endpoint. Dropping the
 field on the wire fails that test.
 
+### T7.47: CI green again
+```yaml
+requires:   T7.40, T7.43
+fixture-ok: yes
+size:       M · frontier
+owns:       internal/assemblyai/socket_test.go, web/src/lib/voice/record-state.ts
+status:     in-progress:implement:t7.47-impl
+```
+CI is red on every `main` commit. The gate stops at the first
+failure, so the red has layers. Fix them in gate order and prove
+each layer by watching CI go further, not by gut feel.
+
+* `staticcheck` fails with SA4006 at
+  `internal/assemblyai/socket_test.go:248`. The first locked read
+  assigns `gotUpgrades` and nothing reads it before the second
+  locked block reassigns it. Keep the asserted behavior (one
+  upgrade across both ends) and drop the dead read.
+* `svelte-check` reports four errors in
+  `web/src/lib/voice/record-state.ts`, landed with T7.40. The
+  gate never reaches them while `staticcheck` stays red. Fix
+  them where the record state declares its types, not by
+  loosening the check.
+* The 2026-09-27 gate passed everything through the web build
+  and then failed at `playwright` with its output swallowed
+  (`npm run test:e2e >/dev/null`). Rerun the e2e suite with the
+  output visible, name the failing spec, and fix it. If the
+  culprit lives outside `owns`, raise a contract change instead
+  of reaching out.
+* The gate itself stays as it is. No check is loosened, skipped,
+  or reordered to reach green.
+
+**Done when:** The gate passes end to end on CI for the landed
+commit. A fresh worktree passes every step the workstation can
+run, and the CI run for the landing commit is green.
+
+
 ---
 
 ## Exit criteria
