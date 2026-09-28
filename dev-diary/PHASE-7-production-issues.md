@@ -2526,7 +2526,7 @@ size:       S · frontier
 owns:       internal/assemblyai/batch.go, internal/assemblyai/batch_test.go,
              internal/assemblyai/batch_live_test.go, internal/analysis/run.go,
              internal/analysis/run_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.78-impl@2263f54c31e29df590e77bd048673e7723b450ff
+status:     done:c7a7e33
 ```
 **Defect.** The Threads page read "Nothing threads yet" after several episodes about testing.
 Production holds 8 mentions, all of kind `callback` from the editorial pass. The one stored
@@ -2581,6 +2581,13 @@ name or a topic before a row forms. Say so in the handoff.
 
 ### What exists now
 
+T7.78 landed at c7a7e33 after round 1 APPROVE with zero findings.
+The analysis batch pass requests, parses, prices, and stores
+entities and key phrases at the combined hourly rate. The tree
+matches reviewed commit 2263f54. Main had moved, so the landing
+rebased. Race tests on assemblyai and analysis passed on the
+rebased commit. Threads still needs two rendered episodes
+sharing a name or topic before a row forms.
 T7.72 landed at 9193d20 after round 2 APPROVE with zero residue.
 The host brief travels in the provider's nested shape with echo
 verification, and a close during setup fails the start instead
