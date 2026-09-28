@@ -1859,7 +1859,7 @@ requires:   T7.61
 fixture-ok: yes
 size:       XS · light
 owns:       web/package.json, web/package-lock.json, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     blocked:waits for a Chaaya release that closes https://github.com/nrynss/chaaya/issues/7
+status:     not-started
 ```
 Once Chaaya publishes the release that fixes issue 7, pin `@nrynss/chaaya` to that exact version
 in `web/package.json` and refresh the lock file. Remove the three `test.fixme` lines T7.61 added.
