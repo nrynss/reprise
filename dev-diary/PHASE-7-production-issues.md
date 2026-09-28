@@ -1718,7 +1718,9 @@ three times in a row. The review file records the three exit codes, because the 
 requires:   T7.40
 fixture-ok: yes
 size:       XS · light
-owns:       web/src/routes/record/stems-complete.spec.ts
+owns:       web/src/routes/record/stems-complete.spec.ts, web/src/routes/record/cap.spec.ts,
+             web/src/routes/record/confirm-processing.spec.ts, web/src/routes/record/end-control.spec.ts,
+             web/src/routes/record/gallery-link.spec.ts, web/src/routes/record/mock-session.spec.ts
 status:     in-progress:implement:t7.60-impl
 ```
 T7.58 round 1 recorded an out of scope M finding. `a repeat
