@@ -404,6 +404,47 @@ describe('draft controller', () => {
 		}
 	});
 
+	it('plays the preview address first and falls back to the stem address', async () => {
+		async function sourceWithPreview(preview: string): Promise<string | null> {
+			vi.stubGlobal(
+				'fetch',
+				vi.fn().mockResolvedValue(
+					Response.json({
+						episode: {
+							id: 'live-1',
+							number: 2,
+							title: 'Live take',
+							state: 'draft',
+							visibility: 'private'
+						},
+						proposals: [],
+						words: [
+							{ text: 'Hello', start: 0, end: 0.4 },
+							{ text: 'there', start: 0.4, end: 0.9 }
+						],
+						audio_url: '/media/user-stem',
+						preview_audio_url: preview,
+						render_audio_url: ''
+					})
+				)
+			);
+			try {
+				const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+				controller.mount('');
+				await vi.waitFor(() => {
+					expect(controller.snapshot.ready).toBe(true);
+				});
+				const source = controller.player.source;
+				controller.destroy();
+				return source;
+			} finally {
+				vi.unstubAllGlobals();
+			}
+		}
+		expect(await sourceWithPreview('/media/draft-preview')).toBe('/media/draft-preview');
+		expect(await sourceWithPreview('')).toBe('/media/user-stem');
+	});
+
 	it('adopts the element length once it reports one', () => {
 		const { controller } = openDraft();
 		expect(controller.snapshot.duration).toBe(24);
