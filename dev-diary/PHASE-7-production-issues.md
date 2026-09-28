@@ -2490,7 +2490,7 @@ size:       S · frontier
 owns:       internal/assemblyai/batch.go, internal/assemblyai/batch_test.go,
              internal/assemblyai/batch_live_test.go, internal/analysis/run.go,
              internal/analysis/run_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     not-started
+status:     in-progress:implement:t7.78-impl
 ```
 **Defect.** The Threads page read "Nothing threads yet" after several episodes about testing.
 Production holds 8 mentions, all of kind `callback` from the editorial pass. The one stored
