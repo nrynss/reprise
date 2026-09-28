@@ -1979,6 +1979,74 @@ live probe draws a real cover and a non-fallback editorial answer. Pointing the 
 **Note.** The box reads `config/reprise.box.toml` baked into the image, so the change ships with
 the next deploy. The service account needs no new role, because the probe ran on it.
 
+### T7.68: Keep the provider record until its recording and timeline are stored
+```yaml
+requires:   T7.49, T7.57, T7.59
+fixture-ok: yes
+size:       M · frontier
+owns:       internal/broker/reconcile.go, internal/broker/reconcile_test.go,
+             internal/broker/sweep.go, internal/broker/sweep_test.go, internal/broker/end_test.go,
+             cmd/reprise/main.go, cmd/reprise/main_test.go
+status:     not-started
+```
+**Defect.** Both live takes on 2026-09-28 at 18:26 and 18:28 UTC, on `a0a9339`, settled within
+seconds of End. Chrome settled 40 seconds and Firefox 40, against owner timers of 41 and 39. Both
+`reconcile_state` rows then read `recording_url = ''`, `timeline_url = ''`, and empty media ids.
+The provider no longer lists either session.
+
+The T7.49 backoff returns as soon as the provider reports a duration. At that moment the provider
+has not yet attached the artifact links. `finishArtifacts` (`internal/broker/reconcile.go`) stores
+an artifact only when its URL is present. It then always calls `endProvider`, which deletes the
+provider record. The recording and the timeline are lost for good. That breaks the rule that
+provider output persists on receipt.
+
+The transcript pass then finds the reconcile ended with no timeline. It ran on the guest words
+alone, 25 words for Chrome and 20 for Firefox, with no host replies. The sweep's settled branch
+(`internal/broker/sweep.go`) retries only `endProvider` for an `end_pending` row. It never fetches
+missing artifacts.
+
+Before T7.49 the reconcile always failed, and the sweep settled 31 minutes later. By then the links
+existed, which hid this.
+
+**Change.**
+1. **Wait for the links.** In `readForSettle`, once a read carries a duration, keep reading while
+   `RecordingURL` or `TimelineURL` is empty. Use a second backoff, `artifactReadBackoff`, of 1 s,
+   2 s, 4 s, 8 s, 16 s and 16 s, which is 47 seconds. Use the same `Wait` seam as
+   `settleReadBackoff`. The two waits together stay under the 100 second limit. Return the last
+   read whether or not both links arrived.
+2. **Never delete without the artifacts.** In `finishArtifacts`, call `endProvider` only when both
+   media ids are stored. If either is still missing, set a new `reconcile_state` column,
+   `artifacts_pending = 1`, created the way `end_pending` is. Return with the money settled and
+   the record kept. A record the provider reports gone clears the flag, since nothing is left to
+   fetch.
+3. **Fetch later.** In the sweep's settled branch, a row with `artifacts_pending = 1` reads the
+   provider session again. It stores whichever artifacts now carry links through
+   `ensureArtifact`, and clears the flag once both are stored. Only then does it call
+   `endProvider`. A settled row never settles money twice.
+4. **Let the transcript outlast the wait.** Raise `hostRepliesWait` in `cmd/reprise/main.go`
+   from 60 to 90 seconds. The reconcile may now run for about 70 seconds before it stores the
+   timeline.
+5. Measure how long the links take to appear after a close. Log the elapsed time on the first
+   read that carries both. Record the figures from the next live take in the handoff.
+
+**Tests.**
+* `reconcile_test.go`: a fake reader returns a duration at once, but empty URLs on the first two
+  reads, then both URLs. One `Reconcile` settles once, stores both artifacts, then calls the ender.
+  `Wait` saw 1 s and 2 s after the duration read.
+* `reconcile_test.go`: a reader whose URLs never arrive settles the money. It leaves
+  `artifacts_pending = 1`, and the ender never runs.
+* `sweep_test.go`: a settled row with `artifacts_pending = 1`, whose read now carries both URLs,
+  stores both, clears the flag, and then ends the provider. The owner budget does not change.
+* `sweep_test.go`: a settled row with `artifacts_pending = 1`, whose read reports the record
+  gone, clears the flag and settles nothing.
+* `main_test.go`: `hostRepliesWait` is at least the sum of both backoffs plus 10 seconds.
+
+**Done when:** The tests pass under `go test -race`, and the gate passes in a fresh worktree.
+Calling `endProvider` unconditionally in `finishArtifacts` again fails the second reconcile test.
+
+**Note.** The two lost recordings belong to episodes 9 (Chrome) and 5 (Firefox) on 2026-09-28.
+They cannot be recovered. Their drafts and renders still work from the local stems.
+
 ---
 
 ## Exit criteria
