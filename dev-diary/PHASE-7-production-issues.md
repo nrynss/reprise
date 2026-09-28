@@ -1396,6 +1396,9 @@ turned up.
 * An editorial answer with no callback still shows a "Planted for next
   time" block, empty but with a revert control. Show no block when
   nothing was planted.
+* A draft with no stored cold open showed `Hello,` as its proposed
+  cold open. The empty default at `draft.ts:103` names word 0. Show no
+  cold open block when none was proposed.
 
 **Done when:** One browser spec loads the fixture draft and checks each
 point. It finds spaced words, seeks by pointer, reverts a cut, then
@@ -1446,30 +1449,61 @@ with no audio.
   before it was stored, and it keeps Erase.
 * Record in the handoff whether a closed take can ever resume its
   stems. If it can, name the task that should offer that.
+* The episode 7 page kept its `rendering` badge and read "The render is
+  done. The analysis starts next." The server already held it as
+  `ready`, and analysis had failed. The page follows the stored state
+  until it settles, and it names a failed analysis.
 
 **Done when:** A spec loads a recording episode with no stems and finds
 no quoted moment, no Publish, and a working Erase. Restoring the moment
 line fails it.
 
-### T7.55: A cold open is a moment, not a word
+### T7.55: A cold open never replays the opening
 ```yaml
 requires:   T7.38
 fixture-ok: yes
-size:       XS · mid
+size:       S · mid
 owns:       internal/editorial/
 status:     not-started
 ```
-The Firefox draft in T6.4b round 2 proposed the cold open `Hello,`.
-A single greeting word is not a moment worth opening on.
+The episode 7 render in T6.4b round 2 runs 56.6 seconds from a 40.4
+second take. Its stored cold open spans words 0 to 28, which is the
+opening itself. The render plays those 16 seconds, then starts the
+episode at word 0, so the listener hears the start twice.
 
-* A proposed cold open shorter than a whole sentence of real content is
-  dropped. The draft then opens at the top, as a reverted cold open
+* A proposed cold open that overlaps the first words the episode plays
+  is dropped. The draft then opens at the top, as a reverted cold open
   does.
-* The prompt asks for a quotable line, and the store enforces the floor.
-  The prompt alone does not.
+* A cold open is a short quotable moment with a length ceiling. It is
+  never a single word.
+* The store enforces both rules. The prompt alone does not.
 
-**Done when:** A test stores an editorial answer whose cold open is one
-word and finds no cold open proposal. Removing the floor fails it.
+**Done when:** A test stores an editorial answer whose cold open starts
+at word 0 and finds no cold open proposal. So does one whose cold open
+is one word. Removing either check fails its test.
+
+### T7.56: Chapters fit their output cap
+```yaml
+requires:   T7.38
+fixture-ok: yes
+size:       XS · frontier
+owns:       internal/analysis/run.go, internal/gemini/
+status:     not-started
+```
+Analysis failed on the 40 second episode 7 render in T6.4b round 2, with
+`chapters: gemini: truncated answer: answer hit the output cap`. The
+chapter call caps output at 800 tokens (`ChapterMaxTokens`) and sets no
+thinking budget, so reasoning spends the cap. T7.38 fixed the same
+failure for the editorial pass.
+
+* Bound the chapter call's thinking budget, and size its output cap
+  from a measured answer.
+* A live probe behind the `live` tag runs chapters on a short and a long
+  render and records the tokens spent.
+
+**Done when:** A test checks that the chapter request carries a thinking
+budget and an output cap above it. Removing the budget fails it. The
+live probe finishes both renders without truncation.
 
 
 ---
