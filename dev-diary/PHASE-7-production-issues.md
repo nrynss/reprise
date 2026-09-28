@@ -2294,7 +2294,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:review-r1:t7.74-rev-r1@fb3256dd3fb8491648f81c52d553105c6520c9f2
+status:     in-progress:land:t7.74-impl@fb3256dd3fb8491648f81c52d553105c6520c9f2
 ```
 **Defect.** On 2026-09-28 at 19:44:51 UTC, the owner pressed Mark done on episode 10. Traefik logged
 `POST /api/episodes/61ac5b47…/done` answering 202. The render, cover, analysis and marking all
