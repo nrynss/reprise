@@ -1086,7 +1086,7 @@ requires:   T7.36, T7.39
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.41-rem-r2@8699b58c28f4ed941993c325ff97658dbe137ed5
+status:     done:b19efd5
 ```
 `startTranscript` passes `nil` host replies and zero offsets to the
 transcript job. So a live transcript holds only the guest's words. The
@@ -1208,6 +1208,16 @@ the delete. Calling `TerminateSession` again fails that test.
 
 ### What exists now
 
+T7.41 landed at b19efd5 after round 3 APPROVE with zero residue.
+Round 2 had three H findings. A partial timeline parse failed the
+job while reconcile was still writing, a terminal reconcile in
+error blocked the guest batch, and an interrupted wait never
+rescheduled. The landed pass waits out the partial document, the
+terminal reconcile, and the interrupted wait, and uploads once.
+The cmd diff matches reviewed commit 8699b58. Main had moved, so
+the landing rebased. Race tests on cmd/reprise passed on the
+rebased commit. The transcript carries the host's replies at
+their reply times. Speaker labels stay with T7.44.
 T7.40 landed at a0570e8 after round 3 APPROVE with zero residue.
 Round 2 had two H findings. A reload after the draft was ready
 rebuilt the upload as waiting with the episode link gone, and an
