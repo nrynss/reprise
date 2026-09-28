@@ -20,10 +20,11 @@ import (
 // render twice.
 var Kind = job.Kind{Limit: 2}
 
-// ChapterMaxTokens caps the chapter answer length. The measured chapter
-// call spent a few hundred tokens, so this ceiling leaves wide margin
-// without inviting a runaway answer.
-const ChapterMaxTokens = 800
+// ChapterMaxTokens caps the chapter output. Reasoning shares this cap
+// with the answer, so the cap holds the chapter reasoning budget plus a
+// complete answer with margin. The spend estimate reads this constant,
+// so the reservation grows with it.
+const ChapterMaxTokens = 4096
 
 // Budget bounds the paid calls. A cost Budget satisfies it directly.
 type Budget interface {

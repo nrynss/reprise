@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/nrynss/reprise/internal/analysis"
 	"github.com/nrynss/reprise/internal/gemini"
 )
 
@@ -66,6 +67,28 @@ func TestCompleteChaptersRefusesEmpty(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("backend calls = %d, want none for empty input", calls)
+	}
+}
+
+// TestCompleteChaptersBoundsReasoning checks the chapter call bounds
+// its reasoning budget inside the output cap, so reasoning cannot starve
+// the answer on a longer take.
+func TestCompleteChaptersBoundsReasoning(t *testing.T) {
+	t.Parallel()
+	var gotConfig *genai.GenerateContentConfig
+	client := gemini.NewTestClient(func(_ context.Context, _ string, _ []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+		gotConfig = config
+		return answer(`{"chapters":[{"title":"Dawn Ferry","start_ms":0}]}`), nil
+	})
+	if _, _, err := client.CompleteChapters(t.Context(), "flash", "[00:00] the ferry leaves", 600, analysis.ChapterMaxTokens); err != nil {
+		t.Fatalf("chapters: %v", err)
+	}
+	if gotConfig == nil || gotConfig.ThinkingConfig == nil || gotConfig.ThinkingConfig.ThinkingBudget == nil {
+		t.Fatalf("config = %+v, want an explicit reasoning budget", gotConfig)
+	}
+	budget := *gotConfig.ThinkingConfig.ThinkingBudget
+	if budget <= 0 || gotConfig.MaxOutputTokens <= budget {
+		t.Fatalf("budget %d cap %d, want a positive budget inside the cap", budget, gotConfig.MaxOutputTokens)
 	}
 }
 

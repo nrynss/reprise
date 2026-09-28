@@ -59,6 +59,12 @@ func ChapterSchema() *genai.Schema {
 // same render chapters the same way twice.
 const chapterTemperature = 0.2
 
+// ChapterThinkingBudget bounds the reasoning tokens the chapter pass may
+// spend. Reasoning shares the output cap with the answer, so an unbounded
+// budget starves the JSON on longer takes. The budget leaves room to weigh
+// turns across an episode.
+const ChapterThinkingBudget = 1024
+
 // CompleteChapters asks the named model for episode chapters over the
 // rendered transcript and returns the answer text with its token usage.
 // The model id arrives from settings through the caller, never from
@@ -74,6 +80,7 @@ func (c *Client) CompleteChapters(ctx context.Context, model, transcript string,
 		return "", Usage{}, fmt.Errorf("gemini: chapters: %w: duration and token cap must be positive", ErrInvalid)
 	}
 	temperature := float32(chapterTemperature)
+	budget := int32(ChapterThinkingBudget)
 	contents := []*genai.Content{{
 		Role: "user",
 		Parts: []*genai.Part{
@@ -83,6 +90,7 @@ func (c *Client) CompleteChapters(ctx context.Context, model, transcript string,
 	text, usage, err := c.Generate(ctx, model, contents, &genai.GenerateContentConfig{
 		SystemInstruction: genai.NewContentFromText(chapterSystem(), genai.RoleUser),
 		Temperature:       &temperature,
+		ThinkingConfig:    &genai.ThinkingConfig{ThinkingBudget: &budget},
 		MaxOutputTokens:   int32(maxTokens),
 		ResponseMIMEType:  "application/json",
 		ResponseSchema:    ChapterSchema(),

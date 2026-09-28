@@ -13,6 +13,7 @@ import (
 	"github.com/nrynss/keel/cost"
 	"github.com/nrynss/reprise/internal/analysis"
 	"github.com/nrynss/reprise/internal/assemblyai"
+	"github.com/nrynss/reprise/internal/gemini"
 )
 
 // fakeBudget records every hold and frees nothing silently.
@@ -374,6 +375,17 @@ func TestEstimatePricesBatchAndGateway(t *testing.T) {
 	}
 	if got := analysis.Estimate(0, 0, analysis.Rates{}); got != cost.Price(0) {
 		t.Fatalf("zero estimate = %v, want nothing", got)
+	}
+}
+
+// TestChapterCapHoldsReasoningPlusAnswer checks the chapter cap keeps
+// the reasoning budget plus room for a complete answer, so reasoning
+// cannot starve the chapters on a longer take.
+func TestChapterCapHoldsReasoningPlusAnswer(t *testing.T) {
+	t.Parallel()
+	if analysis.ChapterMaxTokens < gemini.ChapterThinkingBudget+1024 {
+		t.Fatalf("cap %d budget %d, want the cap to hold the budget plus 1024 answer tokens",
+			analysis.ChapterMaxTokens, gemini.ChapterThinkingBudget)
 	}
 }
 
