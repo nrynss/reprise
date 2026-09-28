@@ -12,7 +12,7 @@ and an agent reading one has to decide. Writing it in the library removes the de
 library a real consumer's feedback instead of a paragraph describing one.
 
 **Versions.** Keel `v0.3.0`, public, fetched from the module proxy with no `replace` directive.
-Chaaya `0.2.2` from npm, pinned exactly in `web/package.json`. Pin both exactly. An earlier release
+Chaaya `0.2.3` from npm, pinned exactly in `web/package.json`. Pin both exactly. An earlier release
 of either carries less than this plan builds on.
 
 ---
@@ -46,7 +46,7 @@ that implements it against the one SQLite file T1.1 opens. Naming the parent pac
 process that forgets across a restart. `keel/upload` is the exception: it stages chunks on disk and
 hands the finished upload to a `mediastore`, so T2.4 wires both.
 
-## Chaaya 0.2.2
+## Chaaya 0.2.3
 
 | Need | Export | Reprise uses it in |
 |---|---|---|
@@ -63,6 +63,7 @@ hands the finished upload to a `mediastore`, so T2.4 wires both.
 | A close message sent once on `pagehide` and on destroy | `guard` `SessionGuard` | T2.4 |
 | One playback element unlocked by the first gesture, with seeking | `audio` `AudioPlayer` | T3.3, T4.3, T5.5 |
 | Play state that survives a media-sink fault while the element still plays | `audio` `AudioPlayer` | T7.64 |
+| The refusal reason on a refused play, unlock, or prime | `audio` `AudioPlayer.lastPlayError` | T7.75 |
 | Live level and waveform peaks in a worker | `audio` `LiveLevel`, `computePeaksInWorker` | T2.4, T3.3 |
 | Timed words, ranges, cuts with reasons, revert | `transcript` `TranscriptEditor` | T3.3 |
 | A transcript that follows playback, and click to seek | `transcript` `TranscriptFollower` | T3.3, T4.3 |

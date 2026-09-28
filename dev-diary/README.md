@@ -6,7 +6,7 @@ How work runs lives only in [`../AGENTS.md`](../AGENTS.md). This file holds fact
 - [`project.md`](project.md): the build, and every departure from the product spec.
 - [`libraries.md`](libraries.md): what Keel and Chaaya carry, and what Reprise builds.
 
-**Current status:** Built on Keel `v0.3.0` and Chaaya `0.2.2`. The public edge
+**Current status:** Built on Keel `v0.3.0` and Chaaya `0.2.3`. The public edge
 at `https://reprise.nryn.dev` has passed workstation verification. P0 through
 P5 are done, including the seeded season copy (T5.2) and first visit screen
 (T5.5). T6.1b production verification, T6.2 submission materials, and T6.3
@@ -21,7 +21,7 @@ owner login is deferred. T6.4b real-voice checks are under way on
 `f79cb91`, with two of four runs measured. They opened T7.36 to T7.45,
 and the final P7 exit checks are not complete.
 
-The libraries carry the general work. Chaaya `0.2.2` carries the live duplex path the recorder needs:
+The libraries carry the general work. Chaaya `0.2.3` carries the live duplex path the recorder needs:
 capture on a context the page owns, a take that streams instead of accumulating, a filtered
 resampler, a PCM stream player with a flush, a session guard, and the transcript module. Keel
 `v0.3.0` carries the server side: budgets per owner, runtime flags, captions, erasure fan-out, the

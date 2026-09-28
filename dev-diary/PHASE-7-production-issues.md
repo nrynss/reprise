@@ -2335,7 +2335,7 @@ size:       S · frontier
 owns:       web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts,
              web/src/routes/welcome/welcome.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/threads/threads.test.ts, web/package.json, web/package-lock.json
-status:     in-progress:land:t7.75-impl@9cb299731b339d55c943a7c4e86c1fd7d8b03d13
+status:     done:68a8e62
 ```
 **Defect.** In real Chrome on 2026-09-28, the owner's first Play press on a draft always showed
 "Playback refused. Press play again after a gesture." The second press played. The episode page
@@ -2451,7 +2451,7 @@ owns:       web/src/lib/components/GalleryLink.svelte, web/src/lib/components/Ga
              web/src/routes/threads/+page.svelte,
              web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
              web/src/routes/episode/[id]/+page.svelte, web/src/routes/episode/[id]/edit/+page.svelte
-status:     not-started
+status:     in-progress:implement:t7.77-impl
 ```
 **Defect.** On 2026-09-28 the owner noted that "Back to the gallery" renders as a bare link, not as a
 button like the rest of the controls. Every page styles its own buttons, and none styles the way
@@ -2581,6 +2581,15 @@ name or a topic before a row forms. Say so in the handoff.
 
 ### What exists now
 
+T7.75 landed at 68a8e62 after round 1 APPROVE with zero findings.
+The first Play press retries once inside the gesture with the
+refusal reason logged. Chaaya pins to exactly 0.2.3 with the
+lastPlayError surface. The tree matches reviewed commit
+9cb2997. Main had moved, so the landing rebased. The draft and
+threads pins passed on the rebased commit. The version records
+moved to 0.2.3 in the package, the pin lines, and the Chaaya
+surface table, which gains the refusal reason row. T7.77
+unblocks on this landing.
 T7.73 landed at e683517 after round 1 APPROVE with zero findings.
 The editor waveform shows the playhead and live peaks with a
 shared seekbar. The tree matches reviewed commit 64478e1. Main
