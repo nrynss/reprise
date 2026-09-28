@@ -1721,7 +1721,7 @@ size:       XS · light
 owns:       web/src/routes/record/stems-complete.spec.ts, web/src/routes/record/cap.spec.ts,
              web/src/routes/record/confirm-processing.spec.ts, web/src/routes/record/end-control.spec.ts,
              web/src/routes/record/gallery-link.spec.ts, web/src/routes/record/mock-session.spec.ts
-status:     in-progress:land:t7.60-rem-r1@b3feb8d2472c16dfee61780f291b61a83e4600e1
+status:     done:ebe6f63
 ```
 T7.58 round 1 recorded an out of scope M finding. `a repeat
 completion reports the standing outcome` fails under full-suite
@@ -1776,7 +1776,7 @@ requires:   T7.58
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:land:t7.61-impl@dc30a2231e7646f74aaee87740cf19ccb8870361
+status:     done:a3ad967
 ```
 **Defect.** Three Firefox specs that T7.58 added fail on every CI run since it landed:
 `revert a cut, then play and seek still answer`, `revert every cut, then play and drag still
@@ -1859,7 +1859,7 @@ requires:   T7.61
 fixture-ok: yes
 size:       XS · light
 owns:       web/package.json, web/package-lock.json, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     not-started
+status:     in-progress:implement:t7.64-impl
 ```
 Once Chaaya publishes the release that fixes issue 7, pin `@nrynss/chaaya` to that exact version
 in `web/package.json` and refresh the lock file. Remove the three `test.fixme` lines T7.61 added.
@@ -1995,6 +1995,17 @@ the next deploy. The service account needs no new role, because the probe ran on
 
 ### What exists now
 
+T7.60 landed at ebe6f63 after round 2 APPROVE with zero residue.
+Every Start press in the record mock suite waits on the
+effect-installed handle. The tree matches reviewed commit
+b3feb8d. Main had moved, so the landing rebased. The full mock
+record suite passed 28/28 on the rebased commit.
+T7.61 landed at a3ad967 after round 1 APPROVE with zero
+findings. The three Firefox play-state specs quarantine behind
+the Chaaya defect while their Chromium runs stay live. The tree
+matches reviewed commit dc30a22. Main had moved, so the landing
+rebased. The Chromium edit suite passed 13/13 on the rebased
+commit. T7.64 unblocks on this landing.
 T7.67 landed at a05556c after round 1 APPROVE with zero findings.
 The live probe resolves the production model id from settings.
 The tree matches reviewed commit e43d991. Main had moved, so
