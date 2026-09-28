@@ -72,22 +72,58 @@ go test -race $GO_PKGS || fail "go test -race" "tests failed"
 cd web
 
 echo "-- svelte-kit sync"
-npx svelte-kit sync >/dev/null || fail "svelte-kit sync" "svelte-kit sync reported problems"
+sync_log=$(mktemp)
+if ! npx svelte-kit sync >"$sync_log" 2>&1; then
+	cat "$sync_log"
+	rm -f "$sync_log"
+	fail "svelte-kit sync" "svelte-kit sync reported problems"
+fi
+rm -f "$sync_log"
 
 echo "-- svelte-check"
-npm run check >/dev/null || fail "svelte-check" "svelte-check reported problems"
+svelte_check_log=$(mktemp)
+if ! npm run check >"$svelte_check_log" 2>&1; then
+	cat "$svelte_check_log"
+	rm -f "$svelte_check_log"
+	fail "svelte-check" "svelte-check reported problems"
+fi
+rm -f "$svelte_check_log"
 
 echo "-- eslint"
-npm run lint >/dev/null || fail "eslint" "eslint reported problems"
+eslint_log=$(mktemp)
+if ! npm run lint >"$eslint_log" 2>&1; then
+	cat "$eslint_log"
+	rm -f "$eslint_log"
+	fail "eslint" "eslint reported problems"
+fi
+rm -f "$eslint_log"
 
 echo "-- vitest"
-npm run test >/dev/null || fail "vitest" "unit tests failed"
+vitest_log=$(mktemp)
+if ! npm run test >"$vitest_log" 2>&1; then
+	cat "$vitest_log"
+	rm -f "$vitest_log"
+	fail "vitest" "unit tests failed"
+fi
+rm -f "$vitest_log"
 
 echo "-- build"
-npm run build >/dev/null || fail "build" "web build reported problems"
+build_log=$(mktemp)
+if ! npm run build >"$build_log" 2>&1; then
+	cat "$build_log"
+	rm -f "$build_log"
+	fail "build" "web build reported problems"
+fi
+rm -f "$build_log"
 
 echo "-- playwright"
-npm run test:e2e >/dev/null || fail "playwright" "end-to-end tests failed"
+playwright_log=$(mktemp)
+if ! npm run test:e2e >"$playwright_log" 2>&1; then
+	cat "$playwright_log"
+	rm -f "$playwright_log"
+	fail "playwright" "end-to-end tests failed"
+fi
+rm -f "$playwright_log"
 
 cd ..
 
