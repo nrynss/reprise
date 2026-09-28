@@ -489,20 +489,20 @@ func spendCeiling(cents int64) (cost.Price, error) {
 	return cost.Price(cents) * nanosPerCent, nil
 }
 
-// Take path bursts size one honest take with two stems. Chunk uploads
-// dominate the honest count, so uploads carry the widest burst while
-// mint and completion stay narrow enough to trip a hammer. A burst
-// alone cannot refill a whole take, so uploads and the outer budget
-// use uploadRefill. The binary test replays these numbers, so a wrong
-// limit fails there instead of stalling a take at the edge.
+// Take path bursts size one honest take with two stems as a burst per
+// minute. Chunk uploads dominate the honest count, so uploads carry a
+// wide burst per minute while mint and completion stay narrow enough to
+// trip a hammer. Uploads and the outer budget refill per token, so one
+// take never stalls at the edge. The test below replays these numbers,
+// so a wrong limit fails there instead of stalling a take.
 const (
 	takeSessionsBurst   = 6
 	takeSessionEndBurst = 6
-	takeEpisodesBurst   = 48
+	takeEpisodesBurst   = 120
 	takeThreadsBurst    = 32
 	takeAdminBurst      = 16
 	takeUploadsBurst    = 48
-	takeMediaBurst      = 48
+	takeMediaBurst      = 240
 	takeStemsBurst      = 8
 	outerAPIBurst       = 256
 )
@@ -513,8 +513,10 @@ const (
 // outer refill stalls a take once 256 chunks are spent.
 const uploadRefill = 200 * time.Millisecond
 
-// takeRefill is one minute for every take route except uploads. Uploads
-// use uploadRefill so a two-stem take does not stall.
+// takeRefill returns the window one burst per minute refills in. Every
+// take route except uploads uses one minute. Uploads use uploadRefill,
+// which already restores one token at a time, so a two-stem take does
+// not stall.
 func takeRefill(name string) time.Duration {
 	if name == "take-uploads" {
 		return uploadRefill
@@ -522,22 +524,31 @@ func takeRefill(name string) time.Duration {
 	return time.Minute
 }
 
-// takeRule returns the spend budget for one take path route. The route
-// refill comes from takeRefill. A double cadence burst still trips the
-// route it hammers. The gate writes the refusal, so the header and the
-// body agree on the wait.
+// takeRule returns the spend budget for one take path route. Each bucket
+// refills its whole burst per minute, so one token arrives every window
+// divided by the burst. The global bucket carries sixteen times the
+// burst and refills on its own cadence. Uploads keep the per token
+// refill. The gate writes the refusal, so the header and the body agree
+// on the wait.
 func takeRule(name string, burst int) gate.Rule {
-	every := takeRefill(name)
+	refill := takeRefill(name)
+	if name != "take-uploads" && burst > 0 {
+		return gate.Rule{
+			Name:      name,
+			PerClient: gate.Limit{Burst: burst, Every: refill / time.Duration(burst)},
+			Global:    gate.Limit{Burst: 16 * burst, Every: refill / time.Duration(16*burst)},
+		}
+	}
 	return gate.Rule{
 		Name:      name,
-		PerClient: gate.Limit{Burst: burst, Every: every},
-		Global:    gate.Limit{Burst: 16 * burst, Every: every},
+		PerClient: gate.Limit{Burst: burst, Every: refill},
+		Global:    gate.Limit{Burst: 16 * burst, Every: refill},
 	}
 }
 
 // outerAPIRule is the shared budget in front of every mounted route.
 // It refills with the uploads, so one take is not cut off at 256. Mint
-// stays at one minute because its own route budget is unchanged.
+// keeps its own burst per minute budget beside it.
 func outerAPIRule() gate.Rule {
 	return gate.Rule{
 		Name:      "api",

@@ -1534,6 +1534,62 @@ func TestTakeGateRouteBurstsTripAtWiredEdge(t *testing.T) {
 	}
 }
 
+// TestTakeRuleRefillsBurstPerMinute requires the wired episodes rule to
+// refill its whole burst once a minute: one token every 500 ms per
+// client, with the global bucket on its own sixteenfold cadence.
+// Uploads keep the per token refill. Setting Every back to the whole
+// minute fails this test.
+func TestTakeRuleRefillsBurstPerMinute(t *testing.T) {
+	rule := takeRule("take-episodes", 120)
+	if rule.PerClient.Burst != 120 {
+		t.Fatalf("PerClient burst = %d, want 120", rule.PerClient.Burst)
+	}
+	if rule.PerClient.Every != 500*time.Millisecond {
+		t.Fatalf("PerClient Every = %v, want 500ms for a 120 burst per minute", rule.PerClient.Every)
+	}
+	wantGlobal := time.Minute / time.Duration(16*120)
+	if rule.Global.Burst != 16*120 {
+		t.Fatalf("Global burst = %d, want %d", rule.Global.Burst, 16*120)
+	}
+	if rule.Global.Every != wantGlobal {
+		t.Fatalf("Global Every = %v, want %v for a %d burst per minute", rule.Global.Every, wantGlobal, 16*120)
+	}
+	uploads := takeRule("take-uploads", takeUploadsBurst)
+	if uploads.PerClient.Every != uploadRefill || uploads.Global.Every != uploadRefill {
+		t.Fatalf("uploads Every = %v and %v, want the per token %v",
+			uploads.PerClient.Every, uploads.Global.Every, uploadRefill)
+	}
+}
+
+// TestTakeGateRefillsFullBurstAfterOneMinute drains the wired episodes
+// burst on the gate clock seam, then advances one minute and passes the
+// whole burst again before tripping.
+func TestTakeGateRefillsFullBurstAfterOneMinute(t *testing.T) {
+	start := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	now := start
+	spendGate, err := gate.New(gate.Config{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatalf("open spend gate: %v", err)
+	}
+	protected, err := protectTake(spendGate, "take-episodes", takeEpisodesBurst, stubHandler())
+	if err != nil {
+		t.Fatalf("protect take-episodes: %v", err)
+	}
+	for i := range takeEpisodesBurst {
+		if rec := takeGateHit(protected); rec.Code != http.StatusOK {
+			t.Fatalf("drain hit %d status = %d, want 200: %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	requireRateLimitHints(t, takeGateHit(protected))
+	now = now.Add(time.Minute)
+	for i := range takeEpisodesBurst {
+		if rec := takeGateHit(protected); rec.Code != http.StatusOK {
+			t.Fatalf("refilled hit %d status = %d, want 200: %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	requireRateLimitHints(t, takeGateHit(protected))
+}
+
 // stackTakeGate wraps the route in the outer budget and then its own
 // budget, which is the order one chunk meets.
 func stackTakeGate(t *testing.T, now func() time.Time, name string, burst int) http.Handler {
@@ -1596,11 +1652,11 @@ func TestTakeGateSustainedUploadClearsOuterBurst(t *testing.T) {
 	}
 }
 
-// TestTakeGateMintRefillStaysOneMinute sends session mints through the
+// TestTakeGateMintRefillStaysPerMinute sends session mints through the
 // outer budget and then the mint budget. Six pass. The next refuses
-// with a one minute wait. One second later it still refuses, so the
-// faster outer refill did not raise the mint rate.
-func TestTakeGateMintRefillStaysOneMinute(t *testing.T) {
+// with a ten second wait. One second later it still refuses with nine,
+// so the faster outer refill did not raise the mint rate.
+func TestTakeGateMintRefillStaysPerMinute(t *testing.T) {
 	start := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
 	now := start
 	handler := stackTakeGate(t, func() time.Time { return now }, "take-sessions", takeSessionsBurst)
@@ -1611,14 +1667,14 @@ func TestTakeGateMintRefillStaysOneMinute(t *testing.T) {
 	}
 	rec := takeGateHit(handler)
 	requireRateLimitHints(t, rec)
-	if got := rec.Header().Get("Retry-After"); got != "60" {
-		t.Fatalf("Retry-After = %q, want 60 for a one minute mint refill", got)
+	if got := rec.Header().Get("Retry-After"); got != "10" {
+		t.Fatalf("Retry-After = %q, want 10 for a ten second mint token", got)
 	}
 	now = now.Add(time.Second)
 	rec = takeGateHit(handler)
 	requireRateLimitHints(t, rec)
-	if got := rec.Header().Get("Retry-After"); got != "59" {
-		t.Fatalf("Retry-After = %q, want 59 one second later", got)
+	if got := rec.Header().Get("Retry-After"); got != "9" {
+		t.Fatalf("Retry-After = %q, want 9 one second later", got)
 	}
 }
 
