@@ -1839,7 +1839,7 @@ requires:   T7.47
 fixture-ok: yes
 size:       XS · light
 owns:       tools/check.sh
-status:     in-progress:implement:t7.63-impl
+status:     in-progress:review-r1:t7.63-rev-r1@00fe2393442028143d20bbcc3d495e083b95b9ec
 ```
 **Defect.** `tools/check.sh` runs `npm run test:e2e >/dev/null`. A failing run therefore prints only
 `FAIL [playwright] end-to-end tests failed`. No CI log names the spec. T7.58 landed on red CI, and
@@ -1874,7 +1874,7 @@ requires:   T7.27
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/welcome/welcome.playwright.config.ts
-status:     in-progress:land:t7.65-impl@85e6b8e4748dd56dcdb2872ff6160640ff2423a3
+status:     done:2e7aa9a
 ```
 T7.27 took WebKit out of the welcome suite. The seeded teaser spec had failed there, and the
 failure was blamed on Chaaya's silent prime (https://github.com/nrynss/chaaya/issues/5). On
@@ -1906,6 +1906,16 @@ the three exit codes. WebKit does not launch on the workstation, so run it only 
 
 ### What exists now
 
+T7.65 landed at 2e7aa9a after round 1 APPROVE with zero findings.
+The welcome suite runs in Chromium and WebKit, green ten times
+in a row in the CI image. The tree matches reviewed commit
+85e6b8e. Main had moved, so the landing rebased. The Chromium
+welcome run passed on the rebased commit; a teaser failure on
+one loaded run passed alone, which is load flake, not
+regression. Cleanup note: the docker run wrote root-owned
+`test-results` into the worktree, so the husk dirs need
+`sudo rm -rf` (see below). Future image runs should pass
+`--user` with the owner uid.
 T7.58 landed at 3ea4c2e after round 1 APPROVE with zero in-scope
 findings. The editor suite runs in Firefox and Chromium with
 revert-all regression pins. The Firefox stall does not reproduce
