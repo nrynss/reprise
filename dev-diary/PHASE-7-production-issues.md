@@ -1721,7 +1721,7 @@ size:       XS · light
 owns:       web/src/routes/record/stems-complete.spec.ts, web/src/routes/record/cap.spec.ts,
              web/src/routes/record/confirm-processing.spec.ts, web/src/routes/record/end-control.spec.ts,
              web/src/routes/record/gallery-link.spec.ts, web/src/routes/record/mock-session.spec.ts
-status:     in-progress:remediate-r1:t7.60-rem-r1
+status:     in-progress:review-r2:t7.60-rev-r2@b3feb8d2472c16dfee61780f291b61a83e4600e1
 ```
 T7.58 round 1 recorded an out of scope M finding. `a repeat
 completion reports the standing outcome` fails under full-suite
