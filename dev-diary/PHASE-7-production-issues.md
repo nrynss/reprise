@@ -1263,7 +1263,7 @@ owns:       web/src/lib/voice/session-calls.ts, web/src/lib/voice/session-calls.
              internal/api/routes.go, internal/api/routes_test.go,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts,
              cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:implement:t7.48-impl
+status:     in-progress:review-r1:t7.48-rev-r1@10d6d36b1161a46e2da42b321338ca47dff95022
 ```
 **Defect.** `reportProviderSession` (`web/src/lib/voice/session-calls.ts`) stores the provider id
 while the take runs. It does that by calling `closeSession`, which posts to
@@ -1310,7 +1310,7 @@ fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/reconcile.go, internal/broker/reconcile_test.go,
              internal/broker/end_test.go
-status:     in-progress:implement:t7.49-impl
+status:     in-progress:review-r1:t7.49-rev-r1@8d1f572de92366e1530254a6a32ff6f51514d551
 ```
 **Defect.** Every reconcile on the four T6.4b round 2 runs failed with
 `provider session is still open`. That covers the reconciles after End and after a tab close.
@@ -1360,7 +1360,7 @@ requires:   T7.47
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts
-status:     in-progress:implement:t7.50-impl
+status:     in-progress:review-r1:t7.50-rev-r1@4b4ba31e0d158ca94a37a07a5144efbb3c956aeb
 ```
 **Defect.** On the T6.4b round 2 Firefox run, Upload read `2 stems, 0 bytes durable`. The box held
 5554988 and 2609836 bytes. The resume path in `ProcessingController`
@@ -1433,7 +1433,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:implement:t7.52-impl
+status:     in-progress:review-r1:t7.52-rev-r1@94445e2e7a50fd5ea3aa7503c687ee4dee4cd7ff
 ```
 The owner used the editor on both T6.4b round 2 drafts. Seven defects turned up. Fix each one
 separately, and pin each one with its own test.
@@ -1519,7 +1519,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
              web/src/routes/threads/gallery-finish.test.ts, web/src/routes/episode/[id]/+page.svelte
-status:     in-progress:implement:t7.54-impl
+status:     in-progress:review-r1:t7.54-rev-r1@11c375212d8c1745431c92bb63baa36259a1e313
 ```
 Three defects, each pinned by its own test.
 
@@ -1558,7 +1558,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       internal/editorial/validate.go, internal/editorial/validate_test.go,
              internal/editorial/run_test.go
-status:     in-progress:implement:t7.55-impl
+status:     in-progress:review-r1:t7.55-rev-r1@7ca36eedaf3a3e3a8e16e8d0b8028e77714d14bb
 ```
 **Defect.** The episode 7 render in T6.4b round 2 runs 56.6 seconds from a 40.4 second take. Its
 stored cold open spans words 0 to 28, which is the opening itself. The render plays those 16
@@ -1590,7 +1590,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       internal/gemini/chapters.go, internal/gemini/calls_test.go,
              internal/analysis/run.go, internal/analysis/run_test.go
-status:     in-progress:implement:t7.56-impl
+status:     in-progress:review-r1:t7.56-rev-r1@c122b2eec22b6c2390df33c602daceaaad5e6298
 ```
 **Defect.** Analysis failed on the 40 second episode 7 render in T6.4b round 2, with
 `chapters: gemini: truncated answer: answer hit the output cap`. `CompleteChapters`
