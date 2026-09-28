@@ -2380,7 +2380,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       internal/api/episodes.go, internal/api/playback_test.go, web/src/routes/threads/threads.ts,
              web/src/routes/threads/threads.test.ts, web/src/routes/episode/[id]/+page.svelte
-status:     in-progress:land:t7.76-impl@e4d849dc4414a8d7d251407a7cf2707ae03ce958
+status:     done:cd47299
 ```
 **Defect.** On 2026-09-28 the owner published episode 10. The page showed only the notice "Public at
 /share/10770da2…. Only the finished audio opens behind it.", as plain text with a relative path.
@@ -2581,6 +2581,12 @@ name or a topic before a row forms. Say so in the handoff.
 
 ### What exists now
 
+T7.76 landed at cd47299 after round 1 APPROVE with zero in-scope
+findings. The Release section links the full share address with
+copy control. The tree matches reviewed commit e4d849d. Main
+had moved, so the landing rebased. Race tests on api passed on
+the rebased commit. Production reload still answers empty until
+T7.80 wires the token reader.
 T7.74 landed at 1219930 after round 1 APPROVE with zero findings.
 Mark done follows the started render with an explicit runner
 instead of calling it refused. The tree matches reviewed commit
