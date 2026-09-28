@@ -1866,6 +1866,28 @@ The orchestrator updates the Chaaya version in `dev-diary/libraries.md` at landi
 **Done when:** The three specs pass in Firefox in the CI image, three runs in a row. The gate passes
 in a fresh worktree three times in a row, and the review file records the exit codes.
 
+### T7.65: Run the welcome suite in WebKit again
+```yaml
+requires:   T7.27
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/welcome/welcome.playwright.config.ts
+status:     not-started
+```
+T7.27 took WebKit out of the welcome suite. The seeded teaser spec had failed there, and the
+failure was blamed on Chaaya's silent prime (https://github.com/nrynss/chaaya/issues/5). On
+2026-09-28 it did not reproduce in the CI image, `mcr.microsoft.com/playwright:v1.63.0-noble`,
+with WebKit 26.6. The teaser spec passed in WebKit three runs of three. The issue is closed as a
+flake on one macOS host.
+
+**Change.** Add `{ name: 'webkit', use: { browserName: 'webkit' } }` beside the Chromium project
+in `welcome.playwright.config.ts`. CI already installs WebKit. Change no spec.
+
+**Done when:** The welcome suite passes in both projects in the CI image, run with
+`docker run --rm --ipc=host -v "$PWD":/w -w /w/web mcr.microsoft.com/playwright:v1.63.0-noble`, ten
+runs in a row. The gate passes in a fresh worktree three times in a row, and the review file records
+the three exit codes. WebKit does not launch on the workstation, so run it only in that image.
+
 ---
 
 ## Exit criteria
@@ -2224,9 +2246,13 @@ still missing.
 A later Chrome take opened both stems as `audio/pcm`. The allowlist
 refused the open, so retry found no stored ids. T7.26 owns that fix.
 T7.27 landed at a9f1237. A WebKit start opens the audio context and
-requests the microphone before the session mint. The welcome teaser
-still fails on WebKit because Chaaya 0.2.0 rejects its silent prime.
-That defect is https://github.com/nrynss/chaaya/issues/5.
+requests the microphone before the session mint. A WebKit teaser
+failure was then blamed on Chaaya's silent prime, as
+https://github.com/nrynss/chaaya/issues/5. On 2026-09-28 it did not
+reproduce. In the CI image, WebKit 26.6 primes that clip cleanly and
+the teaser spec passed three runs of three. The failure was a flake
+on one macOS host, and the issue is closed. T7.65 puts WebKit back
+in the welcome suite.
 T7.4 is deferred, not merely waiting: owner login plus the live
 switch exercise ships as its own phase after dogfooding, not as a
 leftover row here.

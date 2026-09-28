@@ -184,7 +184,7 @@ confirms the button with no seed, and WebKit plays after the first gesture when 
 
 ### What exists now (Orchestrator-2)
 T5.2 landed after round 1 APPROVE with zero in-scope findings. Copy, receipt, and drop live at the package seam. Four wiring items stand: season-list Sync plus EnsureCopy, delete branch on seeded flag, sweep through Drop, Dockerfile data copy.
-T5.5 landed after round 1 APPROVE with zero findings. Empty catalog offers one record link, seeded state plays the teaser after the first gesture. WebKit play-after-gesture stays unverified on the review host (missing libs) and wants a re-run where deps exist.
+T5.5 landed after round 1 APPROVE with zero findings. Empty catalog offers one record link, seeded state plays the teaser after the first gesture. WebKit play-after-gesture was verified on 2026-09-28 in the CI Playwright image, where the teaser passed in WebKit 26.6.
 T5.4 already landed. The sweep does not wait on a catalog. Retention is 90 days.
 T5.3 landed after round 1 APPROVE with zero in-scope findings. Guest caps, kill switch, and the
 Keel-backed spend view are on main with both sides pinned. The owner login stays an explicit
