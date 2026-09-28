@@ -1199,7 +1199,7 @@ requires:   T7.44
 fixture-ok: yes
 size:       XS · light
 owns:       internal/api/episodes.go, internal/api/episodes_speaker_test.go
-status:     in-progress:review-r1:t7.46-rev-r1@86c9acda5fc1a6e97ca41f07a06a24018b6e774c
+status:     in-progress:remediate-r1:t7.46-rem-r1
 ```
 T7.44 round 1 recorded an out of scope H finding. `wordJSON` has
 no speaker field and `wordsOf` drops `EditWord.Speaker`, so the
