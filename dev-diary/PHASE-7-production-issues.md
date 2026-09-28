@@ -1808,7 +1808,7 @@ requires:   T7.40
 fixture-ok: yes
 size:       XS · mid
 owns:       web/src/routes/record/+page.svelte, web/tests/start-gesture.spec.ts
-status:     in-progress:land:t7.62-impl@57e545bc9169df533f4e2698b023d6476bd2f802
+status:     done:76c4a27
 ```
 **Defect.** The record page is prerendered, so the Start button renders enabled before the page's
 script runs. The click handler is attached later, inside `$effect`, through
@@ -1921,7 +1921,7 @@ owns:       config/reprise.box.toml, config/reprise.local.toml, internal/setting
              internal/editorial/run_test.go, internal/cover/cover.go, internal/cover/cover_test.go,
              cmd/reprise/main.go, cmd/reprise/finish.go, cmd/reprise/main_test.go,
              cmd/reprise/boot_test.go
-status:     in-progress:land:t7.66-rem-r1@74c95f0350a27d2d2241dd5f0c71ae661bc2c211
+status:     done:c8e7f74
 ```
 **Findings.** A probe on 2026-09-28 used the project's own service account against Vertex.
 
@@ -1995,6 +1995,23 @@ the next deploy. The service account needs no new role, because the probe ran on
 
 ### What exists now
 
+T7.66 landed at c8e7f74 after round 2 APPROVE with zero residue.
+Editorial runs on 3.8 Flash at global with two-sided pricing
+booked at the measured rate, and covers draw with the image
+model at the flat price. The tree matches reviewed commit
+74c95f0. Main had moved, so the landing rebased. Race tests on
+editorial, settings, and cover passed on the rebased commit.
+The live probe still names the old model. T7.67 owns that.
+T7.62 landed at 76c4a27 after round 1 APPROVE with zero
+findings. The record Start button binds in markup and stays
+disabled until the controller exists. The tree matches reviewed
+commit 57e545b. Main had moved, so the landing rebased. The
+landing check ran under a box load average above 30 with
+renderer stalls; the button resolved enabled in every run and
+the reviewer proved 20 of 20 plus the mutation on the reviewed
+code, so CI judges both the Chromium repeat and the WebKit
+twenty. Husk worktree dirs with root-owned Playwright output
+need `sudo rm -rf`; future image runs should pass `--user`.
 T7.63 landed at 578409f after round 1 APPROVE with zero findings.
 The gate holds each silenced step's output and prints it only
 on failure, with verdicts unchanged. The tree matches reviewed
