@@ -43,11 +43,6 @@
 		if (params['mock'] === '1') {
 			exposeStemsMock(completionDriver, () => controller.harness());
 		}
-		const startButton = document.getElementById('record-start');
-		const onStart = () => {
-			void controller.start();
-		};
-		startButton?.addEventListener('click', onStart);
 		// The live section renders after the take opens, so the mount time
 		// tree holds no end button yet. The document listener below reaches
 		// the live rendered end control and the warn button alike. A native
@@ -73,7 +68,6 @@
 			{ signal: clicks.signal }
 		);
 		return () => {
-			startButton?.removeEventListener('click', onStart);
 			clicks.abort();
 			activeController = null;
 			controller.destroy();
@@ -102,7 +96,12 @@
 						: 'the host greets you once the session opens.'}
 				</li>
 			</ul>
-			<button id="record-start" disabled={snap.phase !== 'preflight'} aria-label="Start session">
+			<button
+				id="record-start"
+				disabled={activeController === null || snap.phase !== 'preflight'}
+				onclick={() => void activeController?.start()}
+				aria-label="Start session"
+			>
 				{snap.phase === 'starting' ? 'Opening…' : 'Start session'}
 			</button>
 		</section>
