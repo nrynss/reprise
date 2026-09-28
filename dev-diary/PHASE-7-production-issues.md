@@ -1199,7 +1199,7 @@ requires:   T7.44
 fixture-ok: yes
 size:       XS · light
 owns:       internal/api/episodes.go, internal/api/episodes_speaker_test.go
-status:     in-progress:land:t7.46-rem-r1@01fefacd340bb2ecf5dc44a462b562751f6ab1fe
+status:     done:2ed5441
 ```
 T7.44 round 1 recorded an out of scope H finding. `wordJSON` has
 no speaker field and `wordsOf` drops `EditWord.Speaker`, so the
@@ -1233,6 +1233,13 @@ field on the wire fails that test.
 
 ### What exists now
 
+T7.46 landed at 2ed5441 after round 2 APPROVE with zero residue.
+Round 1 had one M finding. The speaker forward shipped with no
+pinning test. The landed pass adds the detail endpoint pin on
+both word lists. The api diff matches reviewed commit 01fefac.
+Main had moved, so the landing rebased. Race tests on the api
+package passed on the rebased commit. The speaker now travels
+from the stored column to the editor.
 T7.44 landed at 2c11452 after round 2 APPROVE with zero residue.
 Round 1 had two H findings. The ledger pin ignored the new
 speaker migration and the editorial loader never read the
