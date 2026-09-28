@@ -2125,6 +2125,54 @@ budget.
 **Done when:** The tests pass, and the gate passes in a fresh worktree. Setting the processing
 interval back to every tick fails the first test.
 
+### T7.71: The take pauses while End asks for confirmation
+```yaml
+requires:   T7.40, T7.62
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/take.ts, web/src/lib/voice/take.test.ts,
+             web/src/routes/record/end-control.spec.ts
+status:     not-started
+```
+**Defect.** In the T6.4b round 3 takes on 2026-09-28, the owner pressed End and the take kept
+running while the confirmation showed. The clock kept counting, the host could keep talking, and
+the mic kept streaming to the provider. The owner ruled that the take pauses while End asks.
+
+`endControl` in `web/src/lib/voice/record-state.ts` only sets `armed` and a notice on the first
+press. `publishUserBlock` keeps sending every mic block through `voice.sendAudio`.
+`handleHostAudio` keeps playing and storing host audio. The clock timer keeps writing
+`formatElapsed(context.currentTime, takeStart)`.
+
+**Change.**
+1. **Clock.** Add an exported pure function in `web/src/lib/voice/take.ts`:
+   `elapsedSeconds(now, start, pausedTotal, pausedSince)`. It returns
+   `max(0, floor((pausedSince ?? now) - start - pausedTotal))`. The first End press records
+   `pausedSince = context.currentTime`. Cancel adds `currentTime - pausedSince` to `pausedTotal`
+   and clears `pausedSince`. The clock timer renders through it, so the display freezes while paused.
+2. **Mic.** While paused, `publishUserBlock` sends a block of zeros of the same length to the
+   socket, and appends the same zeros to the user stem. The provider connection stays alive. The
+   user stem stays on the same clock as the host stem and the provider recording. Nothing said
+   during the pause reaches the host or the episode.
+3. **Host.** On the first End press, cut any reply that is playing. Reuse `flushHostStem`, which
+   stores the played head and marks the reply interrupted. While paused, `handleHostAudio` drops
+   incoming host audio, so it neither plays nor reaches the stem.
+4. **Resume.** Cancel clears the pause. Mic blocks and host audio flow again, and the notice
+   returns to "On air. The host hears you." Confirm ends the take as today.
+5. **Notice.** While paused, the notice reads "Paused. End this take? Cancel resumes it."
+6. The provider connection stays open during the pause, so those seconds still bill. Say so in
+   the handoff. Do not change the cap timer.
+
+**Tests.**
+* `take.test.ts`: `elapsedSeconds` with a pause of 10 s between 20 s and 30 s reads 20 at
+  `now = 30` while paused. After resume it reads 25 at `now = 35`.
+* `end-control.spec.ts`, in the mock record suite: after the first End press, the clock text does
+  not change across three clock ticks. The mock socket receives only zero samples while paused.
+  After Cancel the clock advances again from where it stopped. Read the clock from the mock
+  context, never from wall time.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. Sending the live mic block
+while paused fails the spec.
+
 ---
 
 ## Exit criteria
