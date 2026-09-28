@@ -30,6 +30,7 @@ import (
 	"github.com/nrynss/keel/erase"
 	"github.com/nrynss/keel/job"
 	"github.com/nrynss/keel/mediastore"
+	"github.com/nrynss/reprise/internal/assemblyai"
 )
 
 // eraseRef is the application key the erasure carries. It names every
@@ -388,6 +389,16 @@ func (t coverTarget) Delete(ctx context.Context) error {
 	return nil
 }
 
+// sessionEnder ends one provider voice session. It writes session.end on
+// a live socket before deleting the record. The provider session client
+// implements it. A missing socket still deletes, and a repeated end does
+// not open a new socket. The sweep ends through this same call, so erase
+// and the sweep share one end.
+type sessionEnder interface {
+	// EndSession ends the provider session for a provider session id.
+	EndSession(ctx context.Context, sessionID string) (assemblyai.TerminateResult, error)
+}
+
 // sessionTarget deletes the provider voice session. An already ended
 // session reports success without a delete, which counts as confirmed.
 type sessionTarget struct {
@@ -398,8 +409,17 @@ type sessionTarget struct {
 // Name identifies the target in progress reports.
 func (t sessionTarget) Name() string { return "session" }
 
-// Delete ends the provider session for the erased episode.
+// Delete ends the provider session for the erased episode. The end writes
+// session.end on a live socket before the delete, so a connected socket
+// never stays billable past the erasure. A client without that end keeps
+// the plain delete, so scripted doubles still erase.
 func (t sessionTarget) Delete(ctx context.Context) error {
+	if ender, ok := t.svc.sessions.(sessionEnder); ok {
+		if _, err := ender.EndSession(ctx, t.ref.Session); err != nil {
+			return fmt.Errorf("privacy: erase session: %w", err)
+		}
+		return nil
+	}
 	if _, err := t.svc.sessions.TerminateSession(ctx, t.ref.Session); err != nil {
 		return fmt.Errorf("privacy: erase session: %w", err)
 	}

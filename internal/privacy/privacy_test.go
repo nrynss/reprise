@@ -40,8 +40,31 @@ type sessionDouble struct {
 	deleted map[string]bool
 }
 
-// TerminateSession records the call and ends the session.
+// TerminateSession records the call and ends the session. Erase prefers
+// the shared end below when the client offers it, so this path runs only
+// for callers that never learned it.
 func (d *sessionDouble) TerminateSession(ctx context.Context, sessionID string) (assemblyai.TerminateResult, error) {
+	if d.block != nil {
+		select {
+		case <-d.block:
+		case <-ctx.Done():
+			return assemblyai.TerminateResult{}, ctx.Err()
+		}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.calls = append(d.calls, sessionID)
+	if d.deleted == nil {
+		d.deleted = map[string]bool{}
+	}
+	d.deleted[sessionID] = true
+	return assemblyai.TerminateResult{Deleted: true}, nil
+}
+
+// EndSession records the call and ends the session through the shared
+// end. The double holds no socket, so no frame goes out and the delete
+// still lands. Erase takes this path whenever the client offers it.
+func (d *sessionDouble) EndSession(ctx context.Context, sessionID string) (assemblyai.TerminateResult, error) {
 	if d.block != nil {
 		select {
 		case <-d.block:
@@ -145,6 +168,17 @@ type fixture struct {
 // with real visibility.
 func openFixture(t *testing.T) *fixture {
 	t.Helper()
+	sessions := &sessionDouble{}
+	fx := openFixtureOn(t, sessions)
+	fx.sessions = sessions
+	return fx
+}
+
+// openFixtureOn builds the same diary over sessions, so an erase can run
+// against a live provider client while the seeded rows stay the same.
+// Callers that need the scripted double keep using openFixture.
+func openFixtureOn(t *testing.T, sessions privacy.SessionClient) *fixture {
+	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "diary.db")
 	db, err := sqlite.Open(t.Context(), sqlite.Config{
@@ -202,7 +236,7 @@ func openFixture(t *testing.T) *fixture {
 		DB:          db,
 		Media:       media,
 		CoverDir:    coverDir,
-		Sessions:    fx.sessions,
+		Sessions:    sessions,
 		Transcripts: fx.transcript,
 		Owns:        ownsFunc(func(ctx context.Context, ownerID string) bool { return ownerID == fx.current }),
 	})
