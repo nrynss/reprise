@@ -105,6 +105,10 @@
 	<p role="status" aria-label="Applied cuts">{snap.appliedCount} cuts applied</p>
 	<p role="status">{snap.notice}</p>
 
+	{#if !snap.ready && snap.loadError}
+		<button onclick={() => controller?.retry()}>Retry</button>
+	{/if}
+
 	{#if snap.ready}
 		<section aria-label="Draft playback">
 			<h2>Playback</h2>

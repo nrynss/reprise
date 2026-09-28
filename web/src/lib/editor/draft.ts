@@ -51,6 +51,7 @@ export interface CutCard {
 export interface DraftSnapshot {
 	ready: boolean;
 	notice: string;
+	loadError: string | null;
 	episodeLabel: string;
 	title: string;
 	words: EditWord[];
@@ -91,6 +92,7 @@ export function emptyDraft(episodeId: string): DraftSnapshot {
 	return {
 		ready: false,
 		notice: 'Loading the draft.',
+		loadError: null,
 		episodeLabel: `Episode ${episodeId}`,
 		title: '',
 		words: [],
@@ -140,6 +142,27 @@ export function queryValue(search: string, name: string): string | null {
 		if (key === name) return value;
 	}
 	return null;
+}
+
+// Seconds the server asks to wait before the one automatic retry. Reads
+// the Retry-After header by iterating entries, capped at a minute. A
+// missing or unreadable value waits nothing.
+function retryAfterSeconds(headers: Headers): number {
+	let seconds = 0;
+	for (const [name, value] of headers) {
+		if (name.toLowerCase() !== 'retry-after') continue;
+		const parsed = Number.parseInt(value, 10);
+		if (Number.isFinite(parsed)) seconds = Math.max(0, parsed);
+	}
+	return Math.min(seconds, 60);
+}
+
+// Wait a whole number of seconds. The rate limit names the pause, so the
+// caller honors it instead of polling.
+function waitSeconds(seconds: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, Math.max(0, seconds) * 1000);
+	});
 }
 
 // Fixture proposal ids follow one pattern: prop-<cut id> for cuts, and
@@ -312,6 +335,26 @@ export class DraftController {
 		this.player.pause();
 	}
 
+	// Retry the backend read after a refusal. The screen offers this
+	// control, so a refused episode never reads as owned content.
+	retry(): void {
+		this.snap = { ...this.snap, loadError: null, notice: 'Loading the draft.' };
+		this.emit();
+		void this.loadFromBackend();
+	}
+
+	// Park a refused or failed read. The draft stays unready with the
+	// failure named, and no invented words ever stand in for the episode.
+	private failLoad(detail: string): void {
+		this.snap = {
+			...this.snap,
+			ready: false,
+			loadError: detail,
+			notice: `This episode did not load (${detail}).`
+		};
+		this.emit();
+	}
+
 	private emit(): void {
 		this.onChange(this.snap);
 	}
@@ -343,13 +386,29 @@ export class DraftController {
 	}
 
 	private async loadFromBackend(): Promise<void> {
+		let response: Response | null;
+		try {
+			response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`);
+			if (response.status === 429) {
+				await waitSeconds(retryAfterSeconds(response.headers));
+				response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`);
+			}
+		} catch {
+			response = null;
+		}
+		if (response === null) {
+			this.failLoad('no answer');
+			return;
+		}
+		if (!response.ok) {
+			this.failLoad(`status ${response.status}`);
+			return;
+		}
 		let stored: StoredDraft;
 		try {
-			const response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`);
-			if (!response.ok) throw new Error(`episode ${response.status}`);
 			stored = readStoredDraft(await response.json(), this.episodeId);
 		} catch {
-			this.loadFromFixture('The episode endpoint refused, so this is the scripted draft.');
+			this.failLoad(`status ${response.status}`);
 			return;
 		}
 		const words = stored.words;
@@ -465,6 +524,7 @@ export class DraftController {
 			...this.snap,
 			ready: true,
 			notice: args.notice,
+			loadError: null,
 			title: args.title,
 			episodeLabel: `Episode ${this.episodeId} · draft`,
 			words: args.words,

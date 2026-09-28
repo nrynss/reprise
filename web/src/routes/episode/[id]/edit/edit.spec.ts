@@ -272,3 +272,37 @@ test('the screen passes both gates', async ({ page }) => {
 		timeout: 20_000
 	});
 });
+
+test('a refused live draft shows Retry and no scripted title', async ({ page }) => {
+	let calls = 0;
+	await page.route(
+		(url) => url.pathname === '/api/episodes/live-500',
+		(route) => {
+			calls += 1;
+			if (calls === 1) return route.fulfill({ status: 500, body: 'nope' });
+			return route.fulfill({
+				json: {
+					episode: {
+						id: 'live-500',
+						number: 9,
+						title: 'Live take',
+						state: 'draft',
+						visibility: 'private'
+					},
+					proposals: [],
+					words: [{ text: 'Hello', start: 0, end: 0.4 }],
+					audio_url: '',
+					render_audio_url: ''
+				}
+			});
+		}
+	);
+	await page.goto('/episode/live-500/edit');
+	await expect(page.getByText('This episode did not load')).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+	await expect(
+		page.getByRole('heading', { name: 'The only place nobody needs anything' })
+	).toHaveCount(0);
+	await page.getByRole('button', { name: 'Retry' }).click();
+	await expect(page.getByRole('heading', { name: 'Live take' })).toBeVisible();
+});

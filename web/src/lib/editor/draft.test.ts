@@ -165,17 +165,107 @@ describe('draft controller', () => {
 		expect(queryValue('', 'fixture')).toBeNull();
 	});
 
-	it('falls back to the scripted draft when the backend refuses', async () => {
-		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('no backend')));
-		const snaps: DraftSnapshot[] = [];
-		const controller = new DraftController({ episodeId: 'draft-1', onChange: (snap) => snaps.push(snap) });
-		controller.mount('?fixture=0');
-		await vi.waitFor(() => {
-			expect(controller.snapshot.ready).toBe(true);
-		});
-		expect(controller.snapshot.appliedCount).toBe(3);
-		expect(controller.snapshot.notice).toContain('scripted draft');
-		vi.unstubAllGlobals();
+	it('leaves a refused live load unready with the failure named', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 500 })));
+		try {
+			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.notice).toContain('This episode did not load');
+			});
+			const snap = controller.snapshot;
+			expect(snap.ready).toBe(false);
+			expect(snap.words).toEqual([]);
+			expect(snap.title).toBe('');
+			expect(snap.appliedCount).toBe(0);
+			expect(snap.notice).toContain('500');
+			expect(snap.loadError).not.toBeNull();
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('retries the live load on demand after a refusal', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('nope', { status: 500 }))
+			.mockResolvedValueOnce(
+				Response.json({
+					episode: {
+						id: 'live-1',
+						number: 2,
+						title: 'Live take',
+						state: 'draft',
+						visibility: 'private'
+					},
+					proposals: [],
+					words: [{ text: 'Hello', start: 0, end: 0.4 }],
+					audio_url: '',
+					render_audio_url: ''
+				})
+			);
+		vi.stubGlobal('fetch', fetchMock);
+		try {
+			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.notice).toContain('This episode did not load');
+			});
+			expect(controller.snapshot.ready).toBe(false);
+			controller.retry();
+			await vi.waitFor(() => {
+				expect(controller.snapshot.ready).toBe(true);
+			});
+			expect(controller.snapshot.title).toBe('Live take');
+			expect(controller.snapshot.words.map((word) => word.text)).toEqual(['Hello']);
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('waits out a rate limit once and then loads the live draft', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi
+				.fn()
+				.mockResolvedValueOnce(
+					new Response('slow down', { status: 429, headers: { 'Retry-After': '1' } })
+				)
+				.mockResolvedValueOnce(
+					Response.json({
+						episode: {
+							id: 'live-1',
+							number: 2,
+							title: 'Live take',
+							state: 'draft',
+							visibility: 'private'
+						},
+						proposals: [],
+						words: [{ text: 'Hello', start: 0, end: 0.4 }],
+						audio_url: '',
+						render_audio_url: ''
+					})
+				)
+		);
+		try {
+			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(
+				() => {
+					expect(controller.snapshot.ready).toBe(true);
+				},
+				{ timeout: 10_000 }
+			);
+			expect(controller.snapshot.title).toBe('Live take');
+			expect(controller.snapshot.words.map((word) => word.text)).toEqual(['Hello']);
+			expect(controller.snapshot.notice).not.toContain('did not load');
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 
 	it('loads stored words and the stem address instead of the scripted sample', async () => {
