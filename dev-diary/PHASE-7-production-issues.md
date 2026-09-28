@@ -2270,6 +2270,10 @@ nothing that looked draggable. A drag on it still seeked. Two causes, both in th
    once, and never blocks playback.
 3. **Affordance.** Give the canvas `cursor: pointer`, and `cursor: grabbing` while a drag holds the
    pointer. Show a visible focus ring for keyboard users. Keep its slider role and aria values.
+4. **The episode page's seekbar.** The owner likes the player on the episode page. Under the
+   waveform, add the same native `<input type="range">` seekbar, with its `accent-color`
+   styling, and the same "Back 15" button, both as in `web/src/routes/episode/[id]/+page.svelte`.
+   Bind them to `controller.seekTo`. The range and the waveform show the same position.
 
 **Tests.**
 * `draft.test.ts`: a live controller whose fetch returns a short WAV ends with `peaks` set. One
@@ -2322,6 +2326,46 @@ The fixture path skips `followRender`, which is why no spec caught it.
 
 **Done when:** The tests pass in Chromium and Firefox, and the gate passes in a fresh worktree.
 Removing the runner from `attach` fails the first test.
+
+### T7.75: The first Play press plays
+```yaml
+requires:   T7.73
+fixture-ok: yes
+size:       S · frontier
+owns:       web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts,
+             web/src/routes/welcome/welcome.ts, web/src/lib/editor/draft.test.ts,
+             web/src/routes/threads/threads.test.ts
+status:     not-started
+```
+**Defect.** In real Chrome on 2026-09-28, the owner's first Play press on a draft always showed
+"Playback refused. Press play again after a gesture." The second press played. The episode page
+and the welcome teaser share the same path. `DraftController.togglePlay`
+(`web/src/lib/editor/draft.ts`), the episode controller in `web/src/routes/threads/threads.ts` and
+`welcome.ts` all await `AudioPlayer.play()` from `@nrynss/chaaya`. On the first call, that
+primes the element with a silent clip, then loads and plays the real source. It returns `false`
+and swallows the browser's rejection, so nobody can see why.
+
+It did not reproduce in the Playwright image, where Chromium's autoplay policy is relaxed, with
+the audio served over HTTP as WAV or as Ogg Opus. Chaaya gap: https://github.com/nrynss/chaaya/issues/8
+asks for the rejection to be exposed.
+
+**Change.**
+1. In all three controllers, when the first `play()` returns false, call it once more straight
+   away, still inside the same gesture's task. Show the refusal notice only when the retry also
+   fails.
+2. Once Chaaya exposes the rejection (issue 8), log its `name` and `message` with the refusal.
+   Until then, log `refused on first play, retried` once per page.
+3. Record in the handoff what the owner sees on the next live Chrome take. If the retry does not
+   cure it, open a follow-up with the logged reason.
+
+**Tests.**
+* `draft.test.ts`: a player whose `play` resolves false once, then true, leaves `playing` true and
+  no refusal notice after one `togglePlay`. One that stays false shows the notice after exactly
+  two calls.
+* `threads.test.ts`: the same pair for the episode controller.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. Removing the retry fails the
+first test in each file.
 
 ---
 
