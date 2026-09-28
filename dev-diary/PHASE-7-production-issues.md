@@ -1693,7 +1693,7 @@ size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/edit.playwright.config.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts, web/src/lib/editor/draft.ts,
              web/src/routes/episode/[id]/edit/+page.svelte, .github/workflows/ci.yml
-status:     in-progress:review-r1:t7.58-rev-r1@0dd823a5c528a37f15e2729c1dcc23433d96e337
+status:     in-progress:land:t7.58-impl@0dd823a5c528a37f15e2729c1dcc23433d96e337
 ```
 **Defect.** In T6.4b round 2 the owner reverted both cuts on the Firefox draft. Play and the
 slider then stopped answering until a reload. T7.52 could not reproduce it, because every editor
@@ -1712,6 +1712,31 @@ only `chromium webkit` (`.github/workflows/ci.yml`, the `npx playwright install`
 
 **Done when:** The editor suite passes in both projects, and the gate passes in a fresh worktree
 three times in a row. The review file records the three exit codes, because the gate changed.
+
+### T7.60: The record repeat-completion spec flakes under suite load
+```yaml
+requires:   T7.40
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/record/stems-complete.spec.ts
+status:     not-started
+```
+T7.58 round 1 recorded an out of scope M finding. `a repeat
+completion reports the standing outcome` fails under full-suite
+load (27 passed, 1 failed in one 45.6 s run) and passes alone
+in 1.7 s and at file scope 4/4, so a suite-load flake or a real
+ordering defect, cause unattributed.
+
+* Reproduce under repetition first. Name the losing
+  interleaving with a failing pin before changing anything.
+* Fix the synchronization, not the timeout. No sleeps added, no
+  wall-clock threshold widened. Quarantine with `test.fixme`
+  only if the defect sits in a library, with the reason stating
+  the defect.
+
+**Done when:** The mock record suite passes twenty consecutive
+runs, and the gate passes three consecutive full runs in a fresh
+worktree.
 
 ### T7.59: The transcript stops waiting for host words after a minute
 ```yaml
