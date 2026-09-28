@@ -1987,7 +1987,7 @@ size:       M · frontier
 owns:       internal/broker/reconcile.go, internal/broker/reconcile_test.go,
              internal/broker/sweep.go, internal/broker/sweep_test.go, internal/broker/end_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.68-impl@7707217aef32920f54142b3a867ba1d970b6844c
+status:     done:e394372
 ```
 **Defect.** Both live takes on 2026-09-28 at 18:26 and 18:28 UTC, on `a0a9339`, settled within
 seconds of End. Chrome settled 40 seconds and Firefox 40, against owner timers of 41 and 39. Both
@@ -2189,6 +2189,14 @@ while paused fails the spec.
 
 ### What exists now
 
+T7.68 landed at e394372 after round 1 APPROVE with zero findings.
+The reconcile waits out late artifact links, keeps the provider
+record behind a pending flag until both artifacts store, and
+lets the sweep finish the fetch without settling twice. The
+tree matches reviewed commit 7707217. Main had moved, so the
+landing rebased. Race tests on broker and cmd/reprise passed on
+the rebased commit. The next live take should quote the link
+timing line from the box log.
 T7.70 landed at bd5a25a after round 1 APPROVE with zero findings.
 Episode detail reads run on a 3 second budget and 429s pause
 instead of failing. The tree matches reviewed commit b3a734b.
