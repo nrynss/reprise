@@ -1768,48 +1768,37 @@ host replies. Neither test asserts a wall-clock duration.
 **Done when:** The tests pass under `go test -race`, and the gate passes in a fresh worktree.
 Removing the bound makes the first test hang, and the test's own context timeout fails it.
 
-### T7.61: The draft knows it is playing in Firefox
+### T7.61: Quarantine the Firefox play-state specs behind the Chaaya defect
 ```yaml
 requires:   T7.58
 fixture-ok: yes
-size:       S · frontier
-owns:       web/src/lib/editor/draft.ts, web/src/routes/episode/[id]/edit/+page.svelte,
-             web/src/routes/episode/[id]/edit/edit.spec.ts, web/src/lib/editor/draft.test.ts
+size:       XS · light
+owns:       web/src/routes/episode/[id]/edit/edit.spec.ts
 status:     not-started
 ```
-**Defect.** In Firefox the draft plays, but the page never learns it is playing. The button keeps
-reading "Play draft", so the owner cannot pause, and a second press only calls play again. The
-owner hit this on the Firefox draft in T6.4b round 2. It is the dead Play that T7.52 and T7.58
-could not reproduce.
+**Defect.** Three Firefox specs that T7.58 added fail on every CI run since it landed:
+`revert a cut, then play and seek still answer`, `revert every cut, then play and drag still
+answer`, and `revert the live cut, then play and drag still answer`. Each one waits for the
+"Pause draft" button and never finds it.
 
-A probe on 2026-09-28 ran the fixture draft in `mcr.microsoft.com/playwright:v1.63.0-noble`, the
-CI image. It pressed Play with no revert. The position advanced in both browsers. Chromium's button
-then read "Pause draft", and Firefox's still read "Play draft". The three Firefox specs T7.58 added
-fail the same way in CI, at `getByRole('button', { name: 'Pause draft' })`. T7.58 landed while
-CI was red on them.
+A probe on 2026-09-28 found the cause in the CI image, `mcr.microsoft.com/playwright:v1.63.0-noble`.
+That container has no audio output device. About 40 ms after `playing`, Firefox fires an `error`
+event with code 3 and the message `OnMediaSinkAudioError`. The element keeps playing. Chaaya
+0.2.1's `AudioPlayer` then sets `playing = false` and reports a decode failure. The page reads
+that flag, so the button stays on "Play draft". The same happens with no revert at all.
 
-**Suspected cause, unproven.** The page reads `controller.player.playing` from the Chaaya
-`AudioPlayer` (`@nrynss/chaaya` 0.2.1, `src/lib/audio/playback/player.svelte.ts`). That flag
-follows the element's `play` and `pause` events. The first play runs `unlock()`, whose `#prime`
-plays a silent clip and then calls `pause()`. If Firefox delivers that `pause` event after the
-real `play` event, `playing` ends false while audio runs.
+This is a Chaaya defect, filed as https://github.com/nrynss/chaaya/issues/7. It is fixed in Chaaya,
+not here. Reprise adds no workaround.
 
-**Change.**
-1. Add a Firefox spec that presses Play with no revert and expects "Pause draft". It must fail
-   on `main` in the CI image. Run it with
-   `docker run --rm --ipc=host -v "$PWD":/w -w /w/web mcr.microsoft.com/playwright:v1.63.0-noble`,
-   because WebKit and some Firefox builds do not launch on the workstation.
-2. Confirm or refute the event order above. Log the element events through a spec init script,
-   and write the finding in the handoff.
-3. If Chaaya is at fault, write the smallest reproduction in Chaaya's own terms in the handoff.
-   The orchestrator files it on `nrynss/chaaya`. Work around it in `draft.ts`. Either call
-   `player.unlock()` once in the first gesture before any real play, or drive the button from a
-   state the controller sets when `play()` resolves true and clears on pause, end and error.
-   Keep the workaround small, and name the issue URL beside it once filed.
-4. Keep the three T7.58 revert specs. They must pass in Firefox once the state is right.
+**Change.** Mark those three specs `test.fixme` for the Firefox project only, with
+`test.fixme(browserName === 'firefox', '...')`. The reason names the defect and the issue URL. The
+Chromium runs of the same specs stay live, and every other Firefox spec stays live.
 
-**Done when:** The whole editor suite passes in Chromium and Firefox in the CI image, three runs in
-a row. The review file records the three exit codes. Removing the workaround fails the new spec.
+**Done when:** The editor suite passes in both projects in the CI image. The gate passes in a
+fresh worktree. T7.64 owns lifting the quarantine.
+
+**Note.** This does not explain the owner's own Firefox report, made on a machine with speakers.
+The next live session repeats that check by hand.
 
 ### T7.62: Start answers the first tap
 ```yaml
@@ -1861,6 +1850,21 @@ discards output with `>/dev/null`.
 **Done when:** A deliberately broken spec in a scratch branch makes the gate print that spec's
 name and error. The gate passes in a fresh worktree three times in a row, and the review file
 records the three exit codes.
+
+### T7.64: Take the Chaaya AudioPlayer fix and lift the Firefox quarantine
+```yaml
+requires:   T7.61
+fixture-ok: yes
+size:       XS · light
+owns:       web/package.json, web/package-lock.json, web/src/routes/episode/[id]/edit/edit.spec.ts
+status:     blocked:waits for a Chaaya release that closes https://github.com/nrynss/chaaya/issues/7
+```
+Once Chaaya publishes the release that fixes issue 7, pin `@nrynss/chaaya` to that exact version
+in `web/package.json` and refresh the lock file. Remove the three `test.fixme` lines T7.61 added.
+The orchestrator updates the Chaaya version in `dev-diary/libraries.md` at landing.
+
+**Done when:** The three specs pass in Firefox in the CI image, three runs in a row. The gate passes
+in a fresh worktree three times in a row, and the review file records the exit codes.
 
 ---
 
