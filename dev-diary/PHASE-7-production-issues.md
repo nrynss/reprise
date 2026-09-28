@@ -1047,7 +1047,7 @@ requires:   T7.36
 fixture-ok: yes
 size:       L · frontier
 owns:       web/src/routes/processing/, web/src/lib/voice/processing-state.ts, web/src/lib/voice/record-state.ts, web/src/routes/record/
-status:     in-progress:land:t7.40-rem-r2@7623334f82d5c9a4afac7757580fa247a51044a7
+status:     done:a0570e8
 ```
 The live handoff to `/processing` carries no job ids. So transcription
 and the editorial pass read "Waiting" forever, while the draft reads
@@ -1208,6 +1208,16 @@ the delete. Calling `TerminateSession` again fails that test.
 
 ### What exists now
 
+T7.40 landed at a0570e8 after round 3 APPROVE with zero residue.
+Round 2 had two H findings. A reload after the draft was ready
+rebuilt the upload as waiting with the episode link gone, and an
+unlanded draft move was never reposted. The landed pass rebuilds
+the finished upload from the address pair when the store is empty
+and reposts it through the handoff path. The web tree matches
+reviewed commit 7623334. Main had moved, so the landing rebased.
+The processing-state unit pin passed on the rebased commit. End
+asks the guest to confirm, the processing screen follows the
+upload and both jobs, and links on once the draft is ready.
 T7.39 landed at 2f9e55c after round 3 APPROVE with zero residue.
 Round 1 had two H findings. A second pass could store another
 private recording. Round 2 had one C. A crash after the file was
