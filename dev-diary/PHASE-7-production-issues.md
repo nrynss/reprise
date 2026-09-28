@@ -2452,7 +2452,7 @@ owns:       web/src/lib/components/GalleryLink.svelte, web/src/lib/components/Ga
              web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
              web/src/routes/episode/[id]/+page.svelte, web/src/routes/episode/[id]/edit/+page.svelte,
              web/src/routes/record/confirm-processing.spec.ts, web/src/routes/record/gallery-link.spec.ts
-status:     in-progress:review-r1:t7.77-rev-r1@8e9e4669520ee268b791b5711bf36b7fc6656f9e
+status:     in-progress:land:t7.77-impl@8e9e4669520ee268b791b5711bf36b7fc6656f9e
 ```
 **Defect.** On 2026-09-28 the owner noted that "Back to the gallery" renders as a bare link, not as a
 button like the rest of the controls. Every page styles its own buttons, and none styles the way
