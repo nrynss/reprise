@@ -2405,6 +2405,39 @@ but no share path. So after a reload, a public episode shows "Public" with no li
 **Done when:** The tests pass, and the gate passes in a fresh worktree. Dropping `share_path` from
 the detail fails the first test.
 
+### T7.77: One styled way back to the gallery on every page
+```yaml
+requires:   T7.75
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/lib/components/GalleryLink.svelte, web/src/lib/components/GalleryLink.test.ts,
+             web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
+             web/src/routes/episode/[id]/+page.svelte, web/src/routes/episode/[id]/edit/+page.svelte
+status:     not-started
+```
+**Defect.** On 2026-09-28 the owner noted that "Back to the gallery" renders as a bare link, not as a
+button like the rest of the controls. Every page styles its own buttons, and none styles the way
+back. The editor (`edit/+page.svelte`), the episode page (twice, on its missing and refused views,
+plus "Gallery" in its nav), the record page ("Back to gallery") and the processing page ("Gallery")
+each write a plain `<a href={resolve('/')}>`, with four different labels.
+
+**Change.**
+1. Add `web/src/lib/components/GalleryLink.svelte`. It renders `<a href={resolve('/')}>` with the
+   fixed text "Back to the gallery" and a leading left arrow marked `aria-hidden="true"`. Style it
+   as a secondary pill: the episode page's button radius (`100px`) and padding
+   (`0.55rem 1.1rem`), `font-weight: 600`, a `1px solid var(--accent)` border, `var(--accent)`
+   text on a transparent background, and a visible `:focus-visible` ring. It stays a link, not a
+   `<button>`, so it keeps link semantics and middle-click.
+2. Replace every page's own back link with `<GalleryLink />`, at the top of `main`.
+3. Use Svelte 5 runes only.
+
+**Tests.** `GalleryLink.test.ts` renders the component, finds a link named "Back to the gallery"
+whose `href` resolves to `/`, and checks that it carries the component's class. The existing page
+specs that look up the old labels are updated to the one label.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. No route file still carries its
+own `href={resolve('/')}` back link.
+
 ---
 
 ## Exit criteria
