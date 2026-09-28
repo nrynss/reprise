@@ -2411,6 +2411,8 @@ requires:   T7.75
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/components/GalleryLink.svelte, web/src/lib/components/GalleryLink.test.ts,
+             web/src/lib/components/SeasonNav.svelte, web/src/routes/+page.svelte,
+             web/src/routes/threads/+page.svelte,
              web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
              web/src/routes/episode/[id]/+page.svelte, web/src/routes/episode/[id]/edit/+page.svelte
 status:     not-started
@@ -2429,7 +2431,14 @@ each write a plain `<a href={resolve('/')}>`, with four different labels.
    text on a transparent background, and a visible `:focus-visible` ring. It stays a link, not a
    `<button>`, so it keeps link semantics and middle-click.
 2. Replace every page's own back link with `<GalleryLink />`, at the top of `main`.
-3. Use Svelte 5 runes only.
+3. **Season nav.** The owner saw the same bare links in the Gallery and Threads nav:
+   `<a>Gallery</a>` and `<a>Threads</a>` in `web/src/routes/threads/+page.svelte`, and
+   "Record a new episode" and "Threads" in `web/src/routes/+page.svelte`. Add
+   `web/src/lib/components/SeasonNav.svelte`. It renders Gallery and Threads as a row of pill
+   tabs in the same style. The tab named by `aria-current="page"` is filled with
+   `var(--accent)`. Use it on both pages. "Record a new episode" becomes a primary pill, the
+   episode page's filled button style, because it is the main action.
+4. Use Svelte 5 runes only.
 
 **Tests.** `GalleryLink.test.ts` renders the component, finds a link named "Back to the gallery"
 whose `href` resolves to `/`, and checks that it carries the component's class. The existing page
@@ -2437,6 +2446,88 @@ specs that look up the old labels are updated to the one label.
 
 **Done when:** The tests pass, and the gate passes in a fresh worktree. No route file still carries its
 own `href={resolve('/')}` back link.
+
+### T7.79: The rate limits refill their burst every minute, not one request a minute
+```yaml
+requires:   T7.68
+fixture-ok: yes
+size:       XS · frontier
+owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
+status:     not-started
+```
+**Defect.** On 2026-09-28 at 19:53 UTC, `GET /api/episodes` answered 429 with `retry-after: 51`. The
+owner's gallery hung on "Loading the live season." Traefik logged only 25 episode requests in
+the three minutes before. Keel's `gate.Limit` reads "Every is the refill interval: one token per
+Every". `takeRule` in `cmd/reprise/main.go` sets `Every: takeRefill(name)`, which is `time.Minute`
+for every take route except uploads. So each route allows its burst once, then one request a
+minute: episodes 48, threads 32, media 48, the session mint 6, admin 16, stems completion 8. The
+comments beside these constants say the burst refills each minute. Media playback sends range
+requests, so a few seeks on a long episode would stall playback the same way. A container restart
+at 19:54 cleared the buckets for now.
+
+**Change.**
+1. In `takeRule`, set `Every` to `takeRefill(name) / time.Duration(burst)` for both `PerClient` and
+   `Global`, where Global uses its own burst of `16 * burst`. Each bucket then refills its whole
+   burst once a minute. Uploads keep `uploadRefill`, which is already per token.
+2. Rewrite the comments on `takeRefill` and the burst constants to say "burst per minute".
+3. Raise `takeMediaBurst` to 240 and `takeEpisodesBurst` to 120. Playback range requests and the
+   gallery's reads need that headroom. The binary test that replays the numbers follows.
+
+**Tests** in `main_test.go`.
+* A rule built by `takeRule("take-episodes", 120)` gives `PerClient.Every` equal to 500 ms.
+* A request loop against a gate with a fake clock drains the burst. It then advances the clock by
+  one minute and passes the full burst again. Use the gate's clock seam if Keel offers one.
+  Otherwise, assert the computed `Every` only.
+
+**Done when:** The tests pass under `go test -race`, and the gate passes in a fresh worktree. Setting
+`Every` back to `takeRefill(name)` fails the first test.
+
+### T7.78: Analysis asks for the people and topics that Threads is built from
+```yaml
+requires:   T7.79
+fixture-ok: yes
+size:       S · frontier
+owns:       internal/assemblyai/batch.go, internal/assemblyai/batch_test.go,
+             internal/assemblyai/batch_live_test.go, internal/analysis/run.go,
+             internal/analysis/run_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go
+status:     not-started
+```
+**Defect.** The Threads page read "Nothing threads yet" after several episodes about testing.
+Production holds 8 mentions, all of kind `callback` from the editorial pass. The one stored
+analysis has `entities = []` and `key_phrases = []`. The analysis design promises "one creation
+call asks for every feature at once" (`internal/analysis/provider.go`). But
+`batchTranscriber.Create` in `cmd/reprise/main.go` passes only the audio URL, and
+`assemblyai.createBody` (`internal/assemblyai/batch.go`) sends only `audio_url`, `speech_models`
+and `keyterms_prompt`. AssemblyAI is never asked for entities or key phrases, so no person or
+circled topic is ever stored.
+
+**Change.**
+1. Add `EntityDetection bool` and `AutoHighlights bool` to `assemblyai.CreateRequest`, and send
+   them as `entity_detection` and `auto_highlights` (omit when false). Both are documented for
+   `universal-3-5-pro`
+   (https://www.assemblyai.com/docs/speech-understanding/entity-detection and `/key-phrases`).
+2. Parse `entities` and `auto_highlights_result.results` from the transcript response into the
+   `Entities` and `Phrases` the analysis result already carries.
+3. `batchTranscriber.Create` sets both flags for the analysis pass only. The edit transcript pass
+   stays as it is.
+4. **Price them.** `analysis.Estimate` adds the entity detection and key phrase hourly rates to the
+   batch rate. Read the rates from https://www.assemblyai.com/pricing on the day, and cite the date
+   in the constant's comment.
+5. A live probe in `batch_live_test.go`, behind the `live` tag, transcribes a short generated
+   clip that names a person and repeats a topic. It checks that at least one entity and one key
+   phrase come back.
+
+**Tests.**
+* `batch_test.go`: the create body carries `"entity_detection":true` and `"auto_highlights":true`
+  when set, and neither key when unset. A scripted response with entities and highlights parses
+  into both slices.
+* `run_test.go`: a scripted analysis whose transcript carries a person entity stores a mention of
+  that kind.
+* `main_test.go`: the analysis adapter sets both flags, and the edit transcript adapter sets neither.
+
+**Done when:** The tests pass under `go test -race`, and the gate passes in a fresh worktree. The live
+probe returns entities and key phrases. Threads still needs two rendered episodes that share a
+name or a topic before a row forms. Say so in the handoff.
 
 ---
 
