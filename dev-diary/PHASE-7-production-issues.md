@@ -2380,7 +2380,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       internal/api/episodes.go, internal/api/playback_test.go, web/src/routes/threads/threads.ts,
              web/src/routes/threads/threads.test.ts, web/src/routes/episode/[id]/+page.svelte
-status:     in-progress:implement:t7.76-impl
+status:     in-progress:review-r1:t7.76-rev-r1@e4d849dc4414a8d7d251407a7cf2707ae03ce958
 ```
 **Defect.** On 2026-09-28 the owner published episode 10. The page showed only the notice "Public at
 /share/10770da2…. Only the finished audio opens behind it.", as plain text with a relative path.
