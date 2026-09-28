@@ -2132,7 +2132,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/take.ts, web/src/lib/voice/take.test.ts,
              web/src/routes/record/end-control.spec.ts
-status:     in-progress:land:t7.71-impl@6f351a03d4eb460976cbcbc94ad9d2db52314dab
+status:     done:201ebcc
 ```
 **Defect.** In the T6.4b round 3 takes on 2026-09-28, the owner pressed End and the take kept
 running while the confirmation showed. The clock kept counting, the host could keep talking, and
@@ -2189,6 +2189,12 @@ while paused fails the spec.
 
 ### What exists now
 
+T7.71 landed at 201ebcc after round 1 APPROVE with zero findings.
+The take pauses while End asks: frozen clock, silenced mic with
+stem zeros, dropped host audio, resume on Cancel. The tree
+matches reviewed commit 6f351a0. Main had moved, so the landing
+rebased. The take pin passed on the rebased commit. Pause
+seconds still bill; the cap timer is untouched.
 T7.69 landed at 1255b2d after round 1 APPROVE with zero findings.
 A refused episode read parks unready with Retry instead of the
 scripted draft. The tree matches reviewed commit da17dee. Main
