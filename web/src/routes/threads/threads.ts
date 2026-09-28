@@ -1417,6 +1417,10 @@ export interface EpisodeScreen {
 	position: number;
 	playing: boolean;
 	published: boolean;
+	// The share path while the episode is public, or empty otherwise.
+	// The detail answers it on load, publish sets it, and revoke clears
+	// it. The page shows the absolute address behind it as a link.
+	sharePath: string;
 	eraseArmed: boolean;
 	exporting: boolean;
 	activeWord: number | null;
@@ -1454,6 +1458,20 @@ export function publishLink(raw: string): string {
 		// An unreadable answer reads as a refusal at the call site.
 	}
 	return '';
+}
+
+// shareUrl is the absolute address behind one share path. The page shows
+// the full address so the link opens and copies as a URL. Without a
+// window, such as prerender, the path alone answers.
+export function shareUrl(path: string): string {
+	try {
+		if (typeof window !== 'undefined' && window.location?.origin) {
+			return `${window.location.origin}${path}`;
+		}
+	} catch {
+		// A denied location keeps the path form.
+	}
+	return path;
 }
 
 // The export bundle route behind one episode. The owner download reads
@@ -1510,6 +1528,7 @@ export function emptyScreen(id: string): EpisodeScreen {
 		position: 0,
 		playing: false,
 		published: false,
+		sharePath: '',
 		eraseArmed: false,
 		exporting: false,
 		activeWord: null,
@@ -1653,6 +1672,7 @@ export class EpisodeController {
 				...this.snap,
 				published: !revoked,
 				visibility: revoked ? 'private' : this.snap.visibility,
+				sharePath: revoked ? '' : this.snap.sharePath,
 				notice: revoked
 					? 'The link is revoked. The episode is private again.'
 					: 'The revoke refused, so the episode stays public. Retry the control.'
@@ -1672,10 +1692,31 @@ export class EpisodeController {
 			...this.snap,
 			published,
 			visibility: published ? 'public' : this.snap.visibility,
+			sharePath: published ? link : this.snap.sharePath,
 			notice: published
-				? `Public at ${link}. Only the finished audio opens behind it.`
+				? `Public at ${link}. Full address ${shareUrl(link)}. Only the finished audio opens behind it.`
 				: 'The publish refused, so the episode stays private. Retry the control.'
 		};
+		this.emit();
+	}
+
+	copyLink(): void {
+		void this.copyShareLink();
+	}
+
+	// Copy the absolute share address onto the clipboard. The Release
+	// section names this control, and the notice confirms the copy.
+	async copyShareLink(): Promise<void> {
+		const url = shareUrl(this.snap.sharePath);
+		try {
+			await navigator.clipboard.writeText(url);
+			this.snap = { ...this.snap, notice: 'Link copied.' };
+		} catch {
+			this.snap = {
+				...this.snap,
+				notice: 'The copy refused, so copy the link address by hand.'
+			};
+		}
 		this.emit();
 	}
 
@@ -1887,7 +1928,8 @@ export class EpisodeController {
 			momentWord,
 			momentQuote,
 			coveringId,
-			published: detail.episode.visibility === 'public'
+			published: detail.episode.visibility === 'public',
+			sharePath: detail.sharePath
 		};
 		this.emit();
 		this.expose(momentWord);
@@ -2017,7 +2059,8 @@ export interface LiveWord {
 // analysis stores them. The editorial outcome names the pass that stores
 // the proposals, or stays null until that pass starts. The render,
 // analysis and marking outcomes name the passes after mark done, each
-// null until its pass starts.
+// null until its pass starts. The share path is /share/<token> while the
+// episode is public, and empty otherwise.
 export interface LiveDetail {
 	episode: LiveEpisode;
 	proposals: LiveProposal[];
@@ -2030,6 +2073,7 @@ export interface LiveDetail {
 	renderOutcome: LiveOutcome | null;
 	analysisOutcome: LiveOutcome | null;
 	memoryOutcome: LiveOutcome | null;
+	sharePath: string;
 }
 
 // The silence the render lays between the cold open and the episode, and
@@ -2309,6 +2353,15 @@ function parseLiveWord(value: unknown): LiveWord | null {
 	};
 }
 
+// One share path as the detail answers it, or empty when the shape
+// drifts. Only a /share/ path answers, so a renamed backend field reads
+// as unpublished instead of rendering a dead link.
+function sharePathField(body: Record<string, unknown>): string {
+	const value = body['share_path'];
+	if (typeof value !== 'string' || !value.startsWith('/share/')) return '';
+	return value;
+}
+
 // One episode detail with its proposals, words, and playable addresses.
 export function parseEpisodeDetail(raw: string): LiveDetail {
 	let decoded: unknown;
@@ -2349,7 +2402,8 @@ export function parseEpisodeDetail(raw: string): LiveDetail {
 		editorialOutcome: parseLiveOutcome(decoded['editorial_outcome']),
 		renderOutcome: parseLiveOutcome(decoded['render_outcome']),
 		analysisOutcome: parseLiveOutcome(decoded['analysis_outcome']),
-		memoryOutcome: parseLiveOutcome(decoded['memory_outcome'])
+		memoryOutcome: parseLiveOutcome(decoded['memory_outcome']),
+		sharePath: sharePathField(decoded)
 	};
 }
 

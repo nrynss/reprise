@@ -102,6 +102,79 @@ func TestEpisodeDetailServesPreviewAddress(t *testing.T) {
 	}
 }
 
+// shareFixture wraps an episode store with fixed share tokens, so the
+// detail test pins the share path without opening the publish tables.
+type shareFixture struct {
+	episodeStore
+	tokens map[string]string
+}
+
+// ShareToken returns the fixed token for one episode, or empty when the
+// episode holds none.
+func (s shareFixture) ShareToken(_ context.Context, _, episodeID string) (string, error) {
+	return s.tokens[episodeID], nil
+}
+
+// TestEpisodeDetailCarriesSharePathWhilePublic requires the detail to
+// carry /share/<token> on a public episode and an empty share path on a
+// private one. A private episode keeps its rotated token hidden, because
+// the visibility check runs before the token read.
+func TestEpisodeDetailCarriesSharePathWhilePublic(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-public", owner.ID, 1, "ready")
+	seedEpisodeRow(t, db, "ep-private", owner.ID, 2, "ready")
+	if _, err := db.Writer().ExecContext(t.Context(),
+		"UPDATE episodes SET visibility = 'public', share_token = ? WHERE id = ?",
+		"token-1", "ep-public"); err != nil {
+		t.Fatalf("publish ep-public: %v", err)
+	}
+	if _, err := db.Writer().ExecContext(t.Context(),
+		"UPDATE episodes SET share_token = ? WHERE id = ?",
+		"token-2", "ep-private"); err != nil {
+		t.Fatalf("rotate ep-private: %v", err)
+	}
+
+	stack := newEpisodeService(t, db, nil)
+	handler := NewEpisodesWithShare(stack.svc, nil, shareFixture{
+		episodeStore: stack.svc,
+		tokens:       map[string]string{"ep-public": "token-1", "ep-private": "token-2"},
+	})
+	detail := func(id string) episodeDetailJSON {
+		t.Helper()
+		rec := serve(guests, handler, cookie, httptest.NewRequest(http.MethodGet, "/api/episodes/"+id, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("detail %s status = %d, want 200", id, rec.Code)
+		}
+		var body episodeDetailJSON
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("decode detail %s: %v", id, err)
+		}
+		return body
+	}
+
+	if got := detail("ep-public"); got.SharePath != "/share/token-1" {
+		t.Fatalf("public share path = %q, want /share/token-1", got.SharePath)
+	}
+	if got := detail("ep-private"); got.SharePath != "" {
+		t.Fatalf("private share path = %q, want empty", got.SharePath)
+	}
+
+	bare := NewEpisodes(stack.svc)
+	rec := serve(guests, bare, cookie, httptest.NewRequest(http.MethodGet, "/api/episodes/ep-public", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bare detail status = %d, want 200", rec.Code)
+	}
+	var decoded episodeDetailJSON
+	if err := json.NewDecoder(rec.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode bare detail: %v", err)
+	}
+	if decoded.SharePath != "" {
+		t.Fatalf("bare share path = %q, want empty with no token reader", decoded.SharePath)
+	}
+}
+
 // TestEpisodeDetailServesWordsStemAndRender stores edit words, both
 // stems, and two renders, and requires the detail to return word
 // seconds, the user stem address, and the newest render address. A

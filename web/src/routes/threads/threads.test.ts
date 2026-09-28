@@ -2,7 +2,14 @@
 // turns, the season must run newest first, and the job mark must
 // never move backwards.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// mount and unmount come from the client runtime by path. The bare
+// specifier resolves to the server build under vitest, which refuses to
+// mount. The relative path reaches the same client build the page ships.
+// The runtime ships no declaration file on this path.
+// @ts-expect-error: untyped client runtime path, typed as used below.
+import { mount, unmount } from '../../../node_modules/svelte/src/internal/client/render.js';
 import { activeWordAt } from '@nrynss/chaaya/transcript';
+import EpisodePage from '../episode/[id]/+page.svelte';
 import {
 	browserStore,
 	buildTone,
@@ -21,6 +28,7 @@ import {
 	installMockJob,
 	listSeason,
 	listThreads,
+	parseEpisodeDetail,
 	progressFrame,
 	progressPercent,
 	publishLink,
@@ -29,12 +37,19 @@ import {
 	quoteInTranscript,
 	readHighWater,
 	seasonHref,
+	shareUrl,
 	transcriptText,
 	writeHighWater,
 	type GallerySnapshot,
 	type SeasonRow,
 	type WaterStore
 } from './threads';
+
+vi.mock('$app/environment', () => ({ browser: true }));
+vi.mock('$app/paths', () => ({ resolve: (path: string) => path }));
+vi.mock('$app/state', () => ({
+	page: { params: { id: 'e9' }, url: new URL('http://localhost/episode/e9') }
+}));
 
 function memoryStore(): WaterStore {
 	const held: Record<string, string> = {};
@@ -832,5 +847,175 @@ describe('gallery refused season', () => {
 		expect(last?.rows).toHaveLength(1);
 		expect(last?.failed).toBe(false);
 		expect(last?.notice).not.toContain('refused');
+	});
+});
+
+describe('share link release', () => {
+	it('reads the share path only behind a public detail', () => {
+		const held = parseEpisodeDetail(
+			JSON.stringify({
+				episode: { id: 'e9', number: 9, title: 'Ninth real', state: 'ready', visibility: 'public' },
+				proposals: [],
+				words: [],
+				audio_url: '',
+				render_audio_url: '',
+				share_path: '/share/tok-9'
+			})
+		);
+		expect(held.sharePath).toBe('/share/tok-9');
+		const drifted = parseEpisodeDetail(
+			JSON.stringify({
+				episode: { id: 'e9', number: 9, title: 'Ninth real', state: 'ready', visibility: 'public' },
+				proposals: [],
+				words: [],
+				audio_url: '',
+				render_audio_url: '',
+				share_path: '/episode/e9'
+			})
+		);
+		expect(drifted.sharePath).toBe('');
+		const missing = parseEpisodeDetail(
+			JSON.stringify({
+				episode: { id: 'e9', number: 9, title: 'Ninth real', state: 'ready', visibility: 'private' },
+				proposals: [],
+				words: [],
+				audio_url: '',
+				render_audio_url: ''
+			})
+		);
+		expect(missing.sharePath).toBe('');
+	});
+
+	it('exposes the absolute share address behind one path', () => {
+		const url = shareUrl('/share/tok-9');
+		expect(url.endsWith('/share/tok-9')).toBe(true);
+	});
+
+	function stubPublicSeason(next: string | null): void {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				const method = init?.method ?? 'GET';
+				if (url.endsWith('/publish') && method === 'POST') {
+					return Response.json({ share_token: 'tok-2', share_path: next ?? '/share/tok-2' });
+				}
+				if (url.endsWith('/publish') && method === 'DELETE') {
+					return Response.json({ share_token: 'tok-3' });
+				}
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'e9', number: 9, title: 'Ninth real', state: 'ready', visibility: 'public' },
+					proposals: [],
+					words: [],
+					audio_url: '',
+					render_audio_url: '',
+					share_path: '/share/tok-9'
+				});
+			})
+		);
+	}
+
+	function stubClipboard(): string[] {
+		const written: string[] = [];
+		Object.defineProperty(window.navigator, 'clipboard', {
+			value: {
+				writeText: async (text: string) => {
+					written.push(text);
+				}
+			},
+			configurable: true
+		});
+		return written;
+	}
+
+	it('loads the share path on a public detail, sets it on publish, and clears it on revoke', async () => {
+		stubPublicSeason('/share/tok-2');
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('e9', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			expect(snaps.at(-1)?.published).toBe(true);
+			expect(snaps.at(-1)?.sharePath).toBe('/share/tok-9');
+			controller.publishState();
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.published).toBe(false);
+			});
+			expect(snaps.at(-1)?.sharePath).toBe('');
+			controller.publishState();
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.sharePath).toBe('/share/tok-2');
+			});
+			expect(snaps.at(-1)?.published).toBe(true);
+			expect(snaps.at(-1)?.notice).toContain('/share/tok-2');
+			expect(snaps.at(-1)?.notice).toContain('http');
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('copies the absolute share address with confirmation', async () => {
+		stubPublicSeason('/share/tok-2');
+		const written = stubClipboard();
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('e9', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.sharePath).toBe('/share/tok-9');
+			});
+			controller.copyLink();
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.notice).toBe('Link copied.');
+			});
+			expect(written).toHaveLength(1);
+			expect(written[0]).toBe(shareUrl('/share/tok-9'));
+			controller.destroy();
+		} finally {
+			Reflect.deleteProperty(window.navigator, 'clipboard');
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('shows the share address as a link beside the copy control while published', async () => {
+		stubPublicSeason('/share/tok-2');
+		const written = stubClipboard();
+		const app = mount(EpisodePage, { target: document.body });
+		try {
+			await vi.waitFor(() => {
+				expect(document.querySelector('h1')?.textContent).toBe('Ninth real');
+			});
+			const anchor = document.querySelector(
+				'section[aria-label="Episode controls"] a[target="_blank"]'
+			);
+			expect(anchor instanceof HTMLAnchorElement).toBe(true);
+			const href = anchor instanceof HTMLAnchorElement ? anchor.href : '';
+			expect(href.endsWith('/share/tok-9')).toBe(true);
+			const buttons = Array.from(
+				document.querySelectorAll<HTMLButtonElement>('section[aria-label="Episode controls"] button')
+			);
+			const labels = buttons.map((button) => button.textContent);
+			expect(labels).toContain('Copy link');
+			expect(labels).toContain('Revoke link');
+			const releaseText = (document.body.textContent ?? '').replace(/\s+/g, ' ');
+			expect(releaseText).toContain('Stems and the transcript stay private.');
+			buttons.find((button) => button.textContent === 'Copy link')?.click();
+			await vi.waitFor(() => {
+				expect(document.body.textContent).toContain('Link copied.');
+			});
+			expect(written).toHaveLength(1);
+			expect(written[0]).toBe(href);
+		} finally {
+			unmount(app);
+			document.body.innerHTML = '';
+			Reflect.deleteProperty(window.navigator, 'clipboard');
+			vi.unstubAllGlobals();
+		}
 	});
 });

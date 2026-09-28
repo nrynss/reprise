@@ -67,6 +67,15 @@ type previewStore interface {
 	PreviewMediaID(ctx context.Context, ownerID, episodeID string) (string, error)
 }
 
+// shareLookup reports the share token for an episode the owner holds, or
+// empty when the episode holds none. Handlers declare the seam, so tests
+// bind a fake without opening the publish tables. A nil lookup leaves the
+// share path empty.
+type shareLookup interface {
+	// ShareToken returns the share token for one episode the owner holds.
+	ShareToken(ctx context.Context, ownerID, episodeID string) (string, error)
+}
+
 // Episodes serves the episode list, detail, decisions, and mark done
 // routes. Create it with NewEpisodes, because the zero value holds no
 // store. Mount wires one value under all four table patterns behind the
@@ -74,6 +83,7 @@ type previewStore interface {
 type Episodes struct {
 	store   episodeStore
 	preview previewStore
+	share   shareLookup
 }
 
 // NewEpisodes returns the episode routes on one handler. A nil store
@@ -88,7 +98,15 @@ func NewEpisodes(store episodeStore) http.Handler {
 // the preview reader behind the detail. A nil preview leaves the preview
 // address empty, the way episodes without a preview read.
 func NewEpisodesWithPreview(store episodeStore, preview previewStore) http.Handler {
-	h := &Episodes{store: store, preview: preview}
+	return NewEpisodesWithShare(store, preview, nil)
+}
+
+// NewEpisodesWithShare returns the episode routes on one handler with
+// the preview reader and the share token reader behind the detail. A nil
+// share lookup leaves the share path empty, the way episodes without a
+// public link read.
+func NewEpisodesWithShare(store episodeStore, preview previewStore, share shareLookup) http.Handler {
+	h := &Episodes{store: store, preview: preview, share: share}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/episodes", h.list)
 	mux.HandleFunc("GET /api/episodes/{id}", h.detail)
@@ -193,6 +211,11 @@ type episodeDetailJSON struct {
 	// oldest first, on the render clock. It stays empty until analysis
 	// stores them, and always while no render exists.
 	RenderWords []wordJSON `json:"render_words"`
+	// SharePath is /share/<token> while the episode is public, or empty
+	// otherwise. Only the owner reads the detail, so it exposes nothing
+	// new. The episode view shows it as a link every time, without
+	// waiting for a fresh publish answer.
+	SharePath string `json:"share_path"`
 }
 
 // transcriptOutcomeJSON carries one pass outcome on the wire. Error stays
@@ -373,6 +396,12 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		RenderAudioURL:  mediaPath(renderID),
 		RenderWords:     wordsOf(renderWords),
 	}
+	sharePath, err := h.sharePathOf(r.Context(), owner, episodeID, ep.Visibility)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the share link could not be read", nil)
+		return
+	}
+	detail.SharePath = sharePath
 	detail.TranscriptOutcome = outcomeOf(outcome)
 	detail.EditorialOutcome = outcomeOf(editorial)
 	detail.RenderOutcome = outcomeOf(rendered)
@@ -407,6 +436,24 @@ func mediaPath(id string) string {
 		return ""
 	}
 	return "/media/" + id
+}
+
+// sharePathOf returns /share/<token> while the episode is public, or
+// empty otherwise. A store without a token reader reports empty, so the
+// detail never invents a link. A rotated token on a private episode stays
+// hidden, because the visibility check runs first.
+func (h *Episodes) sharePathOf(ctx context.Context, ownerID, episodeID, visibility string) (string, error) {
+	if visibility != "public" || h.share == nil {
+		return "", nil
+	}
+	token, err := h.share.ShareToken(ctx, ownerID, episodeID)
+	if err != nil {
+		return "", err
+	}
+	if token == "" {
+		return "", nil
+	}
+	return "/share/" + token, nil
 }
 
 // decide answers POST /api/episodes/{id}/decisions by appending one

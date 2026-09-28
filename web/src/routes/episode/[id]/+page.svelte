@@ -9,7 +9,8 @@
 		emptyScreen,
 		EpisodeController,
 		formatClock,
-		formatEpisodeNumber
+		formatEpisodeNumber,
+		shareUrl
 	} from '../../threads/threads';
 
 	let snap = $state(emptyScreen('missing'));
@@ -119,7 +120,19 @@
 		<section aria-label="Episode controls">
 			<h2>Release</h2>
 			{#if snap.published}
-				{#if !snap.live}
+				{#if snap.live && snap.sharePath}
+					{@const url = shareUrl(snap.sharePath)}
+					<p>
+						<!-- The address carries its origin, so resolve must not rewrite it. -->
+						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+						<a href={url} target="_blank" rel="noopener">{url}</a>
+					</p>
+					<button onclick={() => controller?.copyLink()}>Copy link</button>
+					<p>
+						Anyone with this link can play the finished episode. Stems and the transcript
+						stay private.
+					</p>
+				{:else if !snap.live}
 					<p>Fixture link: https://reprise.nryn.dev/e/{snap.id}-fixture</p>
 				{/if}
 				<button onclick={() => controller?.publishState()}>Revoke link</button>
