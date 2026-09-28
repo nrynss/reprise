@@ -1387,7 +1387,7 @@ requires:   T7.48
 fixture-ok: yes
 size:       S · mid
 owns:       internal/host/, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.51-rem-r1@029edcf162b121cc09569f99303648f0f1e31135
+status:     done:2cea171
 ```
 **Defect 1.** The Firefox owner held four episodes, two of them drafts, and heard "Welcome to your
 first episode". `host.Build` (`internal/host/host.go`) falls back to the constant `opener`
@@ -1480,7 +1480,7 @@ fixture-ok: yes
 size:       L · frontier
 owns:       internal/render/, internal/api/episodes.go, internal/api/playback_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/editor/draft.ts
-status:     not-started
+status:     in-progress:implement:t7.53-impl
 ```
 **Defect.** The owner edited both T6.4b round 2 drafts hearing only their own voice.
 `episodeDetailJSON.AudioURL` (`internal/api/episodes.go`) names the user stem when one exists,
@@ -1634,6 +1634,14 @@ Record the tokens spent in the handoff.
 
 ### What exists now
 
+T7.51 landed at 2cea171 after round 2 APPROVE with zero residue.
+Round 1 had one H finding. Concurrent same-owner mints cited
+the same callback. The landed pass claims the row conditionally
+and reloads on a lost claim. The tree matches reviewed commit
+029edcf. Main had moved, so the landing rebased. Race tests on
+host, memory, and cmd/reprise passed on the rebased commit. The
+mint-after-config callback loss stands as recorded: an error
+path that refuses the mint can consume one unspoken callback.
 T7.56 landed at 7ba505e after round 1 APPROVE with zero findings.
 Chapter reasoning runs inside a 4096 cap with its own 1024
 thinking budget. The tree matches reviewed commit c122b2e. Main
