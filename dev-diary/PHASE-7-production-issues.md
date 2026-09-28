@@ -1839,7 +1839,7 @@ requires:   T7.47
 fixture-ok: yes
 size:       XS · light
 owns:       tools/check.sh
-status:     in-progress:land:t7.63-impl@00fe2393442028143d20bbcc3d495e083b95b9ec
+status:     done:578409f
 ```
 **Defect.** `tools/check.sh` runs `npm run test:e2e >/dev/null`. A failing run therefore prints only
 `FAIL [playwright] end-to-end tests failed`. No CI log names the spec. T7.58 landed on red CI, and
@@ -1906,6 +1906,11 @@ the three exit codes. WebKit does not launch on the workstation, so run it only 
 
 ### What exists now
 
+T7.63 landed at 578409f after round 1 APPROVE with zero findings.
+The gate holds each silenced step's output and prints it only
+on failure, with verdicts unchanged. The tree matches reviewed
+commit 00fe239. Main had moved, so the landing rebased. Bash
+syntax clean on the rebased commit. CI proves the green run.
 T7.65 landed at 2e7aa9a after round 1 APPROVE with zero findings.
 The welcome suite runs in Chromium and WebKit, green ten times
 in a row in the CI image. The tree matches reviewed commit
