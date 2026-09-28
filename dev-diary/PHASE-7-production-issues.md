@@ -1874,7 +1874,7 @@ requires:   T7.27
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/welcome/welcome.playwright.config.ts
-status:     in-progress:implement:t7.65-impl
+status:     in-progress:review-r1:t7.65-rev-r1@85e6b8e4748dd56dcdb2872ff6160640ff2423a3
 ```
 T7.27 took WebKit out of the welcome suite. The seeded teaser spec had failed there, and the
 failure was blamed on Chaaya's silent prime (https://github.com/nrynss/chaaya/issues/5). On
