@@ -2132,7 +2132,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/take.ts, web/src/lib/voice/take.test.ts,
              web/src/routes/record/end-control.spec.ts
-status:     in-progress:implement:t7.71-impl
+status:     in-progress:review-r1:t7.71-rev-r1@6f351a03d4eb460976cbcbc94ad9d2db52314dab
 ```
 **Defect.** In the T6.4b round 3 takes on 2026-09-28, the owner pressed End and the take kept
 running while the confirmation showed. The clock kept counting, the host could keep talking, and
