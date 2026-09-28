@@ -1721,7 +1721,7 @@ size:       XS · light
 owns:       web/src/routes/record/stems-complete.spec.ts, web/src/routes/record/cap.spec.ts,
              web/src/routes/record/confirm-processing.spec.ts, web/src/routes/record/end-control.spec.ts,
              web/src/routes/record/gallery-link.spec.ts, web/src/routes/record/mock-session.spec.ts
-status:     in-progress:review-r2:t7.60-rev-r2@b3feb8d2472c16dfee61780f291b61a83e4600e1
+status:     in-progress:land:t7.60-rem-r1@b3feb8d2472c16dfee61780f291b61a83e4600e1
 ```
 T7.58 round 1 recorded an out of scope M finding. `a repeat
 completion reports the standing outcome` fails under full-suite
@@ -1776,7 +1776,7 @@ requires:   T7.58
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:review-r1:t7.61-rev-r1@dc30a2231e7646f74aaee87740cf19ccb8870361
+status:     in-progress:land:t7.61-impl@dc30a2231e7646f74aaee87740cf19ccb8870361
 ```
 **Defect.** Three Firefox specs that T7.58 added fail on every CI run since it landed:
 `revert a cut, then play and seek still answer`, `revert every cut, then play and drag still
