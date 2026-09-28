@@ -28,8 +28,22 @@ import (
 	"google.golang.org/genai"
 )
 
-// probeModel names the editorial model from local settings.
-const probeModel = "gemini-2.5-flash"
+// resolveProbeModel returns the model the live probe calls. It reads the
+// editorial model from loaded settings, so the probe always exercises the
+// model production calls.
+func resolveProbeModel(loaded settings.Settings) string {
+	return loaded.EditorialModel
+}
+
+// TestResolveProbeModelFollowsSettings pins the probe to the model
+// production calls. It feeds a synthetic settings value, so it needs no
+// key and no network. A probe that names any fixed id fails here.
+func TestResolveProbeModelFollowsSettings(t *testing.T) {
+	loaded := settings.Settings{EditorialModel: "model-from-settings"}
+	if got := resolveProbeModel(loaded); got != "model-from-settings" {
+		t.Fatalf("probe model %q, want settings model %q", got, "model-from-settings")
+	}
+}
 
 // resolveConfig points the loader at the checkout settings when the caller
 // sets no explicit path. The test binary runs with its package directory
@@ -254,12 +268,16 @@ func logUsage(t *testing.T, label string, meta *genai.GenerateContentResponseUsa
 	}
 }
 
-// generate sends one prompt with optional audio parts and returns the text.
-func generate(t *testing.T, client *genai.Client, parts []*genai.Part, maxTokens int32) *genai.GenerateContentResponse {
+// generate sends one prompt with optional audio parts to the given model
+// and returns the text.
+func generate(t *testing.T, client *genai.Client, model string, parts []*genai.Part, maxTokens int32) *genai.GenerateContentResponse {
 	t.Helper()
+	if model == "" {
+		t.Fatal("probe model resolved empty")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
-	resp, err := client.Models.GenerateContent(ctx, probeModel,
+	resp, err := client.Models.GenerateContent(ctx, model,
 		[]*genai.Content{{Role: "user", Parts: parts}},
 		&genai.GenerateContentConfig{MaxOutputTokens: maxTokens})
 	if err != nil {
@@ -277,12 +295,17 @@ func generate(t *testing.T, client *genai.Client, parts []*genai.Part, maxTokens
 func TestGeminiProbe(t *testing.T) {
 	proveBootRefusal(t)
 	client, loaded := newProbeClient(t)
+	model := resolveProbeModel(loaded)
+	if model == "" {
+		t.Fatal("editorial model resolved empty")
+	}
+	t.Logf("probe model %s", model)
 	dir := t.TempDir()
 	voice := "/tmp/voices/en_US-lessac-medium.onnx"
 
 	// Question one: credentials and a minimal call. The ping proves the
 	// key reaches Vertex with the project and location from settings.
-	ping := generate(t, client, []*genai.Part{
+	ping := generate(t, client, model, []*genai.Part{
 		genai.NewPartFromText("Reply with the single word PONG."),
 	}, 64)
 	t.Logf("ping text: %q model %s", ping.Text(), ping.ModelVersion)
@@ -326,7 +349,7 @@ func TestGeminiProbe(t *testing.T) {
 		t.Fatalf("ffprobe stem: %v %.500s", err, probeOut)
 	}
 	t.Logf("stem bytes %d probe %.500s", info.Size(), probeOut)
-	heard := generate(t, client, []*genai.Part{
+	heard := generate(t, client, model, []*genai.Part{
 		genai.NewPartFromBytes(raw, "audio/ogg"),
 		genai.NewPartFromText("Describe in one sentence what this audio sounds like."),
 	}, 200)
@@ -351,7 +374,7 @@ func TestGeminiProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read laugh opus: %v", err)
 	}
-	choice := generate(t, client, []*genai.Part{
+	choice := generate(t, client, model, []*genai.Part{
 		genai.NewPartFromText("Two short voice takes follow. Do not transcribe them. " +
 			"Listen to the delivery only and say which take should open the episode, " +
 			"the first or the second, with one reason grounded in how it sounds."),
@@ -362,8 +385,6 @@ func TestGeminiProbe(t *testing.T) {
 	t.Logf("choice full text: %s", choice.Text())
 	t.Logf("choice model %s", choice.ModelVersion)
 	logUsage(t, "choice", choice.UsageMetadata)
-
-	_ = loaded
 }
 
 // longTakeSentences carries varied episode material with an unresolved
