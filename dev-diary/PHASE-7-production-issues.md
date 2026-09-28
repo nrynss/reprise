@@ -1921,7 +1921,7 @@ owns:       config/reprise.box.toml, config/reprise.local.toml, internal/setting
              internal/editorial/run_test.go, internal/cover/cover.go, internal/cover/cover_test.go,
              cmd/reprise/main.go, cmd/reprise/finish.go, cmd/reprise/main_test.go,
              cmd/reprise/boot_test.go
-status:     in-progress:review-r2:t7.66-rev-r2@74c95f0350a27d2d2241dd5f0c71ae661bc2c211
+status:     in-progress:land:t7.66-rem-r1@74c95f0350a27d2d2241dd5f0c71ae661bc2c211
 ```
 **Findings.** A probe on 2026-09-28 used the project's own service account against Vertex.
 
