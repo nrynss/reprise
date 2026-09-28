@@ -2091,7 +2091,7 @@ size:       S · mid
 owns:       web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts,
              web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
              web/src/routes/threads/gallery-finish.test.ts
-status:     in-progress:implement:t7.70-impl
+status:     in-progress:review-r1:t7.70-rev-r1@b3a734bd1c7fa81e0c02abcdaf7dbbbedf9ec4b7
 ```
 **Defect.** The episodes routes allow 48 requests a minute per client (`takeEpisodesBurst` in
 `cmd/reprise/main.go`). On 2026-09-28, after two takes, `GET /api/episodes` answered 429 for the
