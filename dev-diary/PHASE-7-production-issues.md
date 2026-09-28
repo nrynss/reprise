@@ -1590,7 +1590,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       internal/gemini/chapters.go, internal/gemini/calls_test.go,
              internal/analysis/run.go, internal/analysis/run_test.go
-status:     in-progress:review-r1:t7.56-rev-r1@c122b2eec22b6c2390df33c602daceaaad5e6298
+status:     in-progress:land:t7.56-impl@c122b2eec22b6c2390df33c602daceaaad5e6298
 ```
 **Defect.** Analysis failed on the 40 second episode 7 render in T6.4b round 2, with
 `chapters: gemini: truncated answer: answer hit the output cap`. `CompleteChapters`
