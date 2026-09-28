@@ -38,7 +38,7 @@ async function confirmEnd(page: Page): Promise<void> {
 }
 
 async function followGalleryLink(page: Page): Promise<void> {
-	const link = page.getByRole('link', { name: 'Back to gallery', exact: true });
+	const link = page.getByRole('link', { name: 'Back to the gallery', exact: true });
 	await expect(link).toBeVisible();
 	await link.click();
 	await expect(page.getByRole('heading', { name: 'The season so far', exact: true })).toBeVisible();

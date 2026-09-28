@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import GalleryLink from '$lib/components/GalleryLink.svelte';
 	import { pageTitle } from '$lib/shell';
 	import {
 		canPublish,
@@ -44,12 +45,12 @@
 	{:else if snap.missing}
 		<h1>Missing episode</h1>
 		<p role="status">{snap.notice}</p>
-		<a href={resolve('/')}>Back to the gallery</a>
+		<GalleryLink />
 	{:else if snap.failed}
 		<h1>Episode refused</h1>
 		<p role="status">{snap.notice}</p>
 		<button onclick={() => controller?.retry()}>Retry the episode</button>
-		<a href={resolve('/')}>Back to the gallery</a>
+		<GalleryLink />
 	{:else}
 		<p class="eyebrow">{formatEpisodeNumber(snap.number)} · {snap.state} · {snap.visibility}</p>
 		<h1>{snap.title}</h1>
@@ -58,7 +59,7 @@
 		<nav aria-label="Season">
 			{#if snap.live}
 				{@const editHref = draftEditHref(snap)}
-				<a href={resolve('/')}>Gallery</a>
+				<GalleryLink />
 				<a href={resolve('/threads')}>Threads</a>
 				{#if editHref}
 					<a href={resolve(editHref)}>Edit</a>

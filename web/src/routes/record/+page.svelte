@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
 	import { pageTitle } from '$lib/shell';
+	import GalleryLink from '$lib/components/GalleryLink.svelte';
 	import { RecordController, emptySnapshot } from '$lib/voice/record-state';
 	import {
 		createCompletionDriver,
@@ -80,7 +80,7 @@
 </svelte:head>
 
 <main>
-	<a href={resolve('/')}>Back to gallery</a>
+	<GalleryLink />
 	<h1>{snap.phase === 'live' ? 'On air' : 'Record'}</h1>
 	<p role="status">{snap.notice}</p>
 

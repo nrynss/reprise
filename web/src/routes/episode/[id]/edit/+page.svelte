@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { activeWordAt } from '@nrynss/chaaya/transcript';
+	import GalleryLink from '$lib/components/GalleryLink.svelte';
 	import { pageTitle } from '$lib/shell';
 	import { DraftController, emptyDraft, formatTime, queryValue, runEditorGates } from '$lib/editor/draft';
 
@@ -117,7 +117,7 @@
 </svelte:head>
 
 <main>
-	<a href={resolve('/')}>Back to the gallery</a>
+	<GalleryLink />
 	<p class="eyebrow">{snap.episodeLabel}</p>
 	<h1>{snap.title || 'Editor'}</h1>
 	<p role="status" aria-label="Applied cuts">{snap.appliedCount} cuts applied</p>

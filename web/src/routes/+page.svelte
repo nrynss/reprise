@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import SeasonNav from '$lib/components/SeasonNav.svelte';
 	import { pageTitle } from '$lib/shell';
 	import {
 		emptyGallery,
@@ -49,8 +50,8 @@
 		<button onclick={() => controller?.retry()}>Retry the season</button>
 	{/if}
 	<nav aria-label="Season">
-		<a href={resolve('/record')}>Record a new episode</a>
-		<a href={resolve('/threads')}>Threads</a>
+		<a class="primary" href={resolve('/record')}>Record a new episode</a>
+		<SeasonNav current="gallery" />
 	</nav>
 
 	{#if snap.ready && snap.rows.length === 0 && !snap.failed}
@@ -174,18 +175,13 @@
 		gap: 1rem;
 		margin: 1.5rem 0;
 	}
-	nav a {
+	nav a.primary {
 		color: var(--on-accent);
 		background: var(--accent);
 		border-radius: 100px;
-		padding: 0.6rem 1.25rem;
+		padding: 0.55rem 1.1rem;
 		text-decoration: none;
 		font-weight: 600;
-	}
-	nav a:last-child {
-		background: transparent;
-		color: var(--accent);
-		border: 1px solid var(--line);
 	}
 	section[aria-label='Empty season'] {
 		background: var(--raised);

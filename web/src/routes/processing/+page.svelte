@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import GalleryLink from '$lib/components/GalleryLink.svelte';
 	import { pageTitle } from '$lib/shell';
 	import { ProcessingController, emptyProcessing } from '$lib/voice/processing-state';
 
@@ -33,18 +34,18 @@
 </svelte:head>
 
 <main>
+	<GalleryLink />
 	<p class="eyebrow">This take</p>
 	<h1>Processing</h1>
 	<p class="sub">The take stays here until the draft is ready.</p>
 	<p role="status">
 		{snap.draft.state === 'done' ? 'The draft is ready.' : 'The take stays here until the draft is ready.'}
 	</p>
-	<nav aria-label="Season">
-		<a href={resolve('/')}>Gallery</a>
-		{#if snap.draft.state === 'done' && snap.episode !== ''}
+	{#if snap.draft.state === 'done' && snap.episode !== ''}
+		<nav aria-label="Season">
 			<a href={resolve(`/episode/${snap.episode}`)}>Open the episode</a>
-		{/if}
-	</nav>
+		</nav>
+	{/if}
 
 	{#if stopped}
 		<section aria-label="Stopped">

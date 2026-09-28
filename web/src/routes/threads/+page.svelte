@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import SeasonNav from '$lib/components/SeasonNav.svelte';
 	import { pageTitle } from '$lib/shell';
 	import {
 		emptyLiveThreads,
@@ -96,13 +97,7 @@
 		<button onclick={() => void load()}>Retry the threads</button>
 	{/if}
 	<nav aria-label="Season">
-		{#if live}
-			<a href={resolve('/')}>Gallery</a>
-			<a href={resolve('/threads')} aria-current="page">Threads</a>
-		{:else}
-			<a href={resolve('/?fixture=1')}>Gallery</a>
-			<a href={resolve('/threads?fixture=1')} aria-current="page">Threads</a>
-		{/if}
+		<SeasonNav current="threads" fixture={!live} />
 	</nav>
 
 	{#if ready && !failed}
@@ -284,9 +279,6 @@
 		display: flex;
 		gap: 1rem;
 		margin: 1.5rem 0;
-	}
-	nav a {
-		color: var(--accent);
 	}
 	h2 {
 		font-size: 1.25rem;
