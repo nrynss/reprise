@@ -1808,7 +1808,7 @@ requires:   T7.40
 fixture-ok: yes
 size:       XS · mid
 owns:       web/src/routes/record/+page.svelte, web/tests/start-gesture.spec.ts
-status:     not-started
+status:     in-progress:implement:t7.62-impl
 ```
 **Defect.** The record page is prerendered, so the Start button renders enabled before the page's
 script runs. The click handler is attached later, inside `$effect`, through
@@ -1839,7 +1839,7 @@ requires:   T7.47
 fixture-ok: yes
 size:       XS · light
 owns:       tools/check.sh
-status:     not-started
+status:     in-progress:implement:t7.63-impl
 ```
 **Defect.** `tools/check.sh` runs `npm run test:e2e >/dev/null`. A failing run therefore prints only
 `FAIL [playwright] end-to-end tests failed`. No CI log names the spec. T7.58 landed on red CI, and
@@ -1874,7 +1874,7 @@ requires:   T7.27
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/welcome/welcome.playwright.config.ts
-status:     not-started
+status:     in-progress:implement:t7.65-impl
 ```
 T7.27 took WebKit out of the welcome suite. The seeded teaser spec had failed there, and the
 failure was blamed on Chaaya's silent prime (https://github.com/nrynss/chaaya/issues/5). On
