@@ -1776,7 +1776,7 @@ requires:   T7.58
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:implement:t7.61-impl
+status:     in-progress:review-r1:t7.61-rev-r1@dc30a2231e7646f74aaee87740cf19ccb8870361
 ```
 **Defect.** Three Firefox specs that T7.58 added fail on every CI run since it landed:
 `revert a cut, then play and seek still answer`, `revert every cut, then play and drag still
@@ -1896,7 +1896,7 @@ requires:   T7.66
 fixture-ok: yes
 size:       XS · light
 owns:       internal/gemini/live_test.go
-status:     in-progress:review-r1:t7.67-rev-r1@e43d991899fb242b374ee8bbae050f2d99f3643c
+status:     in-progress:land:t7.67-impl@e43d991899fb242b374ee8bbae050f2d99f3643c
 ```
 T7.66 round 1 recorded an out of scope M finding. The live
 probe hardcodes `gemini-2.5-flash` while both shipped configs
