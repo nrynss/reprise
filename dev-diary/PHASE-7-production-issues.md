@@ -2248,7 +2248,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:implement:t7.73-impl
+status:     in-progress:review-r1:t7.73-rev-r1@64478e17bcaa22f4890e994b68bffb91afa6d18b
 ```
 **Defect.** The owner edited the live drafts of 2026-09-28. The waveform showed no progress and
 nothing that looked draggable. A drag on it still seeked. Two causes, both in the editor.
@@ -2526,7 +2526,7 @@ size:       S · frontier
 owns:       internal/assemblyai/batch.go, internal/assemblyai/batch_test.go,
              internal/assemblyai/batch_live_test.go, internal/analysis/run.go,
              internal/analysis/run_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:review-r1:t7.78-rev-r1@2263f54c31e29df590e77bd048673e7723b450ff
+status:     in-progress:land:t7.78-impl@2263f54c31e29df590e77bd048673e7723b450ff
 ```
 **Defect.** The Threads page read "Nothing threads yet" after several episodes about testing.
 Production holds 8 mentions, all of kind `callback` from the editorial pass. The one stored
