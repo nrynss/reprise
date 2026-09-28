@@ -610,7 +610,7 @@ export class RecordController {
 	// processing screen awaits this same promise, so the bytes stay in flight
 	// after the record page is gone.
 	private async settleUploads(
-		finishing: Promise<void>
+		finishing: Promise<unknown>
 	): Promise<{ userBytes: number; hostBytes: number; transcriptJob: string }> {
 		await finishing;
 		const failure = describeUploadFailure(this.userUpload, this.hostUpload);
@@ -628,7 +628,7 @@ export class RecordController {
 
 	// openProcessing moves to the processing screen without reloading, so
 	// the upload already running on this page keeps its requests.
-	private async openProcessing(episode: string, finishing: Promise<void>): Promise<void> {
+	private async openProcessing(episode: string, finishing: Promise<unknown>): Promise<void> {
 		const suffix = this.mockMode ? '&mock=1' : '';
 		// The stem ids and the user rate ride on the address. A reload has no
 		// uploader left, and the draft move still needs the pair.
@@ -1142,7 +1142,7 @@ export class RecordController {
 
 // paceUploads reports ready when the upload finishes inside the window.
 // Otherwise the caller hands the same promise to the processing screen.
-function paceUploads(finishing: Promise<void>, windowMs: number): Promise<'ready' | 'slow'> {
+function paceUploads(finishing: Promise<unknown>, windowMs: number): Promise<'ready' | 'slow'> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	const slow = new Promise<'slow'>((resolve) => {
 		timer = setTimeout(() => resolve('slow'), windowMs);

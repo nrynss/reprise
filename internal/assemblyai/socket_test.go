@@ -245,7 +245,6 @@ func TestEndSessionResumesThenEndsBeforeDelete(t *testing.T) {
 	mu.Lock()
 	gotFail := fail
 	gotOrder := append([]string(nil), order...)
-	gotUpgrades := upgrades
 	mu.Unlock()
 	if gotFail != "" {
 		t.Fatalf("voice socket: %s", gotFail)
@@ -267,7 +266,7 @@ func TestEndSessionResumesThenEndsBeforeDelete(t *testing.T) {
 		t.Fatalf("second end %+v, want success without a new socket", second)
 	}
 	mu.Lock()
-	gotUpgrades = upgrades
+	gotUpgrades := upgrades
 	mu.Unlock()
 	if gotUpgrades != 1 {
 		t.Fatalf("upgrades %d, want one socket for both ends", gotUpgrades)
