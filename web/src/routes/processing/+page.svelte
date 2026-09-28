@@ -6,8 +6,8 @@
 	let snap = $state(emptyProcessing());
 	let controller = $state<ProcessingController | null>(null);
 
-	const stopped = $derived(
-		[snap.upload, snap.transcription, snap.editorial, snap.draft].find((step) => step.state === 'failed') ??
+	const stopped = $derived.by(
+		() => [snap.upload, snap.transcription, snap.editorial, snap.draft].find((step) => step.state === 'failed') ??
 			null
 	);
 

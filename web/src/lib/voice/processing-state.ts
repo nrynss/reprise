@@ -592,7 +592,10 @@ export class ProcessingController {
 		this.readingOutcomes = true;
 		try {
 			const response = await fetch(`/api/episodes/${encodeURIComponent(this.snapshot.episode)}`);
-			const contentType = response.headers.get('content-type') ?? '';
+			let contentType = '';
+			for (const [key, value] of response.headers.entries()) {
+				if (key.toLowerCase() === 'content-type') contentType = value;
+			}
 			if (!response.ok || !contentType.toLowerCase().includes('application/json')) return;
 			const body: unknown = await response.json();
 			if (typeof body !== 'object' || body === null || Array.isArray(body)) return;
