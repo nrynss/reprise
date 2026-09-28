@@ -1859,7 +1859,7 @@ requires:   T7.61
 fixture-ok: yes
 size:       XS · light
 owns:       web/package.json, web/package-lock.json, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:land:t7.64-impl@16e26cc95615756f8e7f45c8ddb6784c4352d7eb
+status:     done:c0279f1
 ```
 Once Chaaya publishes the release that fixes issue 7, pin `@nrynss/chaaya` to that exact version
 in `web/package.json` and refresh the lock file. Remove the three `test.fixme` lines T7.61 added.
@@ -2033,6 +2033,14 @@ The gate holds each silenced step's output and prints it only
 on failure, with verdicts unchanged. The tree matches reviewed
 commit 00fe239. Main had moved, so the landing rebased. Bash
 syntax clean on the rebased commit. CI proves the green run.
+T7.64 landed at c0279f1 after round 1 APPROVE with zero
+findings. Chaaya pins to exactly 0.2.2 and the three Firefox
+specs run live again. The tree matches reviewed commit 16e26cc.
+Main had moved, so the landing rebased. The Firefox edit suite
+passed 13/13 three times in a row in the CI image on the
+rebased commit. The version records moved to 0.2.2 in the
+package, the pin lines, and the Chaaya surface table, which
+gains the sink-fault play state row.
 T7.65 landed at 2e7aa9a after round 1 APPROVE with zero findings.
 The welcome suite runs in Chromium and WebKit, green ten times
 in a row in the CI image. The tree matches reviewed commit

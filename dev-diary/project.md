@@ -128,7 +128,7 @@ and what Reprise builds itself.
 Reprise builds these itself: the provider adapter, the edit model behind a render, guest identity,
 which flags exist, which targets an erasure covers, and the deploy and check tooling. Each is
 specific to this product, this provider or this deployment. The mechanisms under them are the
-libraries': the live duplex path and the transcript editor from Chaaya `0.2.1`, and leases, budgets
+libraries': the live duplex path and the transcript editor from Chaaya `0.2.2`, and leases, budgets
 per owner, flags, erasure, rendering and captions from Keel `v0.3.0`.
 
 ### Gemini reaches Reprise through Vertex AI
