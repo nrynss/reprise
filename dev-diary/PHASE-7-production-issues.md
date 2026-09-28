@@ -1433,7 +1433,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:land:t7.52-impl@94445e2e7a50fd5ea3aa7503c687ee4dee4cd7ff
+status:     done:b62d2e1
 ```
 The owner used the editor on both T6.4b round 2 drafts. Seven defects turned up. Fix each one
 separately, and pin each one with its own test.
@@ -1634,6 +1634,12 @@ Record the tokens spent in the handoff.
 
 ### What exists now
 
+T7.52 landed at b62d2e1 after round 1 APPROVE with zero findings.
+All seven editor defects fixed, each with its own pin. The tree
+matches reviewed commit 94445e2. Main had moved, so the landing
+rebased. The draft pin passed on the rebased commit. Residual
+risk stands: if Play still strands on a live draft, the next
+step is the browser and the word timings.
 T7.50 landed at e2403d1 after round 1 APPROVE with zero findings.
 The processing page reports durable stems when a resume carries
 no byte receipts. The tree matches reviewed commit 4b4ba31.
