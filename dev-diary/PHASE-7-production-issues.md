@@ -1224,7 +1224,7 @@ fixture-ok: yes
 size:       M · frontier
 owns:       internal/assemblyai/socket_test.go, web/src/lib/voice/record-state.ts,
              web/src/lib/voice/processing-state.ts, web/src/routes/processing/+page.svelte
-status:     in-progress:implement:t7.47-impl
+status:     in-progress:review-r1:t7.47-rev-r1@3d44caffb06604c3902fe60b7d52fbf65a0377b4
 ```
 CI is red on every `main` commit. The gate stops at the first
 failure, so the red has layers. Fix them in gate order and prove
