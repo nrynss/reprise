@@ -17,6 +17,13 @@ interface Harness {
 
 async function startMockTake(page: Page): Promise<void> {
 	await page.goto('/record?mock=1');
+	// The start control listens through a page effect, so the take waits for
+	// the mock handle that effect installs before pressing Enter. A press that
+	// lands first activates a button with no listener and the take never opens.
+	await page.waitForFunction(() => {
+		const handle = (window as unknown as { __stems?: { complete?: unknown } }).__stems;
+		return typeof handle?.complete === 'function';
+	});
 	await page.getByRole('button', { name: 'Start session' }).focus();
 	await page.keyboard.press('Enter');
 	await expect(page.getByRole('heading', { name: 'On air' })).toBeVisible();
