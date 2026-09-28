@@ -1693,7 +1693,7 @@ size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/edit.playwright.config.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts, web/src/lib/editor/draft.ts,
              web/src/routes/episode/[id]/edit/+page.svelte, .github/workflows/ci.yml
-status:     in-progress:land:t7.58-impl@0dd823a5c528a37f15e2729c1dcc23433d96e337
+status:     done:3ea4c2e
 ```
 **Defect.** In T6.4b round 2 the owner reverted both cuts on the Firefox draft. Play and the
 slider then stopped answering until a reload. T7.52 could not reproduce it, because every editor
@@ -1784,6 +1784,17 @@ Removing the bound makes the first test hang, and the test's own context timeout
 
 ### What exists now
 
+T7.58 landed at 3ea4c2e after round 1 APPROVE with zero in-scope
+findings. The editor suite runs in Firefox and Chromium with
+revert-all regression pins. The Firefox stall does not reproduce
+on stubbed drafts: with stubbed audio and timings, revert
+leaves Play and the waveform answering in both browsers. The
+production stall likely needs real stem audio or live timings.
+One out of scope M opened T7.60: the record repeat-completion
+spec flakes under suite load. The tree matches reviewed commit
+0dd823a. Main had moved, so the landing rebased. The edit suite
+passed 26/26 on the rebased commit. CI judges the Firefox
+install step.
 T7.59 landed at f616218 after round 1 APPROVE with zero findings.
 The host reply wait ends after a minute and the guest batch
 runs alone. The tree matches reviewed commit 1fca47d. Main had
