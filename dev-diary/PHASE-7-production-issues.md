@@ -2054,7 +2054,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/episode/[id]/edit/+page.svelte, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:review-r1:t7.69-rev-r1@da17deef54c47168cb7c9485a4521badcbe70a69
+status:     in-progress:land:t7.69-impl@da17deef54c47168cb7c9485a4521badcbe70a69
 ```
 **Defect.** On 2026-09-28 the owner opened the editor for their real Firefox episode `f068cb5e`.
 The page showed "The only place nobody needs anything", with rain above a shop, a bus timetable
@@ -2132,7 +2132,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/voice/record-state.ts, web/src/lib/voice/take.ts, web/src/lib/voice/take.test.ts,
              web/src/routes/record/end-control.spec.ts
-status:     in-progress:review-r1:t7.71-rev-r1@6f351a03d4eb460976cbcbc94ad9d2db52314dab
+status:     in-progress:land:t7.71-impl@6f351a03d4eb460976cbcbc94ad9d2db52314dab
 ```
 **Defect.** In the T6.4b round 3 takes on 2026-09-28, the owner pressed End and the take kept
 running while the confirmation showed. The clock kept counting, the host could keep talking, and
