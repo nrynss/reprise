@@ -2054,7 +2054,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/episode/[id]/edit/+page.svelte, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:implement:t7.69-impl
+status:     in-progress:review-r1:t7.69-rev-r1@da17deef54c47168cb7c9485a4521badcbe70a69
 ```
 **Defect.** On 2026-09-28 the owner opened the editor for their real Firefox episode `f068cb5e`.
 The page showed "The only place nobody needs anything", with rain above a shop, a bus timetable
