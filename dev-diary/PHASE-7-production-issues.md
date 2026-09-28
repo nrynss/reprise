@@ -1253,6 +1253,86 @@ each layer by watching CI go further, not by gut feel.
 commit. A fresh worktree passes every step the workstation can
 run, and the CI run for the landing commit is green.
 
+### T7.48: The early provider id report neither settles nor ends the call
+```yaml
+requires:   T7.36, T7.43
+fixture-ok: yes
+size:       S · frontier
+owns:       web/src/lib/voice/session-calls.ts, web/src/lib/voice/record-state.ts,
+             internal/api/session_end.go, internal/api/routes.go, cmd/reprise/main.go
+status:     not-started
+```
+The T6.4b round 2 runs on `63c0cb3` found this. `reportProviderSession`
+stores the provider id while the take runs by posting to
+`/api/sessions/{id}/end`. That is the same route End uses. `settleOnEnd`
+then starts a reconcile one second into the take. It happened on three
+of four runs, at 05:38:19, 05:59:43 and 06:00:47 UTC.
+
+That reconcile finds the call open and calls `StopSocket`, which writes
+`session.end` on the live call. On these runs the call kept going, and
+nothing proves why. A take that the server ends one second in breaks the
+demo.
+
+* The early report records the provider id and nothing else. It starts
+  no reconcile and ends nothing.
+* Only a real close (End, `pagehide`, `beforeunload`) starts the
+  reconcile.
+* The sweep still finds a crashed take through the early id.
+
+**Done when:** A test posts the early report for a live session and sees
+no reconcile job and no `session.end`. A test posts the close and sees
+one reconcile. Routing the early report back through the end path fails
+the first test.
+
+### T7.49: A reconcile after a close waits for the provider duration
+```yaml
+requires:   T7.43
+fixture-ok: yes
+size:       S · frontier
+owns:       internal/broker/reconcile.go, internal/broker/settle.go
+status:     not-started
+```
+T6.4b round 2 found this. Every reconcile on four runs failed with
+`provider session is still open`. That includes the reconciles after End
+and after a tab close. `readForSettle` writes `session.end`, then reads
+once more at once. The provider takes a moment to write the duration, so
+that second read still finds it open.
+
+A paid job never reruns, so nothing settles until the sweep passes the
+1800 second cap plus its margin. Until then each lease holds 2.25
+dollars. The provider recording is not stored either, and its artifact
+URL ages meanwhile.
+
+* After a close, the reconcile reads again on a bounded backoff until the
+  duration appears. It stays well inside the 100 second limit.
+* A session still open when the wait runs out is left to the sweep, with
+  a detail that says so. It never settles on a guess.
+* The settle and the recording store still happen exactly once.
+
+**Done when:** A test with a fake provider that reports open for two
+reads, then a duration, settles the session once and stores the
+recording. Removing the backoff fails that test. A provider that never
+closes leaves the session to the sweep, with no settle.
+
+### T7.50: The processing page reports the real stem bytes after a resume
+```yaml
+requires:   T7.47
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/lib/voice/processing-state.ts
+status:     not-started
+```
+On T6.4b round 2's Firefox run, Upload read `2 stems, 0 bytes durable`.
+The box held both stems, 5554988 and 2609836 bytes. The resume path at
+`processing-state.ts:527` sums receipts that carry no byte counts.
+
+* Show the byte counts the receipts or the server report. When none is
+  known, say the stems are durable without a number.
+* Never print zero bytes for a stem the server holds.
+
+**Done when:** A test resumes with receipts that carry no byte counts
+and sees no `0 bytes`. Restoring the old sum fails it.
+
 
 ---
 
@@ -1499,6 +1579,16 @@ truncated (T7.38). `project.md` says both stems share one context
 clock. The user stem does, but the host stem was never written on it.
 Time to first host audio reached 8.7 seconds once, against a median
 near 1.4 seconds. Nothing yet says whether that delay is ours.
+
+The second round of real takes on 2026-09-28 ran on `63c0cb3`. The
+tab close now ends the call within a second in both browsers, and the
+server learns the provider id. The host stem keeps its gaps. Yet no
+reconcile settled on any of the four runs (T7.49). The early id report
+also starts a reconcile one second into each take (T7.48). The host
+stem still steps 45 to 117 ms at reply boundaries, and the Firefox user
+stem steps about 160 ms. Nobody has attributed either. The user stem
+floor sat near -31 to -35 dBFS, against -51 on the first round. That
+may be the room, and the rendered floor is not measured yet.
 
 ### Notes for the next developer
 
