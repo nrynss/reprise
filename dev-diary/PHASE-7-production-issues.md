@@ -1261,6 +1261,7 @@ size:       S · mid
 owns:       web/src/lib/voice/session-calls.ts, web/src/lib/voice/session-calls.test.ts,
              internal/api/session_end.go, internal/api/handlers_test.go,
              internal/api/routes.go, internal/api/routes_test.go,
+             web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts,
              cmd/reprise/main.go, cmd/reprise/main_test.go
 status:     in-progress:implement:t7.48-impl
 ```
@@ -1555,7 +1556,8 @@ store. If it can, name what would offer that. Build nothing for it here.
 requires:   T7.38
 fixture-ok: yes
 size:       XS · light
-owns:       internal/editorial/validate.go, internal/editorial/validate_test.go
+owns:       internal/editorial/validate.go, internal/editorial/validate_test.go,
+             internal/editorial/run_test.go
 status:     in-progress:implement:t7.55-impl
 ```
 **Defect.** The episode 7 render in T6.4b round 2 runs 56.6 seconds from a 40.4 second take. Its
