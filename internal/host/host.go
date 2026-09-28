@@ -63,6 +63,9 @@ type Input struct {
 	Threads []Thread
 	// Keyterms holds the recurring names, most frequent first.
 	Keyterms []string
+	// PriorEpisodes counts the owner's earlier episodes, excluding the
+	// recording row the broker has not created yet.
+	PriorEpisodes int
 }
 
 // Config is the session config the broker answers with. The JSON names match
@@ -74,14 +77,23 @@ type Config struct {
 	SystemPrompt string `json:"system_prompt"`
 	// Keyterms holds up to one hundred recurring names.
 	Keyterms []string `json:"keyterms"`
+	// CallbackID names the planted callback the greeting cites. It stays
+	// empty when the greeting cites no callback, and it never leaves the
+	// process over JSON.
+	CallbackID string `json:"-"`
 }
 
 // opener greets a season with no planted callback.
 const opener = "Welcome to your first episode, tell me what is on your mind today."
 
+// returningOpener greets an owner who already holds episodes but has no
+// planted callback waiting.
+const returningOpener = "Welcome back, tell me what is on your mind today."
+
 // Build renders a Config from stored rows. The greeting cites the planted
-// callback with its episode, or falls back to the first-episode opener. The
-// prompt quotes up to three recent threads and binds the model to them.
+// callback with its episode, or falls back to the opener that matches the
+// episode count. The prompt quotes up to three recent threads and binds the
+// model to them.
 func Build(in Input) Config {
 	threads := in.Threads
 	if len(threads) > MaxThreads {
@@ -98,18 +110,24 @@ func Build(in Input) Config {
 		terms = append(terms, term)
 	}
 	greeting := opener
+	if in.PriorEpisodes > 0 {
+		greeting = returningOpener
+	}
+	callbackID := ""
 	if in.Callback != nil {
 		quote := cleanQuote(in.Callback.Mention.Quote)
 		episode := in.Callback.Mention.EpisodeNumber
 		if quote != "" && episode >= 1 {
 			greeting = fmt.Sprintf("Last time in episode %d you mentioned %q, so tell me how that went.",
 				episode, quote)
+			callbackID = in.Callback.ID
 		}
 	}
 	return Config{
 		Greeting:     greeting,
 		SystemPrompt: systemPrompt(greeting, threads),
 		Keyterms:     terms,
+		CallbackID:   callbackID,
 	}
 }
 
@@ -142,7 +160,8 @@ func systemPrompt(greeting string, threads []Thread) string {
 
 // Load reads the owner's planted callback, recent threads, and keyterms,
 // then builds the session config. It reads only that owner's rows. A season
-// with no planted callback gets the first-episode opener.
+// with no planted callback gets the opener that matches its episode count,
+// which holds only earlier episodes because the new row does not exist yet.
 func Load(ctx context.Context, db *sql.DB, ownerID string) (Config, error) {
 	if db == nil || ownerID == "" {
 		return Config{}, fmt.Errorf("host: load: %w", ErrInvalid)
@@ -155,11 +174,28 @@ func Load(ctx context.Context, db *sql.DB, ownerID string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	prior, err := priorEpisodes(ctx, db, ownerID)
+	if err != nil {
+		return Config{}, err
+	}
 	return Build(Input{
-		Callback: callback,
-		Threads:  threadsFrom(recent),
-		Keyterms: keytermsFrom(recent),
+		Callback:      callback,
+		Threads:       threadsFrom(recent),
+		Keyterms:      keytermsFrom(recent),
+		PriorEpisodes: prior,
 	}), nil
+}
+
+// priorEpisodes counts the owner's episodes outside the open recording
+// row. The broker loads the config before it creates the new episode, so
+// the count holds only earlier episodes.
+func priorEpisodes(ctx context.Context, db *sql.DB, ownerID string) (int, error) {
+	const query = `SELECT COUNT(*) FROM episodes WHERE owner_id = ? AND state != 'recording'`
+	var count int
+	if err := db.QueryRowContext(ctx, query, ownerID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("host: load episode count: %w", err)
+	}
+	return count, nil
 }
 
 // unusedCallback returns the oldest unused planted callback for the owner,

@@ -427,10 +427,17 @@ type hostBuilder struct {
 
 // BuildSessionConfig loads the session config for one owner from stored
 // rows. Counts and names in it come from those rows, never from invention.
+// A greeting that cites a callback marks that row used, so the next mint
+// moves on. A failed mark refuses the mint instead of repeating silently.
 func (b hostBuilder) BuildSessionConfig(ctx context.Context, ownerID string) (broker.SessionConfig, error) {
 	cfg, err := host.Load(ctx, b.db, ownerID)
 	if err != nil {
 		return broker.SessionConfig{}, err
+	}
+	if cfg.CallbackID != "" {
+		if err := memory.MarkUsed(ctx, b.db, ownerID, cfg.CallbackID); err != nil {
+			return broker.SessionConfig{}, err
+		}
 	}
 	return broker.SessionConfig{
 		SystemPrompt: cfg.SystemPrompt,

@@ -229,8 +229,8 @@ func TestUsedCallbackIgnoredAndOwnerIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if !strings.HasPrefix(plain.Greeting, "Welcome to your first episode") {
-		t.Fatalf("greeting = %q, want the opener once the callback is used", plain.Greeting)
+	if plain.Greeting != "Welcome back, tell me what is on your mind today." {
+		t.Fatalf("greeting = %q, want the returning opener once the callback is used", plain.Greeting)
 	}
 	seedSeason(t, db, "owner-b")
 	other, err := host.Load(t.Context(), db, "owner-b")
@@ -306,5 +306,66 @@ func TestLoadRejectsBadInput(t *testing.T) {
 	}
 	if config.Greeting != "" || config.SystemPrompt != "" || len(config.Keyterms) != 0 {
 		t.Fatalf("load empty owner config = %+v, want empty", config)
+	}
+}
+
+// TestOpenerFollowsPriorEpisodes checks the greeting without a callback:
+// a first season hears the first-episode opener, while a returning owner
+// hears the welcome-back opener. A cited callback also reports its id.
+func TestOpenerFollowsPriorEpisodes(t *testing.T) {
+	t.Parallel()
+	first := host.Build(host.Input{PriorEpisodes: 0})
+	if want := "Welcome to your first episode, tell me what is on your mind today."; first.Greeting != want {
+		t.Fatalf("greeting = %q, want %q", first.Greeting, want)
+	}
+	if first.CallbackID != "" {
+		t.Fatalf("callback id = %q, want empty with no callback", first.CallbackID)
+	}
+	returning := host.Build(host.Input{PriorEpisodes: 2})
+	if want := "Welcome back, tell me what is on your mind today."; returning.Greeting != want {
+		t.Fatalf("greeting = %q, want %q", returning.Greeting, want)
+	}
+	if returning.CallbackID != "" {
+		t.Fatalf("callback id = %q, want empty with no callback", returning.CallbackID)
+	}
+	cited := host.Build(host.Input{
+		PriorEpisodes: 2,
+		Callback: &host.Callback{
+			ID: "cb-1",
+			Mention: host.Mention{
+				ID:            "m-1",
+				EpisodeNumber: 5,
+				Kind:          "person",
+				Quote:         "the talk I keep dreading with my sister",
+			},
+		},
+	})
+	if !strings.Contains(cited.Greeting, "the talk I keep dreading with my sister") {
+		t.Fatalf("greeting = %q, want it to cite the callback quote", cited.Greeting)
+	}
+	if cited.CallbackID != "cb-1" {
+		t.Fatalf("callback id = %q, want cb-1", cited.CallbackID)
+	}
+}
+
+// TestReturningOpenerLoadsFromStoredEpisodes seeds a returning owner with
+// no unused callback and checks Load greets them back, proving the count
+// query excludes the open recording row.
+func TestReturningOpenerLoadsFromStoredEpisodes(t *testing.T) {
+	t.Parallel()
+	db := openSeason(t)
+	addOwner(t, db, "owner-back")
+	addEpisode(t, db, "back-ep1", "owner-back", 1, "ready")
+	addEpisode(t, db, "back-ep2", "owner-back", 2, "ready")
+	addEpisode(t, db, "back-ep3", "owner-back", 3, "recording")
+	config, err := host.Load(t.Context(), db, "owner-back")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if want := "Welcome back, tell me what is on your mind today."; config.Greeting != want {
+		t.Fatalf("greeting = %q, want %q", config.Greeting, want)
+	}
+	if config.CallbackID != "" {
+		t.Fatalf("callback id = %q, want empty with no callback", config.CallbackID)
 	}
 }
