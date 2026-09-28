@@ -1590,7 +1590,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       internal/gemini/chapters.go, internal/gemini/calls_test.go,
              internal/analysis/run.go, internal/analysis/run_test.go
-status:     in-progress:land:t7.56-impl@c122b2eec22b6c2390df33c602daceaaad5e6298
+status:     done:7ba505e
 ```
 **Defect.** Analysis failed on the 40 second episode 7 render in T6.4b round 2, with
 `chapters: gemini: truncated answer: answer hit the output cap`. `CompleteChapters`
@@ -1634,6 +1634,11 @@ Record the tokens spent in the handoff.
 
 ### What exists now
 
+T7.56 landed at 7ba505e after round 1 APPROVE with zero findings.
+Chapter reasoning runs inside a 4096 cap with its own 1024
+thinking budget. The tree matches reviewed commit c122b2e. Main
+had moved, so the landing rebased. Race tests on gemini and
+analysis passed on the rebased commit.
 T7.55 landed at e0cfc42 after round 1 APPROVE with zero findings.
 The cold open never replays the first 30 seconds. The tree
 matches reviewed commit 7ca36ee. Main had moved, so the landing
