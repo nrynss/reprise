@@ -1558,7 +1558,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       internal/editorial/validate.go, internal/editorial/validate_test.go,
              internal/editorial/run_test.go
-status:     in-progress:review-r1:t7.55-rev-r1@7ca36eedaf3a3e3a8e16e8d0b8028e77714d14bb
+status:     in-progress:land:t7.55-impl@7ca36eedaf3a3e3a8e16e8d0b8028e77714d14bb
 ```
 **Defect.** The episode 7 render in T6.4b round 2 runs 56.6 seconds from a 40.4 second take. Its
 stored cold open spans words 0 to 28, which is the opening itself. The render plays those 16
