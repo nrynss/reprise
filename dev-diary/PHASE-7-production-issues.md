@@ -2453,7 +2453,7 @@ requires:   T7.68
 fixture-ok: yes
 size:       XS · frontier
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:review-r1:t7.79-rev-r1@184c258e356f43a28d0df3d009a9408e130ba169
+status:     in-progress:land:t7.79-impl@184c258e356f43a28d0df3d009a9408e130ba169
 ```
 **Defect.** On 2026-09-28 at 19:53 UTC, `GET /api/episodes` answered 429 with `retry-after: 51`. The
 owner's gallery hung on "Loading the live season." Traefik logged only 25 episode requests in
