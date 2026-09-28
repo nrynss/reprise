@@ -1619,6 +1619,130 @@ fixed the same failure for the editorial call in `internal/gemini/schema.go`.
 key, running `internal/gemini/live_test.go` under the `live` tag on a short render is welcome.
 Record the tokens spent in the handoff.
 
+### T7.57: A session the server cannot tie to a provider record still pays
+```yaml
+requires:   T7.48, T7.49
+fixture-ok: yes
+size:       M · frontier
+owns:       internal/broker/settle.go, internal/broker/sweep.go, internal/broker/reconcile.go,
+             internal/broker/settle_test.go, internal/broker/sweep_test.go,
+             internal/broker/reconcile_test.go, internal/episode/sessions.go,
+             internal/episode/service_test.go, internal/api/session_end.go,
+             internal/api/respond.go, internal/api/handlers_test.go
+status:     not-started
+```
+**Defect.** The browser reports the provider session id, and the server never checks it. Two
+paths then settle nothing, and the reservation expires with no charge.
+
+* **No id reported.** `ListOpen` (`internal/broker/settle.go`) keeps only rows with
+  `s.provider_session_id <> ''`. Its comment says such rows "age out of their holds by
+  reservation expiry instead". The two tab-closed takes of 2026-09-27 ended exactly so. Their
+  leases read `expired` with 0 settled.
+* **A made-up id.** The sweep reads the provider status, gets `ErrProviderGone`, and runs
+  `reviewGone` (`internal/broker/sweep.go`). That books 0 seconds and raises an alert.
+
+Any anonymous visitor can therefore hold a call up to the 1800 second cap without touching the
+owner budget or the daily ceiling. AssemblyAI still bills the account. `RecordSessionEnd`
+(`internal/episode/sessions.go`) also lets a later post replace a stored id with a different one.
+
+**Change.**
+1. **Charge the cap when the provider record cannot be read.** In `reviewGone`, settle through
+   `s.reconciler.ReconcileAbandoned` with `DurationSeconds: candidate.TokenCapSeconds`, and
+   empty artifact URLs. Keep the `AlertNeedsReview` alert, and change its detail to say the
+   full cap was charged.
+2. **Sweep rows with no id.** Drop the `s.provider_session_id <> ''` filter from `ListOpen`, and
+   rewrite its comment. In the sweep, a candidate with an empty id never reads the provider. It
+   waits until `OpenSeconds >= TokenCapSeconds + margin`, as open sessions do. Then it settles
+   the full cap through `ReconcileAbandoned` and raises `AlertNeedsReview`. Remove the empty id
+   refusal from the sweep's candidate check. In `validate` (`internal/broker/reconcile.go`),
+   allow an empty provider id for `ReconcileAbandoned` only. `Reconcile` still refuses one.
+   `endProvider` already skips an empty id.
+3. **Reject a bad report.** In `RecordSessionEnd`, refuse with a new sentinel
+   `episode.ErrProviderConflict` when:
+   * the id does not match `^sess_[0-9a-f]{32}$`.
+   * the row already holds a different non-empty id.
+   * another session row already holds this id.
+
+   An empty id and a repeat of the stored id still succeed. In `internal/api/session_end.go`,
+   map the sentinel to 409 with a new code `CodeProviderConflict = "provider_conflict"` in
+   `respond.go`. Both the `/end` and `/provider` routes get this.
+
+**Tests.**
+* `sweep_test.go`: a candidate whose status read returns `ErrProviderGone` settles
+  `TokenCapSeconds`. Its reservation is released and the owner budget is charged the cap price.
+* `sweep_test.go`: a candidate with an empty id and `OpenSeconds` past the cap plus margin
+  settles the cap, and no provider read happens. One under the cap is skipped.
+* `settle_test.go`: `ListOpen` returns a row with an empty provider id.
+* `service_test.go`: each of the three refusals returns `ErrProviderConflict`. An empty id and a
+  repeat still succeed.
+* `handlers_test.go`: a conflicting post answers 409 with `provider_conflict`.
+
+**Done when:** The tests pass under `go test -race`, and the gate passes in a fresh worktree.
+Restoring the zero settle in `reviewGone` fails the first test. Restoring the filter fails the
+second.
+
+**Note.** This blocks the next deploy. The fix charges a real user the full $2.25 when the
+browser never reports its id, as a crashed tab does. The review alert is how the owner refunds
+it. Say that in the handoff.
+
+### T7.58: The editor answers after a revert in Firefox
+```yaml
+requires:   T7.53
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/routes/episode/[id]/edit/edit.playwright.config.ts,
+             web/src/routes/episode/[id]/edit/edit.spec.ts, web/src/lib/editor/draft.ts,
+             web/src/routes/episode/[id]/edit/+page.svelte, .github/workflows/ci.yml
+status:     not-started
+```
+**Defect.** In T6.4b round 2 the owner reverted both cuts on the Firefox draft. Play and the
+slider then stopped answering until a reload. T7.52 could not reproduce it, because every editor
+spec runs in Chromium only. `edit.playwright.config.ts` lists one project, `chromium`. CI installs
+only `chromium webkit` (`.github/workflows/ci.yml`, the `npx playwright install` step).
+
+**Change.**
+1. Add a `firefox` project to `edit.playwright.config.ts`, and add `firefox` to the CI install
+   step.
+2. Reproduce in Firefox. Revert every cut on a fixture draft whose first cut starts at word 0,
+   as the Firefox draft's did (words 0 to 3). Then press Play and drag the waveform.
+3. If it reproduces, write the failing spec first, then fix it in `draft.ts` or `+page.svelte`.
+   If it does not, say so in the handoff, with what you ran. Keep the Firefox project either way.
+4. Also check whether the Chrome notice "Playback refused. Press play again after a gesture."
+   appears on a first Play press after load. If it does, name the cause in the handoff.
+
+**Done when:** The editor suite passes in both projects, and the gate passes in a fresh worktree
+three times in a row. The review file records the three exit codes, because the gate changed.
+
+### T7.59: The transcript stops waiting for host words after a minute
+```yaml
+requires:   T7.53
+fixture-ok: yes
+size:       S · mid
+owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
+status:     not-started
+```
+**Defect.** `awaitHostReplies` (`cmd/reprise/main.go`) polls every `timelinePoll` (20 ms) until
+the provider timeline is stored, or until a reconcile for the episode has ended. It has no
+deadline of its own. If the End post never reaches the server, no reconcile starts. The
+transcript then waits for the sweep, which is about 31 minutes, and the processing page shows
+transcription running all that time.
+
+**Change.**
+1. Add `hostRepliesWait = 60 * time.Second`, with a doc comment. The reconcile backoff tops out
+   at 23.5 seconds, so a minute covers a normal close with margin. It stays under the 100 second
+   limit.
+2. Store the bound on `jobs` as a field, so a test can shorten it. In `awaitHostReplies`, count
+   polls, and once the bound passes, return no replies and no error. The batch then runs on the
+   guest words alone, as it does after an errored reconcile.
+3. Log one line naming the episode when the bound passes.
+
+**Tests** in `main_test.go`: with the bound set to a few polls and no reconcile job, the wait
+returns empty replies and a nil error. With a timeline stored before the bound, it returns the
+host replies. Neither test asserts a wall-clock duration.
+
+**Done when:** The tests pass under `go test -race`, and the gate passes in a fresh worktree.
+Removing the bound makes the first test hang, and the test's own context timeout fails it.
+
 ---
 
 ## Exit criteria
