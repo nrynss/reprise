@@ -1481,7 +1481,7 @@ size:       L · frontier
 owns:       internal/render/, internal/api/episodes.go, internal/api/playback_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts
-status:     in-progress:land:t7.53-impl@700dc519ffc7d30d98af03c2ca8ed977685f7ff9
+status:     done:e7ecc58
 ```
 **Defect.** The owner edited both T6.4b round 2 drafts hearing only their own voice.
 `episodeDetailJSON.AudioURL` (`internal/api/episodes.go`) names the user stem when one exists,
@@ -1629,7 +1629,7 @@ owns:       internal/broker/settle.go, internal/broker/sweep.go, internal/broker
              internal/broker/reconcile_test.go, internal/episode/sessions.go,
              internal/episode/service_test.go, internal/api/session_end.go,
              internal/api/respond.go, internal/api/handlers_test.go
-status:     in-progress:implement:t7.57-impl
+status:     in-progress:review-r1:t7.57-rev-r1@73618809c0e7cda925dbe612eaea17a24a9483f5
 ```
 **Defect.** The browser reports the provider session id, and the server never checks it. Two
 paths then settle nothing, and the reservation expires with no charge.
@@ -1693,7 +1693,7 @@ size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/edit.playwright.config.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts, web/src/lib/editor/draft.ts,
              web/src/routes/episode/[id]/edit/+page.svelte, .github/workflows/ci.yml
-status:     not-started
+status:     in-progress:implement:t7.58-impl
 ```
 **Defect.** In T6.4b round 2 the owner reverted both cuts on the Firefox draft. Play and the
 slider then stopped answering until a reload. T7.52 could not reproduce it, because every editor
@@ -1719,7 +1719,7 @@ requires:   T7.53
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     not-started
+status:     in-progress:implement:t7.59-impl
 ```
 **Defect.** `awaitHostReplies` (`cmd/reprise/main.go`) polls every `timelinePoll` (20 ms) until
 the provider timeline is stored, or until a reconcile for the episode has ended. It has no
@@ -1759,6 +1759,13 @@ Removing the bound makes the first test hang, and the test's own context timeout
 
 ### What exists now
 
+T7.53 landed at e7ecc58 after round 1 APPROVE with zero findings.
+The draft mixes and plays a two-voice preview on the word clock
+through a free idempotent preview kind. The tree matches
+reviewed commit 700dc51. Main had moved, so the landing rebased.
+Race tests on render, api, and cmd/reprise passed on the rebased
+commit, and the draft pin passed. Owns widened by decision to
+the draft preview pin. T7.58 and T7.59 unblock on this landing.
 T7.51 landed at 2cea171 after round 2 APPROVE with zero residue.
 Round 1 had one H finding. Concurrent same-owner mints cited
 the same callback. The landed pass claims the row conditionally
