@@ -11,6 +11,7 @@ import {
 	emptyProcessing,
 	ProcessingController,
 	readingFromJob,
+	resumedUploadDetail,
 	stoppedDetail,
 	uploadDetail,
 	uploadPercent,
@@ -71,6 +72,16 @@ describe('uploadDetail', () => {
 		expect(uploadDetail(10, 40)).toBe('Uploading the take. 10 of 40 bytes.');
 		expect(uploadPercent(10, 40)).toBe(25);
 		expect(uploadPercent(0, 0)).toBe(0);
+	});
+});
+
+describe('resumedUploadDetail', () => {
+	it('reads durable when the resumed receipts carry no bytes', () => {
+		expect(resumedUploadDetail(2, 0)).toBe('Both stems durable.');
+	});
+
+	it('names the stored stems and bytes', () => {
+		expect(resumedUploadDetail(2, 8164824)).toBe('2 stems, 8164824 bytes durable.');
 	});
 });
 

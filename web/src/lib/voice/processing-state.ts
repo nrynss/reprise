@@ -83,6 +83,13 @@ export function uploadDetail(stored: number, captured: number): string {
 	return `Uploading the take. ${stored} of ${captured} bytes.`;
 }
 
+// resumedUploadDetail names a resumed upload from its stored bytes. A zero
+// total means the receipts are missing, so the count would mislead.
+export function resumedUploadDetail(count: number, totalBytes: number): string {
+	if (totalBytes <= 0) return 'Both stems durable.';
+	return `${count} stems, ${totalBytes} bytes durable.`;
+};
+
 // uploadPercent is the share of captured bytes the server has acknowledged.
 export function uploadPercent(stored: number, captured: number): number {
 	if (captured <= 0) return 0;
@@ -524,7 +531,7 @@ export class ProcessingController {
 			this.snapshot.upload = {
 				...this.snapshot.upload,
 				state: 'done',
-				detail: `${count} stems, ${total} bytes durable.`,
+				detail: resumedUploadDetail(count, total),
 				percent: 100
 			};
 			this.emit();
