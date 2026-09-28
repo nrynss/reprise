@@ -2248,7 +2248,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:land:t7.73-impl@64478e17bcaa22f4890e994b68bffb91afa6d18b
+status:     done:e683517
 ```
 **Defect.** The owner edited the live drafts of 2026-09-28. The waveform showed no progress and
 nothing that looked draggable. A drag on it still seeked. Two causes, both in the editor.
@@ -2335,7 +2335,7 @@ size:       S · frontier
 owns:       web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts,
              web/src/routes/welcome/welcome.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/threads/threads.test.ts, web/package.json, web/package-lock.json
-status:     not-started
+status:     in-progress:implement:t7.75-impl
 ```
 **Defect.** In real Chrome on 2026-09-28, the owner's first Play press on a draft always showed
 "Playback refused. Press play again after a gesture." The second press played. The episode page
@@ -2581,6 +2581,11 @@ name or a topic before a row forms. Say so in the handoff.
 
 ### What exists now
 
+T7.73 landed at e683517 after round 1 APPROVE with zero findings.
+The editor waveform shows the playhead and live peaks with a
+shared seekbar. The tree matches reviewed commit 64478e1. Main
+had moved, so the landing rebased. The draft pin passed on the
+rebased commit. T7.75 unblocks on this landing.
 T7.78 landed at c7a7e33 after round 1 APPROVE with zero findings.
 The analysis batch pass requests, parses, prices, and stores
 entities and key phrases at the combined hourly rate. The tree
