@@ -1479,7 +1479,8 @@ requires:   T7.51, T7.52
 fixture-ok: yes
 size:       L · frontier
 owns:       internal/render/, internal/api/episodes.go, internal/api/playback_test.go,
-             cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/editor/draft.ts
+             cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/editor/draft.ts,
+             web/src/lib/editor/draft.test.ts
 status:     in-progress:implement:t7.53-impl
 ```
 **Defect.** The owner edited both T6.4b round 2 drafts hearing only their own voice.
