@@ -1257,254 +1257,364 @@ run, and the CI run for the landing commit is green.
 ```yaml
 requires:   T7.36, T7.43
 fixture-ok: yes
-size:       S · frontier
-owns:       web/src/lib/voice/session-calls.ts, web/src/lib/voice/record-state.ts,
-             internal/api/session_end.go, internal/api/routes.go, cmd/reprise/main.go
+size:       S · mid
+owns:       web/src/lib/voice/session-calls.ts, web/src/lib/voice/session-calls.test.ts,
+             internal/api/session_end.go, internal/api/handlers_test.go,
+             internal/api/routes.go, internal/api/routes_test.go,
+             cmd/reprise/main.go, cmd/reprise/main_test.go
 status:     not-started
 ```
-The T6.4b round 2 runs on `63c0cb3` found this. `reportProviderSession`
-stores the provider id while the take runs by posting to
-`/api/sessions/{id}/end`. That is the same route End uses. `settleOnEnd`
-then starts a reconcile one second into the take. It happened on three
-of four runs, at 05:38:19, 05:59:43 and 06:00:47 UTC.
+**Defect.** `reportProviderSession` (`web/src/lib/voice/session-calls.ts`) stores the provider id
+while the take runs. It does that by calling `closeSession`, which posts to
+`POST /api/sessions/{id}/end`. End uses the same route. The server wraps that route in
+`settleOnEnd` (`cmd/reprise/main.go`, `func (s *settleOnEnd) ServeHTTP`). So a reconcile job starts
+about one second into every take. The reconcile then finds the call open and calls `StopSocket`,
+which writes `session.end` on the live call. T6.4b round 2 saw this at 05:38:19, 05:59:43 and
+06:00:47 UTC on 2026-09-28.
 
-That reconcile finds the call open and calls `StopSocket`, which writes
-`session.end` on the live call. On these runs the call kept going, and
-nothing proves why. A take that the server ends one second in breaks the
-demo.
+**Change.**
+1. Add a route `POST /api/sessions/{id}/provider`. It takes the same body as `/end`,
+   `{"provider_session_id": "..."}`, and calls the same `RecordSessionEnd` store method.
+   * Register it in `NewSessionEnd` (`internal/api/session_end.go`) beside the `/end` pattern.
+   * Add it to `routeTable` and to `handlerFor` in `internal/api/routes.go`. It maps to
+     `d.SessionEnd`, like `/end`.
+2. In `settleOnEnd.ServeHTTP`, start the reconcile only when `r.URL.Path` ends in `/end`. A
+   `/provider` post records the id and returns. It starts no job.
+3. In `reportProviderSession`, post to `/api/sessions/{id}/provider` instead of calling
+   `closeSession`. Keep its contract: an empty id posts nothing and returns false, and a refusal
+   returns false without throwing.
+4. Leave `closeSession`, the `SessionGuard` url in `record-state.ts`, and the `pagehide` and
+   `beforeunload` paths on `/end`. A real close must still start the reconcile.
 
-* The early report records the provider id and nothing else. It starts
-  no reconcile and ends nothing.
-* Only a real close (End, `pagehide`, `beforeunload`) starts the
-  reconcile.
-* The sweep still finds a crashed take through the early id.
+**Tests.**
+* `cmd/reprise/main_test.go`: copy the setup of `TestSettleEndSettlesExactlyOnce`. Post to
+  `/provider` and assert that no reconcile job starts. Post to `/end` and assert that exactly one
+  starts.
+* `internal/api/routes_test.go`: the table carries the new route, and it serves `SessionEnd`.
+* `internal/api/handlers_test.go`, where the `NewSessionEnd` tests live: a `/provider` post
+  records the id and answers 200 with the same JSON as `/end`.
+* `web/src/lib/voice/session-calls.test.ts`: `reportProviderSession` fetches a url ending in
+  `/provider`, and `closeSession` still fetches one ending in `/end`.
 
-**Done when:** A test posts the early report for a live session and sees
-no reconcile job and no `session.end`. A test posts the close and sees
-one reconcile. Routing the early report back through the end path fails
-the first test.
+**Done when:** All four tests pass, and the gate passes in a fresh worktree. Pointing
+`reportProviderSession` back at `closeSession` fails the web test. Deleting the path check in
+`settleOnEnd` fails the Go test.
+
+**Do not** change `internal/broker/`. T7.49 owns the reconcile.
 
 ### T7.49: A reconcile after a close waits for the provider duration
 ```yaml
 requires:   T7.43
 fixture-ok: yes
 size:       S · frontier
-owns:       internal/broker/reconcile.go, internal/broker/settle.go
+owns:       internal/broker/reconcile.go, internal/broker/reconcile_test.go,
+             internal/broker/end_test.go
 status:     not-started
 ```
-T6.4b round 2 found this. Every reconcile on four runs failed with
-`provider session is still open`. That includes the reconciles after End
-and after a tab close. `readForSettle` writes `session.end`, then reads
-once more at once. The provider takes a moment to write the duration, so
-that second read still finds it open.
+**Defect.** Every reconcile on the four T6.4b round 2 runs failed with
+`provider session is still open`. That covers the reconciles after End and after a tab close.
+`readForSettle` (`internal/broker/reconcile.go`) reads the provider session. When the read
+returns `ErrSessionOpen`, it calls `StopSocket` and reads again straight away. The provider
+writes the duration a moment after the close, so the second read also fails. A paid job never
+reruns, so the session waits for the sweep. The sweep takes a session only past the 1800 second
+cap plus its margin, which was 31 minutes on these runs.
 
-A paid job never reruns, so nothing settles until the sweep passes the
-1800 second cap plus its margin. Until then each lease holds 2.25
-dollars. The provider recording is not stored either, and its artifact
-URL ages meanwhile.
+Meanwhile each lease holds 2.25 dollars and the provider recording is not stored. The timeline is
+not stored either. So the transcript pass ran without the host replies, and both round 2
+transcripts hold only the user's words.
 
-* After a close, the reconcile reads again on a bounded backoff until the
-  duration appears. It stays well inside the 100 second limit.
-* A session still open when the wait runs out is left to the sweep, with
-  a detail that says so. It never settles on a guess.
-* The settle and the recording store still happen exactly once.
+The existing fake `openThenClosed` (`internal/broker/end_test.go`) closes the moment
+`StopSocket` runs. That hides the delay, which is why the tests passed.
 
-**Done when:** A test with a fake provider that reports open for two
-reads, then a duration, settles the session once and stores the
-recording. Removing the backoff fails that test. A provider that never
-closes leaves the session to the sweep, with no settle.
+**Change.**
+1. Add `Wait func(ctx context.Context, d time.Duration) error` to `ReconcilerConfig`, and store it
+   on `Reconciler`. A nil `Wait` uses a real timer that returns `ctx.Err()` when the context ends.
+   Tests pass a `Wait` that returns at once and records each duration.
+2. Add a backoff constant, `settleReadBackoff`, of 500 ms, 1 s, 2 s, 4 s, 8 s and 8 s. That is
+   23.5 seconds in total, well inside the 100 second limit.
+3. In `readForSettle`, keep the first read and the single `StopSocket`. Then read again after each
+   backoff step until the read succeeds or returns an error other than `ErrSessionOpen`.
+4. If every step still finds the session open, return the error wrapping `ErrSessionOpen`. The
+   sweep settles the session later. Never settle on a guessed duration.
 
-The failed reconcile also never stored the provider timeline. The
-transcript pass therefore ran without the host replies, and both round 2
-transcripts hold only the user's words. The test above also checks that
-the settled session stores its timeline.
+**Tests** in `internal/broker/reconcile_test.go`.
+* Write a fake reader that returns `ErrSessionOpen` for the first N reads after `StopSocket`,
+  then a duration with recording and timeline URLs. With N = 2, one `Reconcile` settles the
+  session and stores both artifacts. `reconcile_state.settled` reads 1, and
+  `recording_media_id` and `timeline_media_id` are set. `StopSocket` runs once, and `Wait`
+  saw 500 ms and then 1 s.
+* A reader that never closes returns an error wrapping `ErrSessionOpen`. It leaves the row
+  unsettled, and `Wait` saw all six steps.
+* A second `Reconcile` on the settled session calls neither `StopSocket` nor `Wait`.
+
+**Done when:** The tests pass under `go test -race ./internal/broker/`, and the gate passes in a
+fresh worktree. Replacing the backoff loop with one read fails the first test.
+
+**Note.** This fix lands before the next deploy and together with T7.48. Alone, the early id
+report would start a 23 second wait mid-take.
 
 ### T7.50: The processing page reports the real stem bytes after a resume
 ```yaml
 requires:   T7.47
 fixture-ok: yes
 size:       XS · light
-owns:       web/src/lib/voice/processing-state.ts
+owns:       web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts
 status:     not-started
 ```
-On T6.4b round 2's Firefox run, Upload read `2 stems, 0 bytes durable`.
-The box held both stems, 5554988 and 2609836 bytes. The resume path at
-`processing-state.ts:527` sums receipts that carry no byte counts.
+**Defect.** On the T6.4b round 2 Firefox run, Upload read `2 stems, 0 bytes durable`. The box held
+5554988 and 2609836 bytes. The resume path in `ProcessingController`
+(`web/src/lib/voice/processing-state.ts`, the loop over `ChunkUploader.resume()`) adds
+`resumed.receipt?.sizeBytes ?? 0` to `total`. It counts a stem even when its receipt is missing.
+It then prints `${count} stems, ${total} bytes durable.`.
 
-* Show the byte counts the receipts or the server report. When none is
-  known, say the stems are durable without a number.
-* Never print zero bytes for a stem the server holds.
+**Change.**
+1. Export a pure function `resumedUploadDetail(count: number, totalBytes: number): string`. It
+   returns `Both stems durable.` when `totalBytes <= 0`. Otherwise it returns
+   `${count} stems, ${totalBytes} bytes durable.`.
+2. Use it for the `pair === null` branch that now builds the string inline.
 
-**Done when:** A test resumes with receipts that carry no byte counts
-and sees no `0 bytes`. Restoring the old sum fails it.
+**Tests** in `processing-state.test.ts`, beside the `uploadDetail` block.
+* `resumedUploadDetail(2, 0)` returns `Both stems durable.`.
+* `resumedUploadDetail(2, 8164824)` returns `2 stems, 8164824 bytes durable.`.
+
+**Done when:** Both tests pass, and the gate passes in a fresh worktree. Returning the old
+template for zero bytes fails the first test.
 
 ### T7.51: The opener speaks from the owner's real history
 ```yaml
 requires:   T7.48
 fixture-ok: yes
-size:       S · frontier
-owns:       internal/host/, internal/memory/callback.go, cmd/reprise/main.go
+size:       S · mid
+owns:       internal/host/, cmd/reprise/main.go, cmd/reprise/main_test.go
 status:     not-started
 ```
-T6.4b round 2 found two defects in the greeting.
+**Defect 1.** The Firefox owner held four episodes, two of them drafts, and heard "Welcome to your
+first episode". `host.Build` (`internal/host/host.go`) falls back to the constant `opener`
+whenever no unused callback exists. It never checks whether the owner has episodes. An episode
+count is a stored fact, so the greeting must not claim one it never read.
 
-The Firefox owner held four episodes, two of them drafts, and heard
-"Welcome to your first episode". `host.Build` falls back to that opener
-whenever no unused callback exists (`internal/host/host.go:80`). An
-episode count is a stored fact, so the prompt must not assert one it
-never read.
+**Defect 2.** Nothing calls `memory.MarkUsed` (`internal/memory/callback.go`). Both of the Chrome
+owner's callbacks still read `used = 0`. `unusedCallback` in `internal/host/host.go` returns the
+oldest unused row. So the host greets every take with the same callback, from episode 5.
 
-Nothing calls `memory.MarkUsed`. Both of the Chrome owner's callbacks
-still read `used = 0`. The host therefore greets every take with the
-oldest one, from episode 5.
+**Change.**
+1. In `internal/host/host.go`, add `PriorEpisodes int` to `Input`. `Load` fills it with
+   `SELECT COUNT(*) FROM episodes WHERE owner_id = ? AND state != 'recording'`. The broker builds
+   the config before it creates the new episode row, so the count holds only earlier episodes.
+2. Add a second constant, `returningOpener = "Welcome back, tell me what is on your mind today."`.
+   `Build` uses the callback greeting when a callback exists. Otherwise it uses `opener` when
+   `PriorEpisodes == 0` and `returningOpener` when it is above 0.
+3. Add `CallbackID string` with the tag `json:"-"` to `Config`. `Build` sets it to
+   `in.Callback.ID` only when the greeting actually cites that callback.
+4. In `hostBuilder.BuildSessionConfig` (`cmd/reprise/main.go`), call
+   `memory.MarkUsed(ctx, b.db, ownerID, cfg.CallbackID)` after `host.Load` succeeds, when
+   `CallbackID` is not empty. A failed mark returns the error, so the mint refuses rather than
+   repeating a callback silently.
 
-* Say "first episode" only when the owner has no earlier episode. An
-  owner with episodes and no callback hears a plain opener that claims
-  no count.
-* Mark the callback used once the session that carries its greeting
-  starts, so the next take moves on to the next callback.
-* Keep reading only the owner's own rows.
+**Tests.**
+* `internal/host/host_test.go`: with `PriorEpisodes: 2` and no callback, the greeting equals
+  `returningOpener`. With `PriorEpisodes: 0`, it equals `opener`. With a callback, it cites the
+  quote and `CallbackID` equals the callback id.
+* `cmd/reprise/main_test.go`: seed one owner with two unused callbacks on two episodes. Call
+  `BuildSessionConfig` twice. The two greetings differ, and both rows read `used = 1`.
 
-**Done when:** A test with two stored episodes and no callback gets a
-greeting without "first episode". A test mints two sessions for one
-owner with two callbacks and sees two different greetings. Dropping the
-`MarkUsed` call fails the second test.
+**Done when:** The tests pass under `go test -race`, and the gate passes in a fresh worktree.
+Removing the `MarkUsed` call fails the second test.
+
+**Note.** The `memory.Select` comment says the mark follows the spoken greeting. Marking at mint
+is one step earlier, so a mint that fails after the config is built loses one callback. Record
+that in the handoff. Do not edit `internal/broker/` to move the mark.
 
 ### T7.52: The editor reads, seeks and leaves like a page
 ```yaml
 requires:   T7.47
 fixture-ok: yes
 size:       S · mid
-owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts
+owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
+             web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts
 status:     not-started
 ```
-The owner tried the editor on both round 2 drafts in T6.4b. Six defects
-turned up.
+The owner used the editor on both T6.4b round 2 drafts. Seven defects turned up. Fix each one
+separately, and pin each one with its own test.
 
-* The transcript reads as one run of text, such as
-  `Oh,hello.Thisisjustatest.`. Each word is a `<button>` with no
-  whitespace between them. Put a space between words, and keep one word
-  per button.
-* The waveform canvas seeks only from the keyboard. Add pointer seek and
-  drag on it.
-* After a cut is reverted, play and seek stop answering until a reload.
-  Both must work after every revert and restore.
-* The position read `0:40 of 0:34`. The shown position never passes
-  the shown length.
-* The editor has no way back to the gallery. Add a link, as the episode
-  page has.
-* An editorial answer with no callback still shows a "Planted for next
-  time" block, empty but with a revert control. Show no block when
-  nothing was planted.
-* A draft with no stored cold open showed `Hello,` as its proposed
-  cold open. The empty default at `draft.ts:103` names word 0. Show no
-  cold open block when none was proposed.
+1. **Words run together.** The transcript reads `Oh,hello.Thisisjustatest.`. In `+page.svelte`,
+   the `{#each snap.words ...}` block emits one `<button>` per word with no whitespace between
+   them. Add a `{' '}` text node after each word, outside the `<button>` and outside the `<s>`.
+2. **No pointer seek.** The waveform `<canvas role="slider">` handles only `onkeydown`. Add
+   `onpointerdown` and `onpointermove`. `onpointermove` acts only while `event.buttons === 1`.
+   Seek to `(event.offsetX / canvas.clientWidth) * snap.duration` through `controller.seekTo`.
+   Call `setPointerCapture` on pointer down.
+3. **The shown length is wrong.** `installDraft` sets `duration` to the last word's end, so the
+   page read `0:40 of 0:34`. The Chaaya `AudioPlayer` exposes `duration`. Once it reads above 0,
+   use it for `snap.duration` and for the waveform regions. The position shown never exceeds the
+   length shown.
+4. **Play and seek stop after a revert.** After `revertCut`, Play and the waveform stop answering
+   until a reload. Nobody has found the cause. Write the failing browser test first, then find
+   it. Check the `TranscriptFollower` skip spans after `refreshCuts`, and whether
+   `this.player.play()` returns false.
+5. **No way back.** Add `<a href={resolve('/')}>Back to the gallery</a>` at the top of the page.
+   The episode page uses the same link.
+6. **An empty planted block.** An editorial answer with no callback still shows "Planted for next
+   time", empty but with a revert control. Render that block only when a callback proposal exists.
+7. **A cold open nobody proposed.** A draft with no stored cold open showed `Hello,`. The empty
+   default in `draft.ts` (`coldOpen: { start: 0, end: 0, ... }`) names word 0. Add
+   `hasColdOpen: boolean` to the snapshot. Set it only when a `cold_open` proposal exists, and
+   render the cold open block only then.
 
-**Done when:** One browser spec loads the fixture draft and checks each
-point. It finds spaced words, seeks by pointer, reverts a cut, then
-plays and seeks again. It also checks the position against the length,
-follows the gallery link, and finds no empty planted block. Removing the
-space fails the first check.
+**Tests.** Use `web/src/routes/episode/[id]/edit/edit.spec.ts` against the fixture draft.
+* The transcript's text content has a space between two adjacent words.
+* A pointer down at mid canvas moves the position near half the length.
+* Revert a cut, then Play. The position advances. Then seek, and the position moves.
+* The position text never shows a first time larger than the second.
+* A `Back to the gallery` link exists and points to `/`.
+* A fixture with no callback and no cold open shows neither block.
+
+**Done when:** Each test fails on `main` and passes after its fix, and the gate passes in a fresh
+worktree.
 
 ### T7.53: The draft plays the host with the guest
 ```yaml
-requires:   T7.52
+requires:   T7.51, T7.52
 fixture-ok: yes
-size:       M · frontier
-owns:       web/src/lib/editor/draft.ts, web/src/routes/episode/[id]/edit/+page.svelte,
-             internal/api/episodes.go
+size:       L · frontier
+owns:       internal/render/, internal/api/episodes.go, internal/api/playback_test.go,
+             cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/editor/draft.ts
 status:     not-started
 ```
-The owner edited both round 2 drafts in T6.4b hearing only their own
-voice. `audio_url` names the user stem alone
-(`internal/api/episodes.go:162`), and the host joins only at render.
-Cuts land on a conversation, so the editor must play the conversation.
-The host stem was stored on both runs.
+**Defect.** The owner edited both T6.4b round 2 drafts hearing only their own voice.
+`episodeDetailJSON.AudioURL` (`internal/api/episodes.go`) names the user stem when one exists,
+otherwise the host stem. The host joins only at render. Cuts land on a conversation, so the
+editor must play the conversation. Both host stems were stored.
 
-* The detail endpoint names both stems with their offsets.
-* The draft plays both stems on one clock, with the offsets the render
-  uses. A cut silences both.
-* A draft with one stem still plays that stem.
+**Approach.** Mix a preview on the server, and keep one audio source in the browser. The Chaaya
+`AudioPlayer` plays a single source, and two synced players drift.
 
-**Done when:** A browser check plays a fixture draft whose host stem
-holds a marker tone and finds the tone at the render offset. Dropping
-the host source fails it.
+1. In `internal/render/`, add a preview that mixes the two stems with the offsets and the mix
+   the render uses. The preview applies no cuts and no cold open. Its clock is the user stem
+   clock, so the stored word times still land on it. Reuse the render's locate and mix steps.
+   Do not copy them.
+2. Store the preview as media owned by the episode owner. Record its media id with the episode.
+   A new table or column is fine, created the way `internal/render/store.go` creates its own.
+3. Run the preview as its own `keel/job` kind. It starts where `stemsComplete`
+   (`cmd/reprise/main.go`) schedules the transcript job. It makes no paid call.
+4. Add `preview_audio_url` to the detail JSON. It stays empty until the preview exists.
+5. In `draft.ts`, load `preview_audio_url` when it is set, otherwise `audio_url`. The
+   `TranscriptFollower` skip spans stay as they are, because the clock is unchanged.
+
+**Tests.**
+* `internal/render/`: build a preview from a user stem of silence and a host stem with a 1 kHz
+  tone at 2.0 s, at a host offset of 500 ms. Run `ffmpeg astats` or a sample scan on the output,
+  and find the tone at 2.5 s within 20 ms. Dropping the host input fails it.
+* `internal/api/playback_test.go`: the detail carries `preview_audio_url` once a preview row exists.
+* `draft.test.ts`: the controller loads the preview url when the detail carries one.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree three times in a row. The
+review file records the three exit codes, because this adds a job kind to the binary.
 
 ### T7.54: An unfinished take says what it is
 ```yaml
 requires:   T7.47
 fixture-ok: yes
-size:       S · frontier
-owns:       web/src/routes/threads/threads.ts, web/src/routes/episode/[id]/+page.svelte
+size:       S · mid
+owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
+             web/src/routes/threads/gallery-finish.test.ts, web/src/routes/episode/[id]/+page.svelte
 status:     not-started
 ```
-The round 2 takes that closed their tab mid-take left episodes 8
-(Chrome) and 4 (Firefox) in `recording`, with no stems. Their pages
-read `Quoted moment at word 0. No stored quote names it.`. That points
-at a moment that does not exist. Firefox also offered Publish on a page
-with no audio.
+Three defects, each pinned by its own test.
 
-* A page with no stored quote shows no quoted moment line.
-* An episode with no audio offers no Publish. It says the take ended
-  before it was stored, and it keeps Erase.
-* Record in the handoff whether a closed take can ever resume its
-  stems. If it can, name the task that should offer that.
-* The episode 7 page kept its `rendering` badge and read "The render is
-  done. The analysis starts next." The server already held it as
-  `ready`, and analysis had failed. The page follows the stored state
-  until it settles, and it names a failed analysis.
+1. **A quoted moment that does not exist.** Every episode page opened without a `?w=` parameter
+   reads `Quoted moment at word 0. No stored quote names it.`. In `threads.ts`, the episode
+   controller runs `Number(queryValue(search, 'w') ?? '')`, and `Number('')` is `0`. Treat a
+   missing or empty `w` as no moment. Only a present, finite, non-negative number sets
+   `momentWord`.
+2. **Publish on an episode with no audio.** The two tab-closed takes left episodes 8 and 4 in
+   `recording`, with no stems. `+page.svelte` shows `Publish…` for every unpublished episode. Show
+   it only when `snap.state === 'ready'`. For a `recording` episode, show this line instead: "This
+   take ended before it was stored. There is nothing to play or publish." Keep Erase.
+3. **The gallery card stays on `rendering`.** After episode 7 rendered, its card kept the
+   `rendering` badge and `RENDERED_NOTE`. The server already held the episode as `ready`, and
+   the analysis had failed. `RECHECKED_STATES` should make the card read the detail again once
+   the render pass stops. Find why the card never took the new state. The card must end on the
+   stored state, and it names the failed analysis through `stoppedPassNote`.
 
-**Done when:** A spec loads a recording episode with no stems and finds
-no quoted moment, no Publish, and a working Erase. Restoring the moment
-line fails it.
+**Tests.**
+* `threads.test.ts`: a controller mounted with an empty search has `momentWord` null, and no
+  notice mentions a quoted moment. With `?w=12` it is 12.
+* `threads.test.ts`: a `recording` episode with no audio exposes no Publish control.
+* `gallery-finish.test.ts`: a rendering card whose render finishes, and whose next detail reads
+  `ready` with a failed analysis, ends showing `ready` and the analysis failure.
+
+**Done when:** Each test fails on `main` and passes after its fix, and the gate passes in a fresh
+worktree.
+
+**Record in the handoff** whether a take closed mid-way can resume its stems from the browser
+store. If it can, name what would offer that. Build nothing for it here.
 
 ### T7.55: A cold open never replays the opening
 ```yaml
 requires:   T7.38
 fixture-ok: yes
-size:       S · mid
-owns:       internal/editorial/
+size:       XS · light
+owns:       internal/editorial/validate.go, internal/editorial/validate_test.go
 status:     not-started
 ```
-The episode 7 render in T6.4b round 2 runs 56.6 seconds from a 40.4
-second take. Its stored cold open spans words 0 to 28, which is the
-opening itself. The render plays those 16 seconds, then starts the
-episode at word 0, so the listener hears the start twice.
+**Defect.** The episode 7 render in T6.4b round 2 runs 56.6 seconds from a 40.4 second take. Its
+stored cold open spans words 0 to 28, which is the opening itself. The render plays those 16
+seconds, then starts the episode at word 0. The listener hears the start twice. The render
+repeats cold open audio on purpose, so the editorial validation must refuse this span.
 
-* A proposed cold open that overlaps the first words the episode plays
-  is dropped. The draft then opens at the top, as a reverted cold open
-  does.
-* A cold open is a short quotable moment with a length ceiling. It is
-  never a single word.
-* The store enforces both rules. The prompt alone does not.
+`validate.go` already holds a cold open to 10 to 20 seconds (`ColdOpenMinMs`, `ColdOpenMaxMs`).
+It has no rule about where the span starts.
 
-**Done when:** A test stores an editorial answer whose cold open starts
-at word 0 and finds no cold open proposal. So does one whose cold open
-is one word. Removing either check fails its test.
+**Change.**
+1. Add `ColdOpenEarliestMs = 30_000` with a doc comment. A teaser from the first half minute
+   replays audio the listener hears moments later.
+2. In the cold open check, drop the span when
+   `words[start].StartMs - words[0].StartMs < ColdOpenEarliestMs`. Log it the way the length
+   check logs, and leave `out.ColdOpen` nil.
+
+**Tests** in `validate_test.go`, beside the existing cold open cases.
+* A 15 second span that starts at word 0 is dropped. Model the cases on `TestShortColdOpenDrops`.
+* A 15 second span that starts 35 seconds in is kept.
+* A take shorter than 30 seconds keeps no cold open.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. Deleting the new check
+fails the first test.
 
 ### T7.56: Chapters fit their output cap
 ```yaml
 requires:   T7.38
 fixture-ok: yes
-size:       XS · frontier
-owns:       internal/analysis/run.go, internal/gemini/
+size:       XS · mid
+owns:       internal/gemini/chapters.go, internal/gemini/calls_test.go,
+             internal/analysis/run.go, internal/analysis/run_test.go
 status:     not-started
 ```
-Analysis failed on the 40 second episode 7 render in T6.4b round 2, with
-`chapters: gemini: truncated answer: answer hit the output cap`. The
-chapter call caps output at 800 tokens (`ChapterMaxTokens`) and sets no
-thinking budget, so reasoning spends the cap. T7.38 fixed the same
-failure for the editorial pass.
+**Defect.** Analysis failed on the 40 second episode 7 render in T6.4b round 2, with
+`chapters: gemini: truncated answer: answer hit the output cap`. `CompleteChapters`
+(`internal/gemini/chapters.go`) sets no `ThinkingConfig`. Reasoning then shares the 800 token
+cap (`ChapterMaxTokens` in `internal/analysis/run.go`) with the answer, and spends it. T7.38
+fixed the same failure for the editorial call in `internal/gemini/schema.go`.
 
-* Bound the chapter call's thinking budget, and size its output cap
-  from a measured answer.
-* A live probe behind the `live` tag runs chapters on a short and a long
-  render and records the tokens spent.
+**Change.**
+1. In `chapters.go`, add the exported `ChapterThinkingBudget = 1024` with a doc comment. Pass
+   `ThinkingConfig: &genai.ThinkingConfig{ThinkingBudget: &budget}` in `CompleteChapters`, as
+   `GenerateEditorial` does.
+2. In `run.go`, raise `ChapterMaxTokens` to 4096 and rewrite its comment. The cap must hold the
+   thinking budget plus the answer. The spend estimate reads this constant, so the reservation
+   grows with it. That is intended.
 
-**Done when:** A test checks that the chapter request carries a thinking
-budget and an output cap above it. Removing the budget fails it. The
-live probe finishes both renders without truncation.
+**Tests.**
+* `calls_test.go`: add `TestCompleteChaptersBoundsReasoning`, modelled on
+  `TestGenerateEditorialBoundsReasoning` in `client_test.go`. The config carries a positive
+  thinking budget below `MaxOutputTokens`. Pass `analysis.ChapterMaxTokens` as the cap, or 4096.
+* `run_test.go`: `ChapterMaxTokens` is at least `gemini.ChapterThinkingBudget + 1024`, so the
+  answer keeps 1024 tokens after reasoning.
 
+**Done when:** The tests pass, and the gate passes in a fresh worktree. Removing the
+`ThinkingConfig` fails the first test. A live probe is not required. If the implementer has a
+key, running `internal/gemini/live_test.go` under the `live` tag on a short render is welcome.
+Record the tokens spent in the handoff.
 
 ---
 
