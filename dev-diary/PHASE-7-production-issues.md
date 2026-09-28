@@ -1558,7 +1558,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       internal/editorial/validate.go, internal/editorial/validate_test.go,
              internal/editorial/run_test.go
-status:     in-progress:land:t7.55-impl@7ca36eedaf3a3e3a8e16e8d0b8028e77714d14bb
+status:     done:e0cfc42
 ```
 **Defect.** The episode 7 render in T6.4b round 2 runs 56.6 seconds from a 40.4 second take. Its
 stored cold open spans words 0 to 28, which is the opening itself. The render plays those 16
@@ -1634,6 +1634,10 @@ Record the tokens spent in the handoff.
 
 ### What exists now
 
+T7.55 landed at e0cfc42 after round 1 APPROVE with zero findings.
+The cold open never replays the first 30 seconds. The tree
+matches reviewed commit 7ca36ee. Main had moved, so the landing
+rebased. The editorial race suite passed on the rebased commit.
 T7.54 landed at 0b9acf2 after round 1 APPROVE with zero findings.
 An unfinished take says what it is on its page, its card, and
 its moment link. The tree matches reviewed commit 11c3752. Main
