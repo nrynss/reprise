@@ -2054,7 +2054,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/episode/[id]/edit/+page.svelte, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:land:t7.69-impl@da17deef54c47168cb7c9485a4521badcbe70a69
+status:     done:1255b2d
 ```
 **Defect.** On 2026-09-28 the owner opened the editor for their real Firefox episode `f068cb5e`.
 The page showed "The only place nobody needs anything", with rain above a shop, a bus timetable
@@ -2189,6 +2189,11 @@ while paused fails the spec.
 
 ### What exists now
 
+T7.69 landed at 1255b2d after round 1 APPROVE with zero findings.
+A refused episode read parks unready with Retry instead of the
+scripted draft. The tree matches reviewed commit da17dee. Main
+had moved, so the landing rebased. The draft pin passed on the
+rebased commit.
 T7.60 landed at ebe6f63 after round 2 APPROVE with zero residue.
 Every Start press in the record mock suite waits on the
 effect-installed handle. The tree matches reviewed commit
