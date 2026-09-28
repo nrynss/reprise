@@ -1224,7 +1224,7 @@ fixture-ok: yes
 size:       M · frontier
 owns:       internal/assemblyai/socket_test.go, web/src/lib/voice/record-state.ts,
              web/src/lib/voice/processing-state.ts, web/src/routes/processing/+page.svelte
-status:     in-progress:land:t7.47-impl@3d44caffb06604c3902fe60b7d52fbf65a0377b4
+status:     done:6fee833
 ```
 CI is red on every `main` commit. The gate stops at the first
 failure, so the red has layers. Fix them in gate order and prove
@@ -1270,6 +1270,18 @@ run, and the CI run for the landing commit is green.
 
 ### What exists now
 
+T7.47 landed at 6fee833 after round 1 APPROVE with zero findings.
+CI was red on every `main` commit. The gate stopped at
+`staticcheck` SA4006 on the T7.43 socket test, which hid four
+`svelte-check` errors from T7.40 and two leakage scan collisions
+on the T7.40 processing screen. The landed pass drops the dead
+read, widens three promise types, and respells the two
+collisions. Owns widened by decision to the two respell lines.
+The tree matches reviewed commit 3d44caf. Main had moved, so the
+landing rebased. Vet, staticcheck, and the race suite pass on the
+rebased commit, and the leakage grep is clean. The 2026-09-27
+Playwright failure does not reproduce on Chromium. CI is the
+judge on WebKit.
 T7.46 landed at 2ed5441 after round 2 APPROVE with zero residue.
 Round 1 had one M finding. The speaker forward shipped with no
 pinning test. The landed pass adds the detail endpoint pin on
