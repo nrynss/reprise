@@ -1629,7 +1629,7 @@ owns:       internal/broker/settle.go, internal/broker/sweep.go, internal/broker
              internal/broker/reconcile_test.go, internal/episode/sessions.go,
              internal/episode/service_test.go, internal/api/session_end.go,
              internal/api/respond.go, internal/api/handlers_test.go
-status:     in-progress:land:t7.57-rem-r1@87d3f61b6917b92f4b6aaba343b0f06badf8c3cf
+status:     done:9390680
 ```
 **Defect.** The browser reports the provider session id, and the server never checks it. Two
 paths then settle nothing, and the reservation expires with no charge.
@@ -1719,7 +1719,7 @@ requires:   T7.53
 fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.59-impl@1fca47d83e869536ae8a9919cee1e75cd78e1a1d
+status:     done:f616218
 ```
 **Defect.** `awaitHostReplies` (`cmd/reprise/main.go`) polls every `timelinePoll` (20 ms) until
 the provider timeline is stored, or until a reconcile for the episode has ended. It has no
@@ -1759,6 +1759,19 @@ Removing the bound makes the first test hang, and the test's own context timeout
 
 ### What exists now
 
+T7.59 landed at f616218 after round 1 APPROVE with zero findings.
+The host reply wait ends after a minute and the guest batch
+runs alone. The tree matches reviewed commit 1fca47d. Main had
+moved, so the landing rebased. Race tests on cmd/reprise passed
+on the rebased commit.
+T7.57 landed at 9390680 after round 2 APPROVE with zero residue.
+Round 1 had one C and one H finding, both stale money-path
+comments. The sweep charges the full cap for untraceable
+sessions with a review alert for the refund. The tree matches
+reviewed commit 87d3f61. Main had moved, so the landing rebased.
+Race tests on broker, episode, and api passed on the rebased
+commit. This blocks the next deploy: a crashed tab charges the
+full $2.25 and the owner refunds from the alert.
 T7.53 landed at e7ecc58 after round 1 APPROVE with zero findings.
 The draft mixes and plays a two-voice preview on the word clock
 through a free idempotent preview kind. The tree matches
