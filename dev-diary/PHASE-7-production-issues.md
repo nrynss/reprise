@@ -1360,7 +1360,7 @@ requires:   T7.47
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts
-status:     in-progress:land:t7.50-impl@4b4ba31e0d158ca94a37a07a5144efbb3c956aeb
+status:     done:e2403d1
 ```
 **Defect.** On the T6.4b round 2 Firefox run, Upload read `2 stems, 0 bytes durable`. The box held
 5554988 and 2609836 bytes. The resume path in `ProcessingController`
@@ -1634,6 +1634,11 @@ Record the tokens spent in the handoff.
 
 ### What exists now
 
+T7.50 landed at e2403d1 after round 1 APPROVE with zero findings.
+The processing page reports durable stems when a resume carries
+no byte receipts. The tree matches reviewed commit 4b4ba31.
+Main had moved, so the landing rebased. The processing-state
+pin passed on the rebased commit.
 T7.49 landed at cd4febb after round 1 APPROVE with zero findings.
 The reconcile waits out the provider close over a 500 ms to 8 s
 backoff before settling. It never settles a guessed duration.
