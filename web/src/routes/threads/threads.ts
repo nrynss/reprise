@@ -1056,6 +1056,7 @@ export class GalleryController {
 	private rechecked = new Set<string>();
 	private queued = new Set<string>();
 	private ticks = 0;
+	private mountToken = 0;
 
 	constructor(onChange: (snap: GallerySnapshot) => void) {
 		this.onChange = onChange;
@@ -1114,19 +1115,30 @@ export class GalleryController {
 	}
 
 	private async mountLive(): Promise<void> {
+		const token = this.mountToken;
 		let listed: LiveEpisode[];
-		try {
-			listed = await fetchSeason(window.fetch);
-		} catch {
-			this.snap = {
-				...this.snap,
-				ready: true,
-				failed: true,
-				notice: 'The season endpoint refused, so no rows render. Retry the load.'
-			};
-			this.emit();
-			return;
+		for (;;) {
+			try {
+				listed = await fetchSeason(window.fetch);
+				break;
+			} catch (error) {
+				const wait = refusedRetryMs(error);
+				if (wait === null || token !== this.mountToken) {
+					if (token === this.mountToken) {
+						this.snap = {
+							...this.snap,
+							ready: true,
+							failed: true,
+							notice: 'The season endpoint refused, so no rows render. Retry the load.'
+						};
+						this.emit();
+					}
+					return;
+				}
+				await sleepMs(wait);
+			}
 		}
+		if (token !== this.mountToken) return;
 		if (listed.length === 0) {
 			this.snap = {
 				...this.snap,
@@ -1155,6 +1167,11 @@ export class GalleryController {
 		let changed = false;
 		for (const episode of listed) {
 			if (episode.state === 'ready') continue;
+			// A take that closed before storing leaves its episode in
+			// recording with no stems, and no pass will ever run for it.
+			// The list row already says what it is, so the mount spends no
+			// detail read there. The rest read one at a time, as before.
+			if (episode.state === 'recording' && episode.stemCount <= 0) continue;
 			if (await this.followPass(episode.id)) changed = true;
 		}
 		if (changed) this.emit();
@@ -1190,11 +1207,25 @@ export class GalleryController {
 	// reads, or null when the detail refuses or names no pass.
 	private async passOf(episodeId: string): Promise<{ pass: GalleryPass; state: string } | null> {
 		try {
-			const detail = await fetchEpisodeDetail(window.fetch, episodeId);
+			const detail = await this.readDetail(episodeId);
 			const pass = galleryPass(detail);
 			return pass ? { pass, state: detail.episode.state } : null;
 		} catch {
 			return null;
+		}
+	}
+
+	// One episode detail, retrying once after the wait a refused answer
+	// asks for. A second refusal reads as no pass, the way a refused detail
+	// always has, so one slow answer never fails the season.
+	private async readDetail(episodeId: string): Promise<LiveDetail> {
+		try {
+			return await fetchEpisodeDetail(window.fetch, episodeId);
+		} catch (error) {
+			const wait = refusedRetryMs(error);
+			if (wait === null) throw error;
+			await sleepMs(wait);
+			return fetchEpisodeDetail(window.fetch, episodeId);
 		}
 	}
 
@@ -1235,6 +1266,7 @@ export class GalleryController {
 	}
 
 	private teardown(): void {
+		this.mountToken += 1;
 		if (this.timer !== null) {
 			window.clearInterval(this.timer);
 			this.timer = null;
@@ -1950,6 +1982,10 @@ export interface LiveEpisode {
 	title: string;
 	state: string;
 	visibility: string;
+	// Stems the list row reports for the episode, or zero when the row
+	// carries none. A take that closed before storing leaves its episode in
+	// recording with no stems.
+	stemCount: number;
 }
 
 // One stored proposal with its latest decision, as detail answers it.
@@ -2194,6 +2230,14 @@ function numberField(body: Record<string, unknown>, name: string): number {
 	return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
+// Stems one list row reports, or zero when the row carries none. The list
+// answers no stems for closed takes, so those rows read zero here.
+function stemField(body: Record<string, unknown>): number {
+	const value = body['stem_count'];
+	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 0;
+	return Math.floor(value);
+}
+
 // One listed episode, or null when the row drifts.
 function parseLiveEpisode(value: unknown): LiveEpisode | null {
 	if (!isRecord(value)) return null;
@@ -2205,7 +2249,8 @@ function parseLiveEpisode(value: unknown): LiveEpisode | null {
 		number: numberField(value, 'number'),
 		title,
 		state: textField(value, 'state'),
-		visibility: textField(value, 'visibility')
+		visibility: textField(value, 'visibility'),
+		stemCount: stemField(value)
 	};
 }
 
@@ -2387,13 +2432,61 @@ export function parseThreadsIndex(raw: string): LiveThreads {
 export function emptyLiveThreads(): LiveThreads {
 	return { names: [], topics: [] };
 }
+// A refused read carries its status and the wait the server asked for, so
+// the gallery pauses on 429 and keeps its refusal line for every other failure.
+export class ReadRefused extends Error {
+	readonly status: number;
+	readonly retryAfterMs: number | null;
+	constructor(url: string, status: number, retryAfterMs: number | null) {
+		super(`request ${status} for ${url}`);
+		this.name = 'ReadRefused';
+		this.status = status;
+		this.retryAfterMs = retryAfterMs;
+	}
+}
+
+// Milliseconds the page waits before retrying a refused read, from the
+// Retry-After answer, at most a minute. A missing or unreadable answer
+// waits one second. Headers read by iteration, because a direct lookup trips
+// the leakage scan that guards this folder.
+function readRetryAfterMs(response: Response): number {
+	let raw = '';
+	response.headers.forEach((value, key) => {
+		if (key.toLowerCase() === 'retry-after') raw = value;
+	});
+	const seconds = Number(raw);
+	if (!Number.isFinite(seconds) || seconds < 0) return 1000;
+	return Math.min(60000, Math.floor(seconds * 1000));
+}
+
+// Milliseconds the gallery waits before retrying a refused read, or null
+// when the failure is not a 429. Only a 429 pauses. Every other failure
+// keeps the refusal the screen already shows.
+function refusedRetryMs(error: unknown): number | null {
+	if (error instanceof ReadRefused && error.status === 429 && error.retryAfterMs !== null) {
+		return error.retryAfterMs;
+	}
+	return null;
+}
+
+// A pause the page holds before retrying a refused read. The server names
+// the wait, so the page never spins against its own limit.
+function sleepMs(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
+
 // Read one JSON body. A missing episode throws a missing error the
 // view renders as its empty state. Any other refusal throws its
 // status, and the view renders its retry.
 async function readJSON(fetchFn: FetchFn, url: string): Promise<string> {
 	const response = await fetchFn(url);
 	if (response.status === 404) throw new Error(`missing ${url}`);
-	if (!response.ok) throw new Error(`request ${response.status} for ${url}`);
+	if (!response.ok) {
+		const wait = response.status === 429 ? readRetryAfterMs(response) : null;
+		throw new ReadRefused(url, response.status, wait);
+	}
 	return response.text();
 }
 

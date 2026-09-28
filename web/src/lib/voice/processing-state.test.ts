@@ -165,3 +165,51 @@ describe('retry after a failed draft move', () => {
 		expect(latest.editorial.state).not.toBe('failed');
 	});
 });
+
+describe('detail polling', () => {
+	let controller: ProcessingController | null = null;
+
+	afterEach(() => {
+		controller?.destroy();
+		controller = null;
+		vi.unstubAllGlobals();
+		vi.useRealTimers();
+	});
+
+	it('reads the detail at most every few seconds while a job id stays unknown', async () => {
+		vi.useFakeTimers();
+		let detailReads = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = requestUrl(input);
+				if (url.includes('/events')) return openJobStream();
+				if (url.includes('/api/jobs/')) {
+					return new Response(
+						JSON.stringify({ jobId: 'tj-1', status: 'running', stage: 'running', current: 1, total: 4 }),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					);
+				}
+				if (url.includes('/api/episodes/')) {
+					detailReads += 1;
+					return new Response(
+						JSON.stringify({
+							transcript_outcome: { job_id: 'tj-1', status: 'running', error: '' },
+							editorial_outcome: null
+						}),
+						{ status: 200, headers: { 'content-type': 'application/json' } }
+					);
+				}
+				return new Response('nope', { status: 404 });
+			})
+		);
+		controller = new ProcessingController(
+			new URLSearchParams('episode=ep-1&transcript=tj-1&uploads=done&userBytes=10&hostBytes=20'),
+			() => {}
+		);
+		controller.mount();
+		await vi.advanceTimersByTimeAsync(10000);
+		expect(detailReads).toBeGreaterThan(0);
+		expect(detailReads).toBeLessThanOrEqual(4);
+	});
+});

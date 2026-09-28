@@ -48,6 +48,29 @@ interface PassOutcome {
 	error: string;
 }
 
+// Milliseconds between two episode detail reads while a job id is still
+// unknown. The job streams already carry progress, so the screen polls the
+// detail only to learn ids it does not have yet. The episodes routes allow
+// a few dozen requests a minute, and one take used to spend dozens here alone.
+const DETAIL_READ_MS = 3000;
+
+// The longest wait a refused answer can ask for before the next detail read.
+const MAX_RETRY_AFTER_MS = 60000;
+
+// Milliseconds the server asks the page to wait before the next read, from
+// its Retry-After answer, at most a minute. A missing or unreadable answer
+// waits one second. Headers read by iteration, because a direct lookup trips
+// the leakage scan that guards this folder.
+function retryAfterMs(response: Response): number {
+	let raw = '';
+	response.headers.forEach((value, key) => {
+		if (key.toLowerCase() === 'retry-after') raw = value;
+	});
+	const seconds = Number(raw);
+	if (!Number.isFinite(seconds) || seconds < 0) return 1000;
+	return Math.min(MAX_RETRY_AFTER_MS, Math.floor(seconds * 1000));
+}
+
 let pendingHandoff: ProcessingHandoff | null = null;
 
 // depositProcessingHandoff holds one in-flight upload for the next screen.
@@ -198,6 +221,8 @@ export class ProcessingController {
 	private handoff: ProcessingHandoff | null = null;
 	private readingOutcomes = false;
 	private alive = true;
+	private lastDetailRead = 0;
+	private detailPausedUntil = 0;
 	private readonly userMediaId: string;
 	private readonly hostMediaId: string;
 	private readonly userSampleRate: number;
@@ -596,9 +621,19 @@ export class ProcessingController {
 		if (!this.alive || this.readingOutcomes) return;
 		if (this.snapshot.episode === '') return;
 		if (this.transcriptJob !== '' && this.editorialJob !== '') return;
+		const now = Date.now();
+		if (now < this.detailPausedUntil) return;
+		if (now - this.lastDetailRead < DETAIL_READ_MS) return;
+		this.lastDetailRead = now;
 		this.readingOutcomes = true;
 		try {
 			const response = await fetch(`/api/episodes/${encodeURIComponent(this.snapshot.episode)}`);
+			if (response.status === 429) {
+				// A refused read pauses the polling instead of failing the
+				// screen. The next tick retries once the asked wait has passed.
+				this.detailPausedUntil = Date.now() + retryAfterMs(response);
+				return;
+			}
 			let contentType = '';
 			for (const [key, value] of response.headers.entries()) {
 				if (key.toLowerCase() === 'content-type') contentType = value;

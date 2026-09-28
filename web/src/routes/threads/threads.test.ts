@@ -1,7 +1,7 @@
 // Pins for the season fixtures and helpers. Quotes must name real
 // turns, the season must run newest first, and the job mark must
 // never move backwards.
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { activeWordAt } from '@nrynss/chaaya/transcript';
 import {
 	browserStore,
@@ -17,6 +17,7 @@ import {
 	eraseJob,
 	formatClock,
 	formatEpisodeNumber,
+	GalleryController,
 	installMockJob,
 	listSeason,
 	listThreads,
@@ -30,6 +31,7 @@ import {
 	seasonHref,
 	transcriptText,
 	writeHighWater,
+	type GallerySnapshot,
 	type SeasonRow,
 	type WaterStore
 } from './threads';
@@ -669,5 +671,166 @@ describe('publish gate', () => {
 		} finally {
 			vi.unstubAllGlobals();
 		}
+	});
+});
+
+function seasonStubUrl(input: RequestInfo | URL): string {
+	if (typeof input === 'string') return input;
+	if (input instanceof URL) return input.href;
+	return input.url;
+}
+
+function seasonDetail(id: string, state: string): Record<string, unknown> {
+	const body: Record<string, unknown> = {
+		episode: { id, number: 1, title: `Take ${id}`, state, visibility: 'private' },
+		proposals: [],
+		transcript_outcome: { job_id: `job-t-${id}`, status: 'running', error: '' }
+	};
+	if (state === 'rendering') {
+		body['render_outcome'] = { job_id: `job-r-${id}`, status: 'running', error: '' };
+	}
+	return body;
+}
+
+function openEventStream(): Response {
+	return new Response(new ReadableStream<Uint8Array>({ start() {} }), {
+		status: 200,
+		headers: { 'content-type': 'text/event-stream' }
+	});
+}
+
+describe('gallery detail budget', () => {
+	let controller: GalleryController | null = null;
+
+	afterEach(() => {
+		controller?.destroy();
+		controller = null;
+		vi.unstubAllGlobals();
+		vi.useRealTimers();
+	});
+
+	it('reads the list once and skips recording rows with no stems', async () => {
+		vi.useFakeTimers();
+		const episodes = [
+			{ id: 'e1', number: 1, title: 'First', state: 'recording', visibility: 'private' },
+			{ id: 'e2', number: 2, title: 'Second', state: 'recording', visibility: 'private' },
+			{ id: 'e3', number: 3, title: 'Third', state: 'recording', visibility: 'private' },
+			{ id: 'e4', number: 4, title: 'Fourth', state: 'recording', visibility: 'private' },
+			{ id: 'e5', number: 5, title: 'Fifth', state: 'recording', visibility: 'private' },
+			{ id: 'e6', number: 6, title: 'Sixth', state: 'recording', visibility: 'private' },
+			{ id: 'e7', number: 7, title: 'Seventh', state: 'draft', visibility: 'private' },
+			{ id: 'e8', number: 8, title: 'Eighth', state: 'draft', visibility: 'private' },
+			{ id: 'e9', number: 9, title: 'Ninth', state: 'rendering', visibility: 'private' }
+		];
+		let listReads = 0;
+		let detailReads = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = seasonStubUrl(input);
+				if (url.endsWith('/api/episodes')) {
+					listReads += 1;
+					return Response.json({ episodes });
+				}
+				const detail = url.match(/\/api\/episodes\/([^/]+)$/);
+				if (detail?.[1]) {
+					detailReads += 1;
+					const row = episodes.find((candidate) => candidate.id === detail[1]);
+					return Response.json(seasonDetail(detail[1] ?? '', row?.state ?? 'draft'));
+				}
+				if (url.endsWith('/events')) return openEventStream();
+				const job = url.match(/\/api\/jobs\/([^/]+)$/);
+				if (job?.[1]) return Response.json({ jobId: job[1], status: 'running' });
+				return new Response('', { status: 404 });
+			})
+		);
+		const snaps: GallerySnapshot[] = [];
+		controller = new GalleryController((snap) => {
+			snaps.push(structuredClone(snap));
+		});
+		controller.mount('');
+		await vi.advanceTimersByTimeAsync(800);
+		expect(listReads).toBe(1);
+		expect(detailReads).toBeLessThanOrEqual(3);
+		expect(snaps.at(-1)?.rows).toHaveLength(9);
+	});
+
+	it('still reads a recording row that reports stems', async () => {
+		vi.useFakeTimers();
+		let detailReads = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = seasonStubUrl(input);
+				if (url.endsWith('/api/episodes')) {
+					return Response.json({
+						episodes: [{ id: 'e1', number: 1, title: 'First', state: 'recording', visibility: 'private', stem_count: 2 }]
+					});
+				}
+				const detail = url.match(/\/api\/episodes\/([^/]+)$/);
+				if (detail?.[1]) {
+					detailReads += 1;
+					return Response.json(seasonDetail('e1', 'recording'));
+				}
+				if (url.endsWith('/events')) return openEventStream();
+				const job = url.match(/\/api\/jobs\/([^/]+)$/);
+				if (job?.[1]) return Response.json({ jobId: job[1], status: 'running' });
+				return new Response('', { status: 404 });
+			})
+		);
+		const snaps: GallerySnapshot[] = [];
+		controller = new GalleryController((snap) => {
+			snaps.push(structuredClone(snap));
+		});
+		controller.mount('');
+		await vi.advanceTimersByTimeAsync(800);
+		expect(detailReads).toBe(1);
+		expect(snaps.at(-1)?.rows).toHaveLength(1);
+	});
+});
+
+describe('gallery refused season', () => {
+	let controller: GalleryController | null = null;
+
+	afterEach(() => {
+		controller?.destroy();
+		controller = null;
+		vi.unstubAllGlobals();
+		vi.useRealTimers();
+	});
+
+	it('waits out a refused season read and renders without a refusal line', async () => {
+		vi.useFakeTimers();
+		let listReads = 0;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = seasonStubUrl(input);
+				if (url.endsWith('/api/episodes')) {
+					listReads += 1;
+					if (listReads === 1) {
+						return new Response(JSON.stringify({ episodes: [] }), {
+							status: 429,
+							headers: { 'retry-after': '1', 'content-type': 'application/json' }
+						});
+					}
+					return Response.json({
+						episodes: [{ id: 'a', number: 1, title: 'First', state: 'ready', visibility: 'private' }]
+					});
+				}
+				return new Response('', { status: 404 });
+			})
+		);
+		const snaps: GallerySnapshot[] = [];
+		controller = new GalleryController((snap) => {
+			snaps.push(structuredClone(snap));
+		});
+		controller.mount('');
+		await vi.advanceTimersByTimeAsync(1500);
+		expect(listReads).toBe(2);
+		const last = snaps.at(-1);
+		expect(last?.rows).toHaveLength(1);
+		expect(last?.failed).toBe(false);
+		expect(last?.notice).not.toContain('refused');
 	});
 });
