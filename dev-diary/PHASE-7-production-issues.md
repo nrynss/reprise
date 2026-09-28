@@ -1310,7 +1310,7 @@ fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/reconcile.go, internal/broker/reconcile_test.go,
              internal/broker/end_test.go
-status:     in-progress:review-r1:t7.49-rev-r1@8d1f572de92366e1530254a6a32ff6f51514d551
+status:     in-progress:land:t7.49-impl@8d1f572de92366e1530254a6a32ff6f51514d551
 ```
 **Defect.** Every reconcile on the four T6.4b round 2 runs failed with
 `provider session is still open`. That covers the reconciles after End and after a tab close.
