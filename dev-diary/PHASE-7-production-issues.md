@@ -2380,7 +2380,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       internal/api/episodes.go, internal/api/playback_test.go, web/src/routes/threads/threads.ts,
              web/src/routes/threads/threads.test.ts, web/src/routes/episode/[id]/+page.svelte
-status:     in-progress:review-r1:t7.76-rev-r1@e4d849dc4414a8d7d251407a7cf2707ae03ce958
+status:     in-progress:land:t7.76-impl@e4d849dc4414a8d7d251407a7cf2707ae03ce958
 ```
 **Defect.** On 2026-09-28 the owner published episode 10. The page showed only the notice "Public at
 /share/10770da2…. Only the finished audio opens behind it.", as plain text with a relative path.
@@ -2410,6 +2410,36 @@ but no share path. So after a reload, a public episode shows "Public" with no li
 
 **Done when:** The tests pass, and the gate passes in a fresh worktree. Dropping `share_path` from
 the detail fails the first test.
+
+### T7.80: The public detail reads the stored share token
+```yaml
+requires:   T7.76
+fixture-ok: yes
+size:       XS · mid
+owns:       internal/episode/query.go, internal/episode/service.go, internal/privacy/publish.go,
+             internal/privacy/publish_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go
+status:     not-started
+```
+T7.76 round 1 recorded an out of scope H finding. The binary
+mounts the episode detail with a nil share lookup, so a public
+episode's detail answers empty `share_path` after a reload.
+Publish and revoke set and clear the link live, but the reload
+loses it, which is the exact complaint T7.76 set out to fix. No
+owned path of T7.76 can close it: the episode row carries no
+token and neither service exports an owner-scoped
+episode-to-token reader.
+
+* Add an owner-scoped episode-to-token reader on the episode or
+  publish service, reading the stored token for an owner-held
+  episode. A private episode still answers empty.
+* Pass it through the detail constructor where the binary mounts
+  it, so the public detail answers `/share/<token>` on every
+  load, not just after publish.
+
+**Done when:** A booted binary publishes an episode and the
+reloaded detail carries the share path, pinned by test. A
+private reloaded detail carries empty. Reverting to the nil
+lookup answers empty again.
 
 ### T7.77: One styled way back to the gallery on every page
 ```yaml
