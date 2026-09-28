@@ -427,23 +427,52 @@ type hostBuilder struct {
 
 // BuildSessionConfig loads the session config for one owner from stored
 // rows. Counts and names in it come from those rows, never from invention.
-// A greeting that cites a callback marks that row used, so the next mint
-// moves on. A failed mark refuses the mint instead of repeating silently.
+// A greeting that cites a callback claims that row with one conditional
+// write, so two mints racing each other land on different callbacks. A mint
+// that loses its claim reloads and tries the next row. A failed claim
+// refuses the mint instead of repeating silently.
 func (b hostBuilder) BuildSessionConfig(ctx context.Context, ownerID string) (broker.SessionConfig, error) {
-	cfg, err := host.Load(ctx, b.db, ownerID)
-	if err != nil {
-		return broker.SessionConfig{}, err
-	}
-	if cfg.CallbackID != "" {
-		if err := memory.MarkUsed(ctx, b.db, ownerID, cfg.CallbackID); err != nil {
+	for {
+		cfg, err := host.Load(ctx, b.db, ownerID)
+		if err != nil {
 			return broker.SessionConfig{}, err
 		}
+		if cfg.CallbackID == "" {
+			return broker.SessionConfig{
+				SystemPrompt: cfg.SystemPrompt,
+				Greeting:     cfg.Greeting,
+				Keyterms:     cfg.Keyterms,
+			}, nil
+		}
+		claimed, err := claimCallback(ctx, b.db, ownerID, cfg.CallbackID)
+		if err != nil {
+			return broker.SessionConfig{}, err
+		}
+		if claimed {
+			return broker.SessionConfig{
+				SystemPrompt: cfg.SystemPrompt,
+				Greeting:     cfg.Greeting,
+				Keyterms:     cfg.Keyterms,
+			}, nil
+		}
 	}
-	return broker.SessionConfig{
-		SystemPrompt: cfg.SystemPrompt,
-		Greeting:     cfg.Greeting,
-		Keyterms:     cfg.Keyterms,
-	}, nil
+}
+
+// claimCallback flips one callback row to used only while it still reads
+// unused. The single write decides the race, so only one mint wins each
+// row. It reports false when another mint won first, and the caller reloads.
+func claimCallback(ctx context.Context, db *sql.DB, ownerID, callbackID string) (bool, error) {
+	result, err := db.ExecContext(ctx,
+		"UPDATE callbacks SET used = 1 WHERE id = ? AND owner_id = ? AND used = 0",
+		callbackID, ownerID)
+	if err != nil {
+		return false, fmt.Errorf("reprise: claim callback: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("reprise: claim callback: %w", err)
+	}
+	return affected == 1, nil
 }
 
 // spendCeiling converts the daily spend ceiling from the cents the settings

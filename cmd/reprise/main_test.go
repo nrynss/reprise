@@ -398,6 +398,71 @@ func TestHostBuilderMarksEachCallbackOnce(t *testing.T) {
 	}
 }
 
+// TestHostBuilderConcurrentMintsDiverge starts two same-owner mints behind
+// one gate, so both load before either claims. The two greetings cite
+// different callbacks and both rows read used, so a double start never
+// repeats an opening.
+func TestHostBuilderConcurrentMintsDiverge(t *testing.T) {
+	ctx := context.Background()
+	db, err := keelsqlite.Open(ctx, keelsqlite.Config{Path: filepath.Join(t.TempDir(), "test.db")})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	if _, err := reprisestore.Open(ctx, db); err != nil {
+		t.Fatalf("migrate diary schema: %v", err)
+	}
+	writer := db.Writer()
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := writer.ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("exec %q: %v", query, err)
+		}
+	}
+	exec("INSERT INTO users (id, kind, created_at, last_seen_at) VALUES ('owner-cb', 'guest', 1, 2)")
+	exec("INSERT INTO episodes (id, owner_id, number, title, state, visibility, share_token, seeded) VALUES ('ep1', 'owner-cb', 1, 'Episode 1', 'ready', 'private', 'share-ep1', 0)")
+	exec("INSERT INTO episodes (id, owner_id, number, title, state, visibility, share_token, seeded) VALUES ('ep2', 'owner-cb', 2, 'Episode 2', 'ready', 'private', 'share-ep2', 0)")
+	exec("INSERT INTO mentions (id, owner_id, episode_id, kind, word_offset, quote) VALUES ('m1', 'owner-cb', 'ep1', 'topic', 3, 'the talk I keep dreading with my sister')")
+	exec("INSERT INTO mentions (id, owner_id, episode_id, kind, word_offset, quote) VALUES ('m2', 'owner-cb', 'ep2', 'topic', 7, 'the allotment')")
+	exec("INSERT INTO callbacks (id, owner_id, episode_id, mention_id, used) VALUES ('cb1', 'owner-cb', 'ep1', 'm1', 0)")
+	exec("INSERT INTO callbacks (id, owner_id, episode_id, mention_id, used) VALUES ('cb2', 'owner-cb', 'ep2', 'm2', 0)")
+	builder := hostBuilder{db: writer}
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	greetings := make([]string, 2)
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			cfg, err := builder.BuildSessionConfig(ctx, "owner-cb")
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			greetings[i] = cfg.Greeting
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("mint %d error = %v, want nil", i, err)
+		}
+	}
+	if greetings[0] == greetings[1] {
+		t.Fatalf("concurrent greetings match %q, want two different callbacks", greetings[0])
+	}
+	var used int
+	if err := writer.QueryRowContext(ctx, "SELECT COUNT(*) FROM callbacks WHERE owner_id = 'owner-cb' AND used = 1").Scan(&used); err != nil {
+		t.Fatalf("count used callbacks: %v", err)
+	}
+	if used != 2 {
+		t.Fatalf("used callbacks = %d, want 2", used)
+	}
+}
+
 // wireFixture carries the stores one wired process shares. Every test
 // below boots the same shape wireAPI builds, minus secrets and the
 // network, so the pins hold for the binary too.
