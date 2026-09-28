@@ -99,12 +99,14 @@ type Result struct {
 }
 
 // Estimate prices one analysis before any provider call. The batch part
-// follows the batch hourly rate. The chapter part caps the answer at
-// the completion rate, which bounds the dearer side.
+// follows the analysis hourly rate, which adds entity detection and key
+// phrases to the model rate, because the creation call asks for both on
+// every episode. The chapter part caps the answer at the completion rate,
+// which bounds the dearer side.
 func Estimate(audioSecs float64, maxTokens int, rates Rates) cost.Price {
 	var batch cost.Price
 	if audioSecs > 0 {
-		perSecond := float64(cost.USD(assemblyai.BatchDollarsPerHour)) / 3600
+		perSecond := float64(cost.USD(assemblyai.BatchAnalysisDollarsPerHour)) / 3600
 		batch = cost.Price(math.Ceil(perSecond * audioSecs))
 	}
 	var chapters cost.Price
@@ -239,13 +241,14 @@ func deleted(tx TranscriptResult) bool {
 	return tx.Text == assemblyai.DeletedText && len(tx.Words) == 0
 }
 
-// batchPrice prices heard audio seconds at the batch hourly rate,
-// rounded up to the nanodollar.
+// batchPrice prices heard audio seconds at the analysis hourly rate,
+// rounded up to the nanodollar. The rate carries entity detection and
+// key phrases, because the creation call asks for both.
 func batchPrice(audioSecs float64) cost.Price {
 	if audioSecs <= 0 {
 		return cost.Price(0)
 	}
-	perSecond := float64(cost.USD(assemblyai.BatchDollarsPerHour)) / 3600
+	perSecond := float64(cost.USD(assemblyai.BatchAnalysisDollarsPerHour)) / 3600
 	return cost.Price(math.Ceil(perSecond * audioSecs))
 }
 

@@ -2688,3 +2688,175 @@ func TestPreviewKindRefusesDuplicateRegistration(t *testing.T) {
 		t.Fatalf("duplicate preview kind merged with err = %v, want the boot refusal", err)
 	}
 }
+
+// createCapture records the last creation body one adapter sent.
+type createCapture struct {
+	mu   sync.Mutex
+	body map[string]any
+}
+
+// capturingBatch answers the upload and one queued transcript while it
+// records the creation body. The follow-up fetch completes, and the
+// fetch after delete reads the deletion marker.
+func capturingBatch(t *testing.T, seen *createCapture, completed string) *httptest.Server {
+	t.Helper()
+	var mu sync.Mutex
+	gets := 0
+	deleted := `{"id":"tx-cap","status":"completed","text":"Deleted by user.",` +
+		`"audio_url":"http://deleted_by_user","confidence":null,"words":null}`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/upload", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"upload_url":"http://`+r.Host+`/audio/cap"}`)
+	})
+	mux.HandleFunc("/v2/transcript", func(w http.ResponseWriter, r *http.Request) {
+		var decoded map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&decoded)
+		seen.mu.Lock()
+		seen.body = decoded
+		seen.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"tx-cap","status":"queued"}`)
+	})
+	mux.HandleFunc("/v2/transcript/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		mu.Lock()
+		gets++
+		body := deleted
+		if gets == 1 {
+			body = completed
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// captureClient points one batch client at the capturing server.
+func captureClient(t *testing.T, srv *httptest.Server) *assemblyai.BatchClient {
+	t.Helper()
+	client, err := assemblyai.NewBatchClient(assemblyai.Config{
+		BaseURL: srv.URL,
+		APIKey:  "probe-key",
+		Client:  srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("open batch client: %v", err)
+	}
+	return client
+}
+
+// TestAnalysisCreateAsksForEntitiesAndPhrases runs the analysis adapter
+// creation call and requires both feature flags set, because the thread
+// panel builds from what they store.
+func TestAnalysisCreateAsksForEntitiesAndPhrases(t *testing.T) {
+	t.Parallel()
+	seen := &createCapture{}
+	completed := `{"id":"tx-cap","status":"completed","text":"Mara","audio_duration":2,` +
+		`"words":[{"text":"Mara","start":100,"end":300,"confidence":0.9,"speaker":null}]}`
+	srv := capturingBatch(t, seen, completed)
+	adapter := batchTranscriber{batch: captureClient(t, srv)}
+	id, err := adapter.Create(t.Context(), analysis.CreateRequest{AudioURL: srv.URL + "/audio/cap"})
+	if err != nil {
+		t.Fatalf("analysis create: %v", err)
+	}
+	if id != "tx-cap" {
+		t.Fatalf("analysis create id = %q, want tx-cap", id)
+	}
+	seen.mu.Lock()
+	defer seen.mu.Unlock()
+	if seen.body["entity_detection"] != true {
+		t.Fatalf("entity_detection = %v, want true on the analysis pass", seen.body["entity_detection"])
+	}
+	if seen.body["auto_highlights"] != true {
+		t.Fatalf("auto_highlights = %v, want true on the analysis pass", seen.body["auto_highlights"])
+	}
+}
+
+// TestMapTranscriptCarriesEntitiesAndPhrases maps one batch transcript
+// with an entity and a phrase and requires both on the carried result,
+// because the analysis pass stores mentions from them.
+func TestMapTranscriptCarriesEntitiesAndPhrases(t *testing.T) {
+	t.Parallel()
+	done := assemblyai.Transcript{
+		ID:   "tx-cap",
+		Text: "Mara studied the tide charts.",
+		Words: []assemblyai.Word{
+			{Text: "Mara", StartMs: 100, EndMs: 300, Confidence: 0.9},
+		},
+		Entities: []assemblyai.Entity{
+			{Type: "person_name", Text: "Mara", StartMs: 100, EndMs: 300},
+		},
+		Phrases: []assemblyai.KeyPhrase{{
+			Text: "tide charts", Rank: 0.83, Count: 2,
+			Spans: []assemblyai.Span{{StartMs: 400, EndMs: 800}, {StartMs: 1200, EndMs: 1600}},
+		}},
+	}
+	mapped := mapTranscript(done)
+	if len(mapped.Entities) != 1 || mapped.Entities[0].Type != "person_name" || mapped.Entities[0].Text != "Mara" {
+		t.Fatalf("entities = %+v, want one person_name Mara", mapped.Entities)
+	}
+	if len(mapped.Phrases) != 1 || mapped.Phrases[0].Text != "tide charts" || len(mapped.Phrases[0].Spans) != 2 {
+		t.Fatalf("phrases = %+v, want one tide charts phrase with two spans", mapped.Phrases)
+	}
+}
+
+// stubPassBudget holds every reservation and settles without a ledger,
+// because the flag tests spend nothing real.
+type stubPassBudget struct{}
+
+func (stubPassBudget) Reserve(cost.Price) error { return nil }
+
+func (stubPassBudget) Settle(_, _ cost.Price) error { return nil }
+
+func (stubPassBudget) Release(cost.Price) {}
+
+// TestEditCreateAsksForNeitherFeature runs the real edit transcript pass
+// against a capturing server and requires neither feature key on its
+// creation call, because the edit pass pays for no add-on.
+func TestEditCreateAsksForNeitherFeature(t *testing.T) {
+	t.Parallel()
+	fx := openWireFixture(t)
+	const owner = "owner-edit-flags"
+	insertWireUser(t, fx, owner)
+	diary, err := broker.NewSQLiteDiary(fx.db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	episodeID, _, err := diary.CreateEpisodeAndSession(t.Context(), owner, 1800)
+	if err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+	seen := &createCapture{}
+	completed := `{"id":"tx-cap","status":"completed","text":"guest","audio_duration":1,` +
+		`"words":[{"text":"guest","start":100,"end":250,"confidence":0.9,"speaker":null}]}`
+	srv := capturingBatch(t, seen, completed)
+	if _, err := transcript.Run(t.Context(), transcript.Config{
+		DB:           fx.db.Writer(),
+		Batch:        captureClient(t, srv),
+		Budgets:      stubPassBudget{},
+		OwnerID:      owner,
+		EpisodeID:    episodeID,
+		Audio:        sineWAV(),
+		DurationSecs: 2,
+		PollInterval: time.Millisecond,
+		SaveRaw:      func(context.Context, []byte) error { return nil },
+	}); err != nil {
+		t.Fatalf("edit run: %v", err)
+	}
+	seen.mu.Lock()
+	defer seen.mu.Unlock()
+	if _, ok := seen.body["entity_detection"]; ok {
+		t.Fatalf("entity_detection = %v, want the key absent on the edit pass", seen.body["entity_detection"])
+	}
+	if _, ok := seen.body["auto_highlights"]; ok {
+		t.Fatalf("auto_highlights = %v, want the key absent on the edit pass", seen.body["auto_highlights"])
+	}
+}

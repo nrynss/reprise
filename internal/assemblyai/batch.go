@@ -53,8 +53,24 @@ func normalizeBatchModel(model string) string {
 	return model
 }
 
-// BatchDollarsPerHour prices one audio hour on the batch model.
+// BatchDollarsPerHour prices one audio hour on the batch model. The rate
+// comes from the provider pricing page, read on 2026-09-28.
 const BatchDollarsPerHour = 0.21
+
+// BatchEntityDollarsPerHour prices one audio hour of entity detection on
+// the batch model. The rate comes from the provider pricing page, read on
+// 2026-09-28, where entity detection lists above the model rate.
+const BatchEntityDollarsPerHour = 0.08
+
+// BatchHighlightsDollarsPerHour prices one audio hour of key phrases on
+// the batch model. The rate comes from the provider pricing page, read on
+// 2026-09-28, where key phrases list above the model rate.
+const BatchHighlightsDollarsPerHour = 0.01
+
+// BatchAnalysisDollarsPerHour prices one audio hour of the analysis pass.
+// The analysis creation call asks for entities and key phrases on every
+// episode, so the estimate books the model rate plus both add-ons.
+const BatchAnalysisDollarsPerHour = BatchDollarsPerHour + BatchEntityDollarsPerHour + BatchHighlightsDollarsPerHour
 
 // DeletedText is the text a fetched transcript carries after deletion.
 const DeletedText = "Deleted by user."
@@ -83,6 +99,40 @@ type Word struct {
 	Confidence float64
 }
 
+// Entity is one detected name, place, or time with millisecond offsets
+// on the uploaded audio.
+type Entity struct {
+	// Type names the entity kind the provider returned, such as
+	// person_name or location.
+	Type string
+	// Text is the entity wording as heard.
+	Text string
+	// StartMs is the span start in milliseconds from the audio start.
+	StartMs int64
+	// EndMs is the span end in milliseconds from the audio start.
+	EndMs int64
+}
+
+// Span is one occurrence window on the uploaded audio clock.
+type Span struct {
+	// StartMs is the occurrence start in milliseconds.
+	StartMs int64
+	// EndMs is the occurrence end in milliseconds.
+	EndMs int64
+}
+
+// KeyPhrase is one recurring phrase with every span where it occurs.
+type KeyPhrase struct {
+	// Text is the phrase wording as heard.
+	Text string
+	// Rank scores the phrase importance from zero upward.
+	Rank float64
+	// Count carries how often the phrase occurs.
+	Count int
+	// Spans holds one window per occurrence on the audio clock.
+	Spans []Span
+}
+
 // Transcript is one batch transcript. Raw carries the exact bytes the
 // provider returned, so the caller persists the response before deleting
 // the provider copy.
@@ -97,6 +147,10 @@ type Transcript struct {
 	AudioDurationSecs int64
 	// Words holds every word with its timing, or nothing after deletion.
 	Words []Word
+	// Entities holds every detected entity, or nothing after deletion.
+	Entities []Entity
+	// Phrases holds every key phrase, or nothing after deletion.
+	Phrases []KeyPhrase
 	// Failure carries the provider error text on a failed transcript.
 	Failure string
 	// Raw is the full GET response body for the receipt store.
@@ -116,10 +170,17 @@ type CreateRequest struct {
 	AudioURL string
 	// Keyterms boosts names from past episodes, most recent first.
 	Keyterms []string
+	// EntityDetection asks the provider for named entities with this
+	// transcription. The provider documents it for the flagship model.
+	EntityDetection bool
+	// AutoHighlights asks the provider for key phrases with this
+	// transcription. The provider documents it for the flagship model.
+	AutoHighlights bool
 }
 
-// createBody is the wire shape the create call sends. Keyterms stay out
-// when empty, so the JSON matches the recorded shape either way.
+// createBody is the wire shape the create call sends. Keyterms and the
+// feature flags stay out when empty or false, so the JSON matches the
+// recorded shape of a plain transcription either way.
 type createBody struct {
 	// AudioURL is the upload URL the upload call returned.
 	AudioURL string `json:"audio_url"`
@@ -127,6 +188,10 @@ type createBody struct {
 	SpeechModels []string `json:"speech_models"`
 	// Keyterms boosts names from past episodes, most recent first.
 	Keyterms []string `json:"keyterms_prompt,omitempty"`
+	// EntityDetection asks for named entities with this transcription.
+	EntityDetection bool `json:"entity_detection,omitempty"`
+	// AutoHighlights asks for key phrases with this transcription.
+	AutoHighlights bool `json:"auto_highlights,omitempty"`
 }
 
 // Config carries the batch client settings. The caller loads the key from
@@ -259,8 +324,10 @@ func (c *BatchClient) Create(ctx context.Context, req CreateRequest) (string, er
 		return "", fmt.Errorf("assemblyai: create: %w: empty audio url", ErrBatchInvalid)
 	}
 	body := createBody{
-		AudioURL:     req.AudioURL,
-		SpeechModels: []string{c.model},
+		AudioURL:        req.AudioURL,
+		SpeechModels:    []string{c.model},
+		EntityDetection: req.EntityDetection,
+		AutoHighlights:  req.AutoHighlights,
 	}
 	if len(req.Keyterms) > 0 {
 		body.Keyterms = req.Keyterms
@@ -295,6 +362,24 @@ type transcriptBody struct {
 		End        int64   `json:"end"`
 		Confidence float64 `json:"confidence"`
 	} `json:"words"`
+	Entities []struct {
+		Type  string `json:"entity_type"`
+		Text  string `json:"text"`
+		Start int64  `json:"start"`
+		End   int64  `json:"end"`
+	} `json:"entities"`
+	Highlights *struct {
+		Status  string `json:"status"`
+		Results []struct {
+			Count      int     `json:"count"`
+			Rank       float64 `json:"rank"`
+			Text       string  `json:"text"`
+			Timestamps []struct {
+				Start int64 `json:"start"`
+				End   int64 `json:"end"`
+			} `json:"timestamps"`
+		} `json:"results"`
+	} `json:"auto_highlights_result"`
 }
 
 // Get fetches one transcript and keeps the raw body beside the parse. The
@@ -328,6 +413,23 @@ func (c *BatchClient) Get(ctx context.Context, id string) (Transcript, error) {
 			EndMs:      w.End,
 			Confidence: w.Confidence,
 		})
+	}
+	for _, e := range decoded.Entities {
+		out.Entities = append(out.Entities, Entity{
+			Type:    e.Type,
+			Text:    e.Text,
+			StartMs: e.Start,
+			EndMs:   e.End,
+		})
+	}
+	if decoded.Highlights != nil {
+		for _, h := range decoded.Highlights.Results {
+			phrase := KeyPhrase{Text: h.Text, Rank: h.Rank, Count: h.Count}
+			for _, s := range h.Timestamps {
+				phrase.Spans = append(phrase.Spans, Span{StartMs: s.Start, EndMs: s.End})
+			}
+			out.Phrases = append(out.Phrases, phrase)
+		}
 	}
 	return out, nil
 }

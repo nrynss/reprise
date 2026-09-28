@@ -262,6 +262,94 @@ func TestUploadPostsOctetStream(t *testing.T) {
 	}
 }
 
+// TestCreateSendsEntityDetectionAndHighlights checks the creation call
+// carries both feature flags when the caller sets them.
+func TestCreateSendsEntityDetectionAndHighlights(t *testing.T) {
+	t.Parallel()
+	fake := &scriptedBatch{}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	client := openClient(t, server)
+	if _, err := client.Create(t.Context(), assemblyai.CreateRequest{
+		AudioURL:        server.URL + "/audio/1",
+		EntityDetection: true,
+		AutoHighlights:  true,
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.createBody["entity_detection"] != true {
+		t.Fatalf("entity_detection = %v, want true", fake.createBody["entity_detection"])
+	}
+	if fake.createBody["auto_highlights"] != true {
+		t.Fatalf("auto_highlights = %v, want true", fake.createBody["auto_highlights"])
+	}
+}
+
+// TestCreateOmitsFeaturesWhenUnset checks a plain transcription carries
+// neither feature key, so the edit pass pays for no add-on.
+func TestCreateOmitsFeaturesWhenUnset(t *testing.T) {
+	t.Parallel()
+	fake := &scriptedBatch{}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	client := openClient(t, server)
+	if _, err := client.Create(t.Context(), assemblyai.CreateRequest{
+		AudioURL: server.URL + "/audio/1",
+		Keyterms: []string{"Mara"},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if _, ok := fake.createBody["entity_detection"]; ok {
+		t.Fatalf("entity_detection = %v, want the key absent", fake.createBody["entity_detection"])
+	}
+	if _, ok := fake.createBody["auto_highlights"]; ok {
+		t.Fatalf("auto_highlights = %v, want the key absent", fake.createBody["auto_highlights"])
+	}
+}
+
+// enrichedBody is the recorded completion shape with one person entity
+// and one key phrase beside the words.
+const enrichedBody = `{"id":"tx-1","status":"completed",` +
+	`"text":"Mara studied the tide charts.", "audio_duration": 9,` +
+	`"words":[{"text":"Mara","start":500,"end":900,"confidence":0.98,"speaker":null}],` +
+	`"entities":[{"entity_type":"person_name","text":"Mara","start":500,"end":900}],` +
+	`"auto_highlights_result":{"status":"success","results":[` +
+	`{"count":2,"rank":0.83,"text":"tide charts",` +
+	`"timestamps":[{"start":1800,"end":2600},{"start":5400,"end":6200}]}]}}`
+
+// TestGetParsesEntitiesAndHighlights checks the fetch maps the recorded
+// entities and highlight results into the carried slices.
+func TestGetParsesEntitiesAndHighlights(t *testing.T) {
+	t.Parallel()
+	fake := &scriptedBatch{getReplies: []string{enrichedBody}}
+	server := httptest.NewServer(fake.handler())
+	defer server.Close()
+	client := openClient(t, server)
+	tx, err := client.Get(t.Context(), "tx-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(tx.Entities) != 1 || tx.Entities[0].Type != "person_name" || tx.Entities[0].Text != "Mara" {
+		t.Fatalf("entities = %+v, want one person_name Mara", tx.Entities)
+	}
+	if tx.Entities[0].StartMs != 500 || tx.Entities[0].EndMs != 900 {
+		t.Fatalf("entity span = %+v, want 500 to 900", tx.Entities[0])
+	}
+	if len(tx.Phrases) != 1 || tx.Phrases[0].Text != "tide charts" {
+		t.Fatalf("phrases = %+v, want one tide charts phrase", tx.Phrases)
+	}
+	if tx.Phrases[0].Count != 2 || tx.Phrases[0].Rank != 0.83 {
+		t.Fatalf("phrase = %+v, want count 2 rank 0.83", tx.Phrases[0])
+	}
+	if len(tx.Phrases[0].Spans) != 2 || tx.Phrases[0].Spans[0].StartMs != 1800 {
+		t.Fatalf("phrase spans = %+v, want two starting at 1800", tx.Phrases[0].Spans)
+	}
+}
+
 // TestCreateSendsModelAndKeyterms checks one creation call carries the
 // flagship model and the mention keyterms together.
 func TestCreateSendsModelAndKeyterms(t *testing.T) {

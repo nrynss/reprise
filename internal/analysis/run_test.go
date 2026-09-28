@@ -257,6 +257,47 @@ func TestRunStoresFullAnalysis(t *testing.T) {
 	}
 }
 
+// TestRunStoresPersonEntityMention runs a scripted analysis whose
+// transcript carries one person entity and checks the mentions hold a
+// row of that kind quoting the name.
+func TestRunStoresPersonEntityMention(t *testing.T) {
+	t.Parallel()
+	db := openDiary(t)
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "ep-1", "owner-a", 1, "draft")
+	words := make([]analysis.Word, 0, 10)
+	for i := range 10 {
+		start := int64(1000 + i*1000)
+		words = append(words, analysis.Word{Text: "word", StartMs: start, EndMs: start + 600, Confidence: 0.99})
+	}
+	words[2].Text = "Mara"
+	completion := analysis.TranscriptResult{
+		ID:    "tx-person",
+		Text:  "word word Mara word",
+		Words: words,
+		Entities: []analysis.Entity{
+			{Type: "person_name", Text: "Mara", StartMs: 3000, EndMs: 3600},
+		},
+		AudioDurationSecs: 12,
+		Raw:               []byte(`{"id":"tx-person","status":"completed"}`),
+	}
+	batch := &analysis.ScriptedTranscriber{Completion: completion, Deleted: deletedResult()}
+	chapterer := &analysis.ScriptedChapterer{Drafts: episodeDrafts(), Raw: []byte(`{}`)}
+	budgets := &fakeBudget{}
+	if _, err := analysis.Run(t.Context(), runConfig(t, db, batch, chapterer, budgets,
+		func(context.Context, string, []byte) error { return nil })); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var kind, quote string
+	if err := db.QueryRowContext(t.Context(),
+		"SELECT kind, quote FROM mentions WHERE episode_id = 'ep-1' AND kind = 'person_name'").Scan(&kind, &quote); err != nil {
+		t.Fatalf("read person mention: %v", err)
+	}
+	if kind != "person_name" || quote != "Mara" {
+		t.Fatalf("mention = %q %q, want person_name Mara", kind, quote)
+	}
+}
+
 // TestRunRefusesWithoutBudget checks a refused reservation reaches no
 // provider endpoint and stores no words.
 func TestRunRefusesWithoutBudget(t *testing.T) {
@@ -363,15 +404,19 @@ func TestRunKeepsCopyOnChapterFailure(t *testing.T) {
 }
 
 // TestEstimatePricesBatchAndGateway checks one audio hour costs the
-// batch rate and the chapter cap prices a million tokens at the dearer
+// analysis rate, which is the batch rate plus entity detection and key
+// phrases, and the chapter cap prices a million tokens at the dearer
 // rate.
 func TestEstimatePricesBatchAndGateway(t *testing.T) {
 	t.Parallel()
-	if got := analysis.Estimate(3600, 0, analysis.Rates{}); got != cost.USD(0.21) {
-		t.Fatalf("hour estimate = %v, want the batch hourly rate", got)
+	if got := analysis.Estimate(3600, 0, analysis.Rates{}); got != cost.USD(assemblyai.BatchAnalysisDollarsPerHour) {
+		t.Fatalf("hour estimate = %v, want the analysis hourly rate", got)
 	}
-	if got := analysis.Estimate(3600, 1000000, analysis.Rates{PromptPerMillionUSD: 1, CompletionPerMillionUSD: 2}); got != cost.USD(0.21)+cost.USD(2) {
-		t.Fatalf("capped estimate = %v, want batch plus the completion rate cap", got)
+	if got := analysis.Estimate(3600, 0, analysis.Rates{}); got != cost.USD(0.30) {
+		t.Fatalf("hour estimate = %v, want thirty cents for the model plus both add-ons", got)
+	}
+	if got := analysis.Estimate(3600, 1000000, analysis.Rates{PromptPerMillionUSD: 1, CompletionPerMillionUSD: 2}); got != cost.USD(0.30)+cost.USD(2) {
+		t.Fatalf("capped estimate = %v, want analysis plus the completion rate cap", got)
 	}
 	if got := analysis.Estimate(0, 0, analysis.Rates{}); got != cost.Price(0) {
 		t.Fatalf("zero estimate = %v, want nothing", got)

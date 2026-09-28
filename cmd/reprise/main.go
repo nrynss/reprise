@@ -1028,10 +1028,9 @@ func (m geminiMemory) GenerateResolution(ctx context.Context, model string, req 
 }
 
 // batchTranscriber serves the analysis batch seam over the AssemblyAI
-// batch client. Words, text, duration, and delete confirmation map one
-// to one. Entity, phrase, and summary features need a provider adapter
-// that asks for them, which no landed package builds yet, so those
-// stay empty until that seam lands and the analysis pass fills them.
+// batch client. Words, text, duration, entities, phrases, and delete
+// confirmation map one to one. The creation call asks for entities and
+// key phrases, because the thread panel builds from what they store.
 type batchTranscriber struct {
 	batch *assemblyai.BatchClient
 }
@@ -1041,9 +1040,15 @@ func (t batchTranscriber) Upload(ctx context.Context, audio io.Reader) (string, 
 	return t.batch.Upload(ctx, audio)
 }
 
-// Create starts one transcription and returns its id.
+// Create starts one transcription and returns its id. It asks for
+// entities and key phrases, which the analysis pass stores as mentions.
+// The edit pass builds its own creation call without either flag.
 func (t batchTranscriber) Create(ctx context.Context, req analysis.CreateRequest) (string, error) {
-	return t.batch.Create(ctx, assemblyai.CreateRequest{AudioURL: req.AudioURL})
+	return t.batch.Create(ctx, assemblyai.CreateRequest{
+		AudioURL:        req.AudioURL,
+		EntityDetection: true,
+		AutoHighlights:  true,
+	})
 }
 
 // Wait polls one transcript until it completes or fails.
@@ -1069,9 +1074,8 @@ func (t batchTranscriber) Delete(ctx context.Context, id string) error {
 	return t.batch.Delete(ctx, id)
 }
 
-// mapTranscript carries the batch fields the provider returns today:
-// words, text, billed length, and the receipt. Entity and phrase rows
-// stay empty until a provider adapter asks for those features.
+// mapTranscript carries the batch fields the provider returns: words,
+// text, billed length, entities, key phrases, and the receipt.
 func mapTranscript(done assemblyai.Transcript) analysis.TranscriptResult {
 	words := make([]analysis.Word, 0, len(done.Words))
 	for _, word := range done.Words {
@@ -1082,10 +1086,33 @@ func mapTranscript(done assemblyai.Transcript) analysis.TranscriptResult {
 			Confidence: word.Confidence,
 		})
 	}
+	entities := make([]analysis.Entity, 0, len(done.Entities))
+	for _, entity := range done.Entities {
+		entities = append(entities, analysis.Entity{
+			Type:    entity.Type,
+			Text:    entity.Text,
+			StartMs: entity.StartMs,
+			EndMs:   entity.EndMs,
+		})
+	}
+	phrases := make([]analysis.KeyPhrase, 0, len(done.Phrases))
+	for _, phrase := range done.Phrases {
+		mapped := analysis.KeyPhrase{
+			Text:  phrase.Text,
+			Rank:  phrase.Rank,
+			Count: phrase.Count,
+		}
+		for _, span := range phrase.Spans {
+			mapped.Spans = append(mapped.Spans, analysis.Span{StartMs: span.StartMs, EndMs: span.EndMs})
+		}
+		phrases = append(phrases, mapped)
+	}
 	return analysis.TranscriptResult{
 		ID:                done.ID,
 		Text:              done.Text,
 		Words:             words,
+		Entities:          entities,
+		Phrases:           phrases,
 		AudioDurationSecs: done.AudioDurationSecs,
 		Raw:               done.Raw,
 	}

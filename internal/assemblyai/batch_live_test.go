@@ -501,6 +501,131 @@ func logWordErrors(t *testing.T, bounds []probeWord, words []batchWord) {
 	t.Logf("matched %d of %d known words", matched, len(bounds))
 }
 
+// probeEntitySentences is the short script for the entity and key
+// phrase probe. It names one person and repeats one topic, so entity
+// detection and key phrases each have something to return.
+var probeEntitySentences = []string{
+	"Mara studied the tide charts before dawn.",
+	"The tide charts covered the harbour wall.",
+	"Mara folded the tide charts into her bag.",
+}
+
+// synthEntitySentence renders one sentence to a WAV file with the local
+// piper voice. The binary runs offline, so no network call is involved.
+func synthEntitySentence(t *testing.T, voice, sentence, out string) {
+	t.Helper()
+	cmd := exec.Command("piper", "-m", voice, "-f", out)
+	cmd.Stdin = strings.NewReader(sentence)
+	if raw, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("synthesize sentence: %v %.500s", err, raw)
+	}
+}
+
+// TestBatchEntityHighlightsProbe synthesizes the short script locally,
+// transcribes it with entity detection and key phrases on, and requires
+// at least one entity naming the person and one key phrase naming the
+// repeated topic. It runs behind the live tag with a real key, and it
+// skips when no key is provisioned.
+func TestBatchEntityHighlightsProbe(t *testing.T) {
+	loaded, _, err := settings.Load(context.Background())
+	if err != nil {
+		t.Skipf("settings unloadable, skipping live probe: %v", err)
+	}
+	key, err := loaded.Secrets.AssemblyAIAPIKey.Reveal()
+	if err != nil || len(key) == 0 {
+		t.Skip("no assemblyai key provisioned, skipping live probe")
+	}
+	if _, err := exec.LookPath("piper"); err != nil {
+		t.Skip("piper voice missing, skipping live probe")
+	}
+	voice := "/tmp/voices/en_US-lessac-medium.onnx"
+	if _, err := os.Stat(voice); err != nil {
+		t.Skip("piper voice model missing, skipping live probe")
+	}
+	dir := t.TempDir()
+	var clip []int16
+	rate := 0
+	for i, sentence := range probeEntitySentences {
+		wav := filepath.Join(dir, fmt.Sprintf("entity-%d.wav", i))
+		synthEntitySentence(t, voice, sentence, wav)
+		pcm, sentRate := readWAV(t, wav)
+		if rate == 0 {
+			rate = sentRate
+		}
+		if sentRate != rate {
+			t.Fatalf("sentence rate %d, want %d from the same voice", sentRate, rate)
+		}
+		clip = append(clip, pcm...)
+		clip = append(clip, make([]int16, rate/2)...)
+	}
+	combined := filepath.Join(dir, "entity-clip.wav")
+	writeWAV(t, combined, clip, rate)
+	raw, err := os.ReadFile(combined)
+	if err != nil {
+		t.Fatalf("read clip: %v", err)
+	}
+	t.Logf("clip bytes %d rate %d", len(raw), rate)
+
+	client, err := NewBatchClient(Config{APIKey: key})
+	if err != nil {
+		t.Fatalf("new batch client: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+	defer cancel()
+	uploadURL, err := client.Upload(ctx, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("upload clip: %v", err)
+	}
+	id, err := client.Create(ctx, CreateRequest{
+		AudioURL:        uploadURL,
+		EntityDetection: true,
+		AutoHighlights:  true,
+	})
+	if err != nil {
+		t.Fatalf("create transcript: %v", err)
+	}
+	t.Logf("transcript %s", id)
+	tx, err := client.Wait(ctx, id, 5*time.Second)
+	if err != nil {
+		t.Fatalf("wait transcript: %v", err)
+	}
+	t.Logf("text: %.500s", tx.Text)
+	for _, e := range tx.Entities {
+		t.Logf("entity %s %q start %d end %d", e.Type, e.Text, e.StartMs, e.EndMs)
+	}
+	for _, p := range tx.Phrases {
+		t.Logf("phrase %q rank %.4f count %d spans %d", p.Text, p.Rank, p.Count, len(p.Spans))
+	}
+	named := false
+	for _, e := range tx.Entities {
+		if strings.Contains(strings.ToLower(e.Text), "mara") {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("entities = %+v, want one naming Mara", tx.Entities)
+	}
+	topical := false
+	for _, p := range tx.Phrases {
+		if strings.Contains(strings.ToLower(p.Text), "tide charts") {
+			topical = true
+		}
+	}
+	if !topical {
+		t.Fatalf("phrases = %+v, want one naming the tide charts", tx.Phrases)
+	}
+	if err := client.Delete(ctx, id); err != nil {
+		t.Fatalf("delete transcript: %v", err)
+	}
+	after, err := client.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("fetch after delete: %v", err)
+	}
+	if !after.Deleted() {
+		t.Fatalf("transcript after delete = %+v, want the deletion marker", after)
+	}
+}
+
 func TestBatchProbe(t *testing.T) {
 	client := newBatchClient(t)
 	dir := t.TempDir()
