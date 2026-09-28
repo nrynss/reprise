@@ -2241,6 +2241,48 @@ test and the mock suite.
 **Note.** This blocks the next demo take. Every take so far ran without the host prompt or the
 greeting, so no live episode has yet tested the callback opener.
 
+### T7.73: The editor waveform shows the audio, where playback is, and what to drag
+```yaml
+requires:   T7.69
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
+             web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts
+status:     not-started
+```
+**Defect.** The owner edited the live drafts of 2026-09-28. The waveform showed no progress and
+nothing that looked draggable. A drag on it still seeked. Two causes, both in the editor.
+
+* **No playhead.** The drawing `$effect` in `+page.svelte` paints peaks and cut regions only. It
+  never marks the position, and it does not redraw as the position moves.
+* **No peaks on a live draft.** `installDraft` in `web/src/lib/editor/draft.ts` computes peaks only
+  from `channels`. A live load passes `channels: null`, and only the fixture carries channels. So
+  every real draft draws the flat 2 px fallback line.
+
+**Change.**
+1. **Playhead.** Draw the played span, from 0 to the position, as a filled tint under the peaks.
+   Draw a 2 px vertical line at the position, with a round 10 px handle at its top. Redraw when
+   `controller.player.currentTime` or `snap.position` changes. Keep the cut regions drawn over the
+   peaks, as today.
+2. **Live peaks.** After a live draft installs, fetch the audio it loads, the preview when present,
+   otherwise the stem. Decode it with `OfflineAudioContext.decodeAudioData`, then pass the channels
+   to `computePeaksInWorker` as the fixture path does. A failed decode keeps the flat line, logs
+   once, and never blocks playback.
+3. **Affordance.** Give the canvas `cursor: pointer`, and `cursor: grabbing` while a drag holds the
+   pointer. Show a visible focus ring for keyboard users. Keep its slider role and aria values.
+
+**Tests.**
+* `draft.test.ts`: a live controller whose fetch returns a short WAV ends with `peaks` set. One
+  whose decode fails keeps `peaks` null and still plays.
+* `edit.spec.ts`: after Play, the pixel column at the expected playhead x differs from the column
+  before Play. After a pointer seek to mid canvas, the playhead line sits near the middle. Read
+  the canvas with `getImageData`, and compare only positions, never timings.
+* `edit.spec.ts`: a live draft route serving a WAV draws peaks. At least one column away from the
+  centre line is not background.
+
+**Done when:** The tests pass in Chromium and Firefox, and the gate passes in a fresh worktree.
+Removing the playhead drawing fails the first spec.
+
 ---
 
 ## Exit criteria
