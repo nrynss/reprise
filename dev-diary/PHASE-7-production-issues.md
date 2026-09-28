@@ -2047,6 +2047,84 @@ Calling `endProvider` unconditionally in `finishArtifacts` again fails the secon
 **Note.** The two lost recordings belong to episodes 9 (Chrome) and 5 (Firefox) on 2026-09-28.
 They cannot be recovered. Their drafts and renders still work from the local stems.
 
+### T7.69: A refused episode read never shows the scripted draft
+```yaml
+requires:   T7.61
+fixture-ok: yes
+size:       XS · mid
+owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
+             web/src/routes/episode/[id]/edit/+page.svelte, web/src/routes/episode/[id]/edit/edit.spec.ts
+status:     not-started
+```
+**Defect.** On 2026-09-28 the owner opened the editor for their real Firefox episode `f068cb5e`.
+The page showed "The only place nobody needs anything", with rain above a shop, a bus timetable
+and a harvest. That is the built-in fixture, presented as the owner's episode, with Mark done
+offered. In `DraftController.loadFromBackend` (`web/src/lib/editor/draft.ts`), any refused or
+failed `GET /api/episodes/{id}` falls through to
+`this.loadFromFixture('The episode endpoint refused, so this is the scripted draft.')`. The
+refusal here was a 429 from the episodes rate limit (see T7.70). Showing invented content as a
+person's own episode is a trust breach.
+
+**Change.**
+1. A live load, with no `?fixture=1`, never falls back to the fixture. A refused or failed read
+   leaves `snap.ready` false, shows "This episode did not load" with the status, and offers a
+   Retry control. Retry reruns `loadFromBackend`.
+2. On a 429, read `Retry-After` and retry once on its own after that many seconds, with a cap of
+   60 s, before showing the Retry control.
+3. `?fixture=1` keeps loading the fixture exactly as today, so the specs that use it are unchanged.
+
+**Tests.**
+* `draft.test.ts`: a live controller whose fetch answers 500 has no fixture words or title, and
+  exposes the failure. One whose fetch answers 429 with `Retry-After: 1`, then 200, loads the real
+  draft.
+* `edit.spec.ts`: a live draft route whose detail answers 500 shows the Retry control and no
+  "The only place nobody needs anything".
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. Restoring the fixture
+fallback fails the first test.
+
+### T7.70: The pages stop spending the episodes rate limit on polling
+```yaml
+requires:   T7.54, T7.50
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts,
+             web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
+             web/src/routes/threads/gallery-finish.test.ts
+status:     not-started
+```
+**Defect.** The episodes routes allow 48 requests a minute per client (`takeEpisodesBurst` in
+`cmd/reprise/main.go`). On 2026-09-28, after two takes, `GET /api/episodes` answered 429 for the
+owner's network. The gallery then read "The season endpoint refused". Two pages spend that
+budget.
+
+* **Processing.** `ProcessingController.refresh` runs every 500 ms. Until it knows both the
+  transcript and editorial job ids, it calls `readOutcomes`, which fetches
+  `/api/episodes/{id}`. The editorial job only starts once transcription ends, 10 to 25 seconds
+  after End. So one take spends 20 to 50 detail reads on this screen alone.
+* **Gallery.** On mount, `followUnfinished` in `threads.ts` fetches the detail of every episode
+  not in `ready`. An owner with nine episodes spends ten requests per gallery load. Episodes left
+  in `recording` by closed takes are read each time, although no pass will ever run for them.
+
+**Change.**
+1. In `processing-state.ts`, read the detail at most once every 3 seconds while a job id is
+   missing. The job streams already carry progress, so the screen loses nothing.
+2. In `threads.ts`, skip the detail read for `recording` episodes with no stems. The list row
+   already says what they are. Read the rest one at a time, as today.
+3. Both pages treat a 429 as a pause, not a failure. They wait the `Retry-After` seconds, then
+   retry. The gallery keeps "The season endpoint refused" for other failures only.
+
+**Tests.**
+* `processing-state.test.ts`: with fake timers, 10 seconds on a take whose editorial id stays
+  unknown makes at most 4 detail reads.
+* `threads.test.ts`: a season of 9 episodes, 6 of them in `recording`, makes 1 list read and at
+  most 3 detail reads on mount.
+* `threads.test.ts`: a list read that answers 429 with `Retry-After: 1`, then 200, renders the
+  rows and no refusal line.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. Setting the processing
+interval back to every tick fails the first test.
+
 ---
 
 ## Exit criteria
