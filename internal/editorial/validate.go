@@ -14,6 +14,10 @@ const ColdOpenMinMs = 10_000
 // a chapter, not a cold open.
 const ColdOpenMaxMs = 20_000
 
+// ColdOpenEarliestMs is the earliest a cold open may start. A teaser from
+// the first half minute replays audio the listener hears moments later.
+const ColdOpenEarliestMs = 30_000
+
 // word is one timeline word the proposals point at. Offsets are positions
 // in this slice, which the prompt numbers the same way.
 type word struct {
@@ -84,6 +88,9 @@ func validate(log *slog.Logger, words []word, got answer) draft {
 		case words[end].EndMs-words[start].StartMs < ColdOpenMinMs || words[end].EndMs-words[start].StartMs > ColdOpenMaxMs:
 			log.Warn("editorial: cold open misses the 10 to 20 second span",
 				"start", start, "end", end, "span_ms", words[end].EndMs-words[start].StartMs)
+		case words[start].StartMs-words[0].StartMs < ColdOpenEarliestMs:
+			log.Warn("editorial: cold open starts within the first 30 seconds",
+				"start", start, "end", end, "offset_ms", words[start].StartMs-words[0].StartMs)
 		default:
 			out.ColdOpen = &[2]int{start, end}
 			out.ColdReason = strings.TrimSpace(got.ColdOpen.Reason)
