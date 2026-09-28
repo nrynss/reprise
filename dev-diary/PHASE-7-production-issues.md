@@ -1157,8 +1157,9 @@ the delete. Making the end only DELETE fails that test.
 requires:   T7.41
 fixture-ok: yes
 size:       M · mid
-owns:       internal/transcript/, internal/episode/, internal/store/migrations/, internal/editorial/validate.go, web/src/lib/editor/
-status:     in-progress:implement:t7.44-impl
+owns:       internal/transcript/, internal/episode/, internal/store/migrations/, internal/store/store_test.go,
+             internal/editorial/validate.go, internal/editorial/run.go, web/src/lib/editor/
+status:     in-progress:review-r1:t7.44-rev-r1@af4fb8e
 ```
 T7.41 round 1 recorded an out of scope H finding. Host words share
 the edit timeline with the guest. The `words` table has no speaker
@@ -1179,7 +1180,7 @@ requires:   T7.43
 fixture-ok: yes
 size:       S · mid
 owns:       internal/privacy/
-status:     in-progress:implement:t7.45-impl
+status:     in-progress:review-r1:t7.45-rev-r1@b80efebfb35e9909ec06a1fb009eb51a9c2fab9c
 ```
 T7.43 round 1 recorded an out of scope H finding. Account erase
 deletes the provider record through `TerminateSession`. That call
