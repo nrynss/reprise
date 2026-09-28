@@ -1776,7 +1776,7 @@ requires:   T7.58
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     not-started
+status:     in-progress:implement:t7.61-impl
 ```
 **Defect.** Three Firefox specs that T7.58 added fail on every CI run since it landed:
 `revert a cut, then play and seek still answer`, `revert every cut, then play and drag still
