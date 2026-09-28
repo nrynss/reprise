@@ -2182,7 +2182,7 @@ owns:       web/src/lib/voice/socket.ts, web/src/lib/voice/socket.test.ts, web/s
              web/src/lib/voice/mock.test.ts, web/src/lib/voice/record-state.ts,
              web/src/lib/voice/testdata/session-update.golden.json,
              internal/assemblyai/voice_live_test.go
-status:     in-progress:land:t7.72-rem-r1@550ee61389bf7372339d36666d1d9bf26c91b2f5
+status:     done:9193d20
 ```
 **Defect.** In both live takes of 2026-09-28 at 19:38 and 19:40 UTC, the host never greeted. The
 guest spoke first. The host then introduced itself as a generic voice assistant that could
@@ -2581,6 +2581,13 @@ name or a topic before a row forms. Say so in the handoff.
 
 ### What exists now
 
+T7.72 landed at 9193d20 after round 2 APPROVE with zero residue.
+The host brief travels in the provider's nested shape with echo
+verification, and a close during setup fails the start instead
+of stranding the guest. The tree matches reviewed commit
+550ee61. Main had moved, so the landing rebased. The socket pin
+passed on the rebased commit. No live episode has yet tested
+the callback opener; the next demo take proves it.
 T7.76 landed at cd47299 after round 1 APPROVE with zero in-scope
 findings. The Release section links the full share address with
 copy control. The tree matches reviewed commit e4d849d. Main
