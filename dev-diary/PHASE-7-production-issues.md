@@ -1481,7 +1481,7 @@ size:       L · frontier
 owns:       internal/render/, internal/api/episodes.go, internal/api/playback_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts
-status:     in-progress:review-r1:t7.53-rev-r1@700dc519ffc7d30d98af03c2ca8ed977685f7ff9
+status:     in-progress:land:t7.53-impl@700dc519ffc7d30d98af03c2ca8ed977685f7ff9
 ```
 **Defect.** The owner edited both T6.4b round 2 drafts hearing only their own voice.
 `episodeDetailJSON.AudioURL` (`internal/api/episodes.go`) names the user stem when one exists,
