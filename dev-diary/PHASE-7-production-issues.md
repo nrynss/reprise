@@ -1896,7 +1896,7 @@ requires:   T7.66
 fixture-ok: yes
 size:       XS · light
 owns:       internal/gemini/live_test.go
-status:     not-started
+status:     in-progress:implement:t7.67-impl
 ```
 T7.66 round 1 recorded an out of scope M finding. The live
 probe hardcodes `gemini-2.5-flash` while both shipped configs
