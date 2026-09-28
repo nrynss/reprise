@@ -1719,7 +1719,7 @@ requires:   T7.40
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/record/stems-complete.spec.ts
-status:     not-started
+status:     in-progress:implement:t7.60-impl
 ```
 T7.58 round 1 recorded an out of scope M finding. `a repeat
 completion reports the standing outcome` fails under full-suite
