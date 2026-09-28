@@ -1387,7 +1387,7 @@ requires:   T7.48
 fixture-ok: yes
 size:       S · mid
 owns:       internal/host/, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:review-r1:t7.51-rev-r1@fdf053908b506cfa9d79b55bff20a4617d9da8ff
+status:     in-progress:remediate-r1:t7.51-rem-r1
 ```
 **Defect 1.** The Firefox owner held four episodes, two of them drafts, and heard "Welcome to your
 first episode". `host.Build` (`internal/host/host.go`) falls back to the constant `opener`
