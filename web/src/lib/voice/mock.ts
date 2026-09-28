@@ -46,7 +46,7 @@ export class MockSocketHandle implements SocketHandle {
 		this.log.push(record['type']);
 		switch (record['type']) {
 			case 'session.update':
-				this.emitReply(this.script.greetingAudio, this.script.greetingText, false);
+				this.answerSetup(record);
 				break;
 			case 'input.audio':
 				this.inputBlocks += 1;
@@ -85,6 +85,35 @@ export class MockSocketHandle implements SocketHandle {
 	private emit(message: Record<string, unknown>): void {
 		const text = JSON.stringify(message);
 		for (const task of this.messageTasks) task(text);
+	}
+
+	// answerSetup echoes the nested setup the provider takes, then speaks the
+	// greeting. A setup with no nested greeting never applied on the wire,
+	// so the double refuses it with the provider error code and stays
+	// silent. That matches how the provider ignores the old top level shape.
+	private answerSetup(record: Record<string, unknown>): void {
+		const nested = record['session'];
+		const inner =
+			typeof nested === 'object' && nested !== null && !Array.isArray(nested)
+				? (nested as Record<string, unknown>)
+				: null;
+		const greeting = inner?.['greeting'];
+		if (typeof greeting !== 'string' || greeting.length === 0) {
+			this.emit({
+				type: 'session.error',
+				code: 'invalid_format',
+				message: 'the setup nests under session with a greeting',
+				param: 'session.greeting'
+			});
+			return;
+		}
+		const echo: Record<string, unknown> = {
+			system_prompt: inner?.['system_prompt'],
+			greeting: inner?.['greeting']
+		};
+		if (inner?.['input'] !== undefined) echo['input'] = inner?.['input'];
+		this.emit({ type: 'session.updated', config: echo });
+		this.emitReply(this.script.greetingAudio, this.script.greetingText, false);
 	}
 
 	private emitReply(audio: Float32Array, text: string, interrupted: boolean): void {

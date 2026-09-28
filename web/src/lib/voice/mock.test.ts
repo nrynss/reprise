@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { VoiceSocket } from './socket';
+import { VoiceSocket, sessionUpdateFrame } from './socket';
 import { MockSocketHandle, MockUploadServer, progressFrame, sseResponse, statusFrame } from './mock';
 import { makeTestTone } from './pcm';
 import type { SessionConfig } from './session';
@@ -72,6 +72,56 @@ describe('MockSocketHandle', () => {
 		expect(handle.log.filter((entry) => entry === 'session.end').length).toBe(1);
 		await done;
 		expect(ended).toBe(1);
+	});
+});
+
+describe('MockSocketHandle setup shape', () => {
+	function collect(handle: MockSocketHandle): string[] {
+		const frames: string[] = [];
+		handle.onMessage((text) => frames.push(text));
+		return frames;
+	}
+
+	function frameTypes(frames: string[]): string[] {
+		return frames.map((text) => (JSON.parse(text) as { type: string }).type);
+	}
+
+	it('refuses a top level update with an error and no greeting', () => {
+		const handle = new MockSocketHandle(script());
+		const frames = collect(handle);
+		handle.send(
+			JSON.stringify({
+				type: 'session.update',
+				system_prompt: 'prompt',
+				greeting: 'hello',
+				keyterms: [],
+				tools: []
+			})
+		);
+		const types = frameTypes(frames);
+		const error = frames
+			.map((text) => JSON.parse(text) as Record<string, unknown>)
+			.find((frame) => frame['type'] === 'session.error');
+		expect(error?.['code']).toBe('invalid_format');
+		expect(types).not.toContain('session.updated');
+		expect(types).not.toContain('reply.audio');
+		expect(types).not.toContain('reply.done');
+	});
+
+	it('echoes the nested setup and speaks the greeting', () => {
+		const handle = new MockSocketHandle(script());
+		const frames = collect(handle);
+		handle.send(JSON.stringify(sessionUpdateFrame(CONFIG)));
+		const types = frameTypes(frames);
+		const updated = frames
+			.map((text) => JSON.parse(text) as Record<string, unknown>)
+			.find((frame) => frame['type'] === 'session.updated');
+		const echo = updated?.['config'] as Record<string, unknown>;
+		expect(echo['system_prompt']).toBe(CONFIG.system_prompt);
+		expect(echo['greeting']).toBe(CONFIG.greeting);
+		expect(types).toContain('reply.audio');
+		expect(types).toContain('reply.done');
+		expect(types).not.toContain('session.error');
 	});
 });
 

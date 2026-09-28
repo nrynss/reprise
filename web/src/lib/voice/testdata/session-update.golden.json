@@ -1,0 +1,11 @@
+{
+	"type": "session.update",
+	"session": {
+		"system_prompt": "You are the host of Reprise. Open on the stored callback.",
+		"greeting": "Last week you mentioned the loft. Did you ever go back?",
+		"tools": [],
+		"input": {
+			"keyterms": ["the loft", "Mara"]
+		}
+	}
+}

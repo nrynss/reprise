@@ -861,6 +861,7 @@ export class RecordController {
 		this.voice = this.wireVoice(browserSocket(socketUrl(this.session.token)));
 		this.attachGuard(this.session.session_id);
 		this.flushEarlyBlocks();
+		await this.voice.waitForSetup();
 	}
 
 	private async startMockTake(): Promise<void> {
@@ -903,6 +904,7 @@ export class RecordController {
 		});
 		this.attachGuard(this.session.session_id);
 		this.mockHandle.open();
+		await this.voice.waitForSetup();
 		this.pushTurn('host', this.session.config.greeting);
 		this.exposeMockHandle();
 	}
@@ -978,6 +980,10 @@ export class RecordController {
 			onEnded: () => {},
 			onProviderId: (id) => {
 				void this.reportProviderId(id);
+			},
+			onSessionError: (detail) => {
+				this.notice = `The host reported an error (${detail.code}). ${detail.message}`;
+				this.emit();
 			}
 		});
 	}

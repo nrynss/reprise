@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import steadyEvents from '../../../../testdata/sessions/steady/events.json';
+import golden from './testdata/session-update.golden.json';
 import { closeSession } from './session-calls';
-import { VoiceSocket, type SocketHandle } from './socket';
+import { SETUP_FAILURE, VoiceSocket, sessionUpdateFrame, type SocketHandle } from './socket';
 import { bytesToPcm16, encodeBase64, floatToPcm16, pcm16ToBytes, pcm16ToFloat } from './pcm';
 import { drainHostBlock } from './take';
 import type { SessionConfig } from './session';
@@ -38,6 +39,12 @@ class FakeHandle implements SocketHandle {
 
 const CONFIG: SessionConfig = { system_prompt: 'prompt', greeting: 'hello', keyterms: ['Mara'] };
 
+const GOLDEN_CONFIG: SessionConfig = {
+	system_prompt: 'You are the host of Reprise. Open on the stored callback.',
+	greeting: 'Last week you mentioned the loft. Did you ever go back?',
+	keyterms: ['the loft', 'Mara']
+};
+
 interface ProviderFrame {
 	type: string;
 	session_id?: string;
@@ -68,20 +75,22 @@ function events() {
 		done: [] as boolean[],
 		user: [] as Array<{ text: string; itemId: string }>,
 		host: [] as Array<{ text: string; startMs: number; endMs: number }>,
+		errors: [] as Array<{ code: string; message: string }>,
 		ended: 0
 	};
 }
 
-function wire(handle: FakeHandle) {
+function wire(handle: FakeHandle, config: SessionConfig = CONFIG) {
 	const seen = events();
 	const socket = new VoiceSocket(
 		handle,
-		CONFIG,
+		config,
 		{
 			onHostAudio: (samples) => seen.hostAudio.push(samples),
 			onReplyDone: (interrupted) => seen.done.push(interrupted),
 			onUserTranscript: (text, itemId) => seen.user.push({ text, itemId }),
 			onHostTranscript: (text, startMs, endMs) => seen.host.push({ text, startMs, endMs }),
+			onSessionError: (detail) => seen.errors.push({ code: detail.code, message: detail.message }),
 			onEnded: () => {
 				seen.ended += 1;
 			}
@@ -90,17 +99,25 @@ function wire(handle: FakeHandle) {
 	return { seen, socket };
 }
 
+function sentTypes(handle: FakeHandle): string[] {
+	return handle.sent.map((text) => (JSON.parse(text) as { type: string }).type);
+}
+
 describe('VoiceSocket', () => {
-	it('sends the setup first with the stored config', () => {
+	it('sends the nested setup first with the stored config', () => {
 		const handle = new FakeHandle();
 		wire(handle);
 		handle.open();
 		expect(handle.sent.length).toBe(1);
 		const setup = JSON.parse(handle.sent[0]) as Record<string, unknown>;
 		expect(setup['type']).toBe('session.update');
-		expect(setup['system_prompt']).toBe('prompt');
-		expect(setup['greeting']).toBe('hello');
-		expect(setup['keyterms']).toEqual(['Mara']);
+		expect(setup['system_prompt']).toBeUndefined();
+		expect(setup['greeting']).toBeUndefined();
+		const session = setup['session'] as Record<string, unknown>;
+		expect(session['system_prompt']).toBe('prompt');
+		expect(session['greeting']).toBe('hello');
+		expect(session['tools']).toEqual([]);
+		expect(session['input']).toEqual({ keyterms: ['Mara'] });
 	});
 
 	it('routes host audio through a base64 round trip', () => {
@@ -216,6 +233,10 @@ describe('VoiceSocket', () => {
 		const { updated, other } = steadyProviderFrames();
 		const handle = new FakeHandle();
 		const { socket } = wire(handle);
+		// The recorded echo carries the probe brief, not the test config, so
+		// the setup check refuses it in the background. The id reads below
+		// still run.
+		void socket.waitForSetup().catch(() => undefined);
 		handle.open();
 		handle.receive(JSON.stringify(updated));
 		const learned = socket.providerSessionId;
@@ -231,6 +252,10 @@ describe('VoiceSocket', () => {
 		const { ready, updated, other } = steadyProviderFrames();
 		const handle = new FakeHandle();
 		const { socket } = wire(handle);
+		// The recorded echo carries the probe brief, not the test config, so
+		// the setup check refuses it in the background. The close body below
+		// still carries the learned id.
+		void socket.waitForSetup().catch(() => undefined);
 		handle.open();
 		handle.receive(JSON.stringify(updated));
 		handle.receive(JSON.stringify(ready));
@@ -320,6 +345,89 @@ describe('VoiceSocket', () => {
 		handle.receive(JSON.stringify(ready));
 		handle.receive(JSON.stringify({ type: 'session.ready', session_id: '' }));
 		expect(reported).toHaveLength(1);
+	});
+});
+
+describe('session setup frame', () => {
+	it('matches the golden frame for a config with two keyterms', () => {
+		expect(sessionUpdateFrame(GOLDEN_CONFIG)).toEqual(golden);
+	});
+
+	it('omits input when no keyterms are set', () => {
+		const frame = sessionUpdateFrame({ system_prompt: 'prompt', greeting: 'hello', keyterms: [] });
+		const session = frame['session'] as Record<string, unknown>;
+		expect('input' in session).toBe(false);
+	});
+
+	it('sends the golden frame on open', () => {
+		const handle = new FakeHandle();
+		wire(handle, GOLDEN_CONFIG);
+		handle.open();
+		expect(handle.sent.length).toBe(1);
+		expect(JSON.parse(handle.sent[0])).toEqual(golden);
+	});
+});
+
+describe('setup verification', () => {
+	it('fails the start when the echo drops the setup', async () => {
+		const handle = new FakeHandle();
+		const { seen, socket } = wire(handle);
+		handle.open();
+		const pending = expect(socket.waitForSetup()).rejects.toThrow(SETUP_FAILURE);
+		handle.receive(
+			JSON.stringify({ type: 'session.updated', config: { system_prompt: '', greeting: 'hello' } })
+		);
+		await pending;
+		expect(sentTypes(handle)).toContain('session.end');
+		expect(handle.closed).toBe(1);
+		expect(seen.errors).toEqual([]);
+	});
+
+	it('fails the start on an error before ready', async () => {
+		const handle = new FakeHandle();
+		const { seen, socket } = wire(handle);
+		handle.open();
+		const pending = expect(socket.waitForSetup()).rejects.toThrow(SETUP_FAILURE);
+		handle.receive(
+			JSON.stringify({
+				type: 'session.error',
+				code: 'invalid_format',
+				message: 'the setup shape is wrong',
+				param: 'session'
+			})
+		);
+		await pending;
+		expect(sentTypes(handle)).toContain('session.end');
+		expect(handle.closed).toBe(1);
+		expect(socket.setupError).toEqual({
+			code: 'invalid_format',
+			message: 'the setup shape is wrong',
+			param: 'session'
+		});
+		expect(seen.errors).toEqual([{ code: 'invalid_format', message: 'the setup shape is wrong' }]);
+	});
+
+	it('goes live on a matching echo and only records a later error', async () => {
+		const handle = new FakeHandle();
+		const { seen, socket } = wire(handle);
+		handle.open();
+		const pending = socket.waitForSetup();
+		handle.receive(
+			JSON.stringify({
+				type: 'session.updated',
+				config: { system_prompt: 'prompt', greeting: 'hello' }
+			})
+		);
+		await pending;
+		handle.receive(JSON.stringify({ type: 'session.ready', session_id: 's-1' }));
+		handle.receive(
+			JSON.stringify({ type: 'session.error', code: 'late', message: 'after ready', param: '' })
+		);
+		expect(sentTypes(handle)).not.toContain('session.end');
+		expect(handle.closed).toBe(0);
+		expect(socket.setupError?.code).toBe('late');
+		expect(seen.errors).toEqual([{ code: 'late', message: 'after ready' }]);
+		await socket.waitForSetup();
 	});
 });
 
