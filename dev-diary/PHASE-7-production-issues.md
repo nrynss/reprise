@@ -1721,7 +1721,7 @@ size:       XS · light
 owns:       web/src/routes/record/stems-complete.spec.ts, web/src/routes/record/cap.spec.ts,
              web/src/routes/record/confirm-processing.spec.ts, web/src/routes/record/end-control.spec.ts,
              web/src/routes/record/gallery-link.spec.ts, web/src/routes/record/mock-session.spec.ts
-status:     in-progress:review-r1:t7.60-rev-r1@d47755685ada3e443bf88ffe9ccc6230bf8be198
+status:     in-progress:remediate-r1:t7.60-rem-r1
 ```
 T7.58 round 1 recorded an out of scope M finding. `a repeat
 completion reports the standing outcome` fails under full-suite
@@ -1808,7 +1808,7 @@ requires:   T7.40
 fixture-ok: yes
 size:       XS · mid
 owns:       web/src/routes/record/+page.svelte, web/tests/start-gesture.spec.ts
-status:     in-progress:review-r1:t7.62-rev-r1@57e545bc9169df533f4e2698b023d6476bd2f802
+status:     in-progress:land:t7.62-impl@57e545bc9169df533f4e2698b023d6476bd2f802
 ```
 **Defect.** The record page is prerendered, so the Start button renders enabled before the page's
 script runs. The click handler is attached later, inside `$effect`, through
@@ -1890,6 +1890,27 @@ in `welcome.playwright.config.ts`. CI already installs WebKit. Change no spec.
 runs in a row. The gate passes in a fresh worktree three times in a row, and the review file records
 the three exit codes. WebKit does not launch on the workstation, so run it only in that image.
 
+### T7.67: The live probe follows the production model
+```yaml
+requires:   T7.66
+fixture-ok: yes
+size:       XS · light
+owns:       internal/gemini/live_test.go
+status:     not-started
+```
+T7.66 round 1 recorded an out of scope M finding. The live
+probe hardcodes `gemini-2.5-flash` while both shipped configs
+carry `gemini-3.8-flash`. The next live run would exercise the
+old model and prove nothing about production.
+
+* Read the model from the loaded settings (or the shipped
+  local config) instead of the constant, so the probe always
+  exercises what production calls. Live-only helper, never CI.
+
+**Done when:** The probe resolves the production model id from
+settings. Pinning the constant back to the old id fails that
+test.
+
 ### T7.66: Run Gemini 3.8 Flash on Vertex global, price it right, and draw real covers
 ```yaml
 requires:   T7.56
@@ -1900,7 +1921,7 @@ owns:       config/reprise.box.toml, config/reprise.local.toml, internal/setting
              internal/editorial/run_test.go, internal/cover/cover.go, internal/cover/cover_test.go,
              cmd/reprise/main.go, cmd/reprise/finish.go, cmd/reprise/main_test.go,
              cmd/reprise/boot_test.go
-status:     in-progress:review-r1:t7.66-rev-r1@f9e1eda25bf8b5b90e7cdd5739ee456f600a2f4a
+status:     in-progress:remediate-r1:t7.66-rem-r1
 ```
 **Findings.** A probe on 2026-09-28 used the project's own service account against Vertex.
 
