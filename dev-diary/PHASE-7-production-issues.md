@@ -2248,7 +2248,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:review-r1:t7.73-rev-r1@64478e17bcaa22f4890e994b68bffb91afa6d18b
+status:     in-progress:land:t7.73-impl@64478e17bcaa22f4890e994b68bffb91afa6d18b
 ```
 **Defect.** The owner edited the live drafts of 2026-09-28. The waveform showed no progress and
 nothing that looked draggable. A drag on it still seeked. Two causes, both in the editor.
