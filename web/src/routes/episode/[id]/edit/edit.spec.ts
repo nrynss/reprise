@@ -1,10 +1,85 @@
-// Playwright proofs for the editor screen. The page runs on the scripted
-// draft, so every proof below needs no backend and no real clock. This
-// spec runs with the suite beside the route:
+// Playwright proofs for the editor screen. The fixture proofs run on the
+// scripted draft with no backend. The live proofs stub the episode detail
+// and one stem, so they pin the stored shapes with no network and no real
+// clock beyond the audio element itself. This spec runs with the suite
+// beside the route:
 // npx playwright test -c src/routes/episode/[id]/edit/edit.playwright.config.ts
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const DRAFT = '/episode/draft-1/edit?fixture=1';
+
+// One mono 16-bit WAV of a plain tone, built in the runner and served by
+// route, so the element reports a known length with no fixture file.
+function toneWav(seconds: number, rate: number): Uint8Array {
+	const frames = Math.floor(seconds * rate);
+	const buffer = new ArrayBuffer(44 + frames * 2);
+	const view = new DataView(buffer);
+	const writeText = (offset: number, text: string) => {
+		for (let i = 0; i < text.length; i += 1) view.setUint8(offset + i, text.charCodeAt(i));
+	};
+	writeText(0, 'RIFF');
+	view.setUint32(4, 36 + frames * 2, true);
+	writeText(8, 'WAVE');
+	writeText(12, 'fmt ');
+	view.setUint32(16, 16, true);
+	view.setUint16(20, 1, true);
+	view.setUint16(22, 1, true);
+	view.setUint32(24, rate, true);
+	view.setUint32(28, rate * 2, true);
+	view.setUint16(32, 2, true);
+	view.setUint16(34, 16, true);
+	writeText(36, 'data');
+	view.setUint32(40, frames * 2, true);
+	for (let frame = 0; frame < frames; frame += 1) {
+		const sample = Math.sin((2 * Math.PI * 220 * frame) / rate) * 0.4;
+		view.setInt16(44 + frame * 2, Math.round(sample * 32767), true);
+	}
+	return new Uint8Array(buffer);
+}
+
+// Base 64 without node types, chunked so no call frame overflows.
+function base64(bytes: Uint8Array): string {
+	let binary = '';
+	const step = 0x8000;
+	for (let at = 0; at < bytes.length; at += step) {
+		binary += String.fromCharCode(...bytes.subarray(at, at + step));
+	}
+	return btoa(binary);
+}
+
+// A stored draft of forty short words ending near fifteen seconds, one
+// accepted cut, a title and notes, and no callback or cold open, with a
+// twenty second tone behind it as a data address.
+async function serveLiveDraft(page: Page): Promise<void> {
+	const words = Array.from({ length: 40 }, (_, index) => ({
+		text: `w${index}`,
+		start: 0.4 + index * 0.36,
+		end: 0.4 + index * 0.36 + 0.3
+	}));
+	const audioUrl = `data:audio/wav;base64,${base64(toneWav(20, 8000))}`;
+	await page.route(
+		(url) => url.pathname === '/api/episodes/live-9',
+		(route) =>
+			route.fulfill({
+				json: {
+					episode: { id: 'live-9', number: 9, title: 'Live take', state: 'draft', visibility: 'private' },
+					proposals: [
+						{ id: 'cut-a', kind: 'cut', start_word: 0, end_word: 2, reason: 'Trim the open.', decision: 'accepted' },
+						{ id: 'title-9', kind: 'title', start_word: 0, end_word: 0, reason: 'Live take', decision: '' },
+						{ id: 'notes-9', kind: 'show_notes', start_word: 0, end_word: 0, reason: 'Some notes.', decision: '' }
+					],
+					words,
+					audio_url: audioUrl,
+					render_audio_url: ''
+				}
+			})
+	);
+	await page.route((url) => url.pathname === '/api/episodes/live-9/decisions', (route) =>
+		route.fulfill({ json: {} })
+	);
+	await page.goto('/episode/live-9/edit');
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('1 cuts applied');
+}
 
 test('reverting a cut writes its decision row', async ({ page }) => {
 	await page.goto(DRAFT);
@@ -73,6 +148,84 @@ test('clicking a word seeks the readout', async ({ page }) => {
 	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');
 	await page.getByRole('button', { name: 'shop. Activate to seek.' }).click();
 	await expect(page.getByRole('status', { name: 'Playback position' })).toHaveText('0:03 of 0:24');
+});
+
+test('adjacent words read with a space between them', async ({ page }) => {
+	await page.goto(DRAFT);
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');
+	const words = page.locator('p.words');
+	await expect(words).toContainText('I mean');
+	await expect(words).toContainText('the shop');
+});
+
+test('a pointer down on the waveform seeks, and a drag with the button held follows', async ({
+	page
+}) => {
+	await page.goto(DRAFT);
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');
+	const position = page.getByRole('status', { name: 'Playback position' });
+	await expect(position).toHaveText('0:00 of 0:24');
+
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error('waveform has no box');
+	const middle = Math.floor(box.width / 2);
+	await canvas.click({ position: { x: middle, y: 5 } });
+	await expect(position).toHaveText('0:12 of 0:24');
+
+	await page.mouse.move(box.x + middle + 120, box.y + 5);
+	await expect(position).toHaveText('0:12 of 0:24');
+
+	await page.mouse.move(box.x + middle + 170, box.y + 5, { steps: 3 });
+	await page.mouse.down();
+	await page.mouse.move(box.x + middle + 270, box.y + 5, { steps: 3 });
+	await page.mouse.up();
+	await expect(position).toHaveText(/0:1[4-9] of 0:24/);
+});
+
+test('revert a cut, then play and seek still answer', async ({ page }) => {
+	await page.goto(DRAFT);
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');
+	await page.getByRole('button', { name: 'Revert cut: False start at the top of the answer.' }).click();
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('2 cuts applied');
+
+	await page.getByRole('button', { name: 'Play draft' }).click();
+	const position = page.getByRole('status', { name: 'Playback position' });
+	await expect(position).toHaveText(/0:0[1-9] of 0:24/, { timeout: 15_000 });
+
+	await page.getByRole('button', { name: 'Pause draft' }).click();
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error('waveform has no box');
+	await canvas.click({ position: { x: Math.floor(box.width / 2), y: 5 } });
+	await expect(position).toHaveText('0:12 of 0:24');
+});
+
+test('the shown length follows the audio, and the position never passes it', async ({ page }) => {
+	await serveLiveDraft(page);
+	const position = page.getByRole('status', { name: 'Playback position' });
+	await expect(position).toHaveText('0:00 of 0:20', { timeout: 15_000 });
+
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	await canvas.focus();
+	await page.keyboard.press('End');
+	await expect(position).toHaveText('0:20 of 0:20');
+	await expect(canvas).toHaveAttribute('aria-valuemax', '20');
+});
+
+test('a draft with no callback and no cold open shows neither block', async ({ page }) => {
+	await serveLiveDraft(page);
+	await expect(page.getByRole('region', { name: 'Proposed cold open' })).toHaveCount(0);
+	await expect(page.getByRole('region', { name: 'Planted for next time' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Revert callback proposal' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Preview the cold open' })).toHaveCount(0);
+});
+
+test('the editor links back to the gallery', async ({ page }) => {
+	await page.goto(DRAFT);
+	const back = page.getByRole('link', { name: 'Back to the gallery' });
+	await expect(back).toBeVisible();
+	await expect(back).toHaveAttribute('href', '/');
 });
 
 test('the screen passes both gates', async ({ page }) => {

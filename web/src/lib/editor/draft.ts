@@ -63,6 +63,7 @@ export interface DraftSnapshot {
 	regions: WaveformRegion[];
 	coldOpen: ColdOpen;
 	coldOpenReverted: boolean;
+	hasColdOpen: boolean;
 	proposedTitle: string;
 	titleReverted: boolean;
 	proposedNotes: string;
@@ -102,6 +103,7 @@ export function emptyDraft(episodeId: string): DraftSnapshot {
 		regions: [],
 		coldOpen: { start: 0, end: 0, reason: '', quote: '' },
 		coldOpenReverted: false,
+		hasColdOpen: false,
 		proposedTitle: '',
 		titleReverted: false,
 		proposedNotes: '',
@@ -320,6 +322,7 @@ export class DraftController {
 			coldStart: FIXTURE_COLD_OPEN.start,
 			coldEnd: FIXTURE_COLD_OPEN.end,
 			coldReason: FIXTURE_COLD_REASON,
+			hasColdOpen: true,
 			callback: FIXTURE_CALLBACK,
 			callbackQuote: quoteRange(fixture.words, 48, 57),
 			notes:
@@ -403,6 +406,7 @@ export class DraftController {
 			coldStart: cold?.start ?? 0,
 			coldEnd: cold?.end ?? 0,
 			coldReason: cold?.reason ?? '',
+			hasColdOpen: cold !== undefined,
 			callback: callback?.reason ?? '',
 			callbackQuote:
 				callback && words.length > 0
@@ -430,6 +434,7 @@ export class DraftController {
 		coldStart: number;
 		coldEnd: number;
 		coldReason: string;
+		hasColdOpen: boolean;
 		callback: string;
 		callbackQuote: string;
 		notes: string;
@@ -460,6 +465,7 @@ export class DraftController {
 				quote: quoteRange(args.words, args.coldStart, args.coldEnd)
 			},
 			coldOpenReverted: args.reverted.coldOpen,
+			hasColdOpen: args.hasColdOpen,
 			proposedTitle: args.title,
 			titleReverted: args.reverted.title,
 			proposedNotes: args.notes,
@@ -735,8 +741,26 @@ export class DraftController {
 		this.emit();
 	}
 
+	// Adopt the element length once it reports one. The install length
+	// comes from the last word end, which can sit short of or past the
+	// stored audio. Regions follow the adopted length, and the playhead
+	// never reads past it.
+	syncDuration(): void {
+		const reported = this.player.duration;
+		if (!(reported > 0)) return;
+		if (reported === this.snap.duration) return;
+		this.snap = {
+			...this.snap,
+			duration: reported,
+			position: Math.min(this.snap.position, reported)
+		};
+		this.refreshCuts();
+		this.emit();
+	}
+
 	seekTo(seconds: number): void {
 		if (!this.editor) return;
+		this.syncDuration();
 		const clamped = Math.max(0, Math.min(this.snap.duration, seconds));
 		this.player.seek(clamped);
 		this.snap = { ...this.snap, position: this.player.currentTime || clamped };
@@ -747,6 +771,7 @@ export class DraftController {
 	// play still leaves the playhead where the open starts.
 	async previewColdOpen(): Promise<void> {
 		if (!this.editor) return;
+		this.syncDuration();
 		const start = this.snap.words[this.snap.coldOpen.start]?.start ?? 0;
 		this.player.seek(start);
 		this.snap = { ...this.snap, position: start };
@@ -761,6 +786,7 @@ export class DraftController {
 	}
 
 	async togglePlay(): Promise<void> {
+		this.syncDuration();
 		if (this.player.playing) {
 			this.player.pause();
 			this.snap = { ...this.snap, playing: false };

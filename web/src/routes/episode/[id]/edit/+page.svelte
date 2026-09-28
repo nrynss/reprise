@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { activeWordAt } from '@nrynss/chaaya/transcript';
 	import { pageTitle } from '$lib/shell';
@@ -34,11 +35,15 @@
 	});
 
 	// Keep the playhead out of removed spans while the draft plays. The
-	// follower seeks past a cut once, then reports quiet.
+	// follower seeks past a cut once, then reports quiet. The length
+	// follows the element once it reports one, so the readout never runs
+	// past the audio it describes.
 	$effect(() => {
 		if (!browser || !controller) return;
 		const clock = controller.player;
 		void clock.currentTime;
+		void clock.duration;
+		controller.syncDuration();
 		if (clock.playing) controller.follower?.update();
 	});
 
@@ -83,7 +88,10 @@
 				: null
 	);
 
-	let position = $derived.by(() => (controller ? controller.player.currentTime || snap.position : 0));
+	let position = $derived.by(() => {
+		const raw = controller ? controller.player.currentTime || snap.position : 0;
+		return Math.min(raw, snap.duration);
+	});
 </script>
 
 <svelte:head>
@@ -91,6 +99,7 @@
 </svelte:head>
 
 <main>
+	<a href={resolve('/')}>Back to the gallery</a>
 	<p class="eyebrow">{snap.episodeLabel}</p>
 	<h1>{snap.title || 'Editor'}</h1>
 	<p role="status" aria-label="Applied cuts">{snap.appliedCount} cuts applied</p>
@@ -120,6 +129,17 @@
 					else if (event.key === 'Home') controller?.seekTo(0);
 					else if (event.key === 'End') controller?.seekTo(snap.duration);
 				}}
+				onpointerdown={(event) => {
+					wave?.setPointerCapture(event.pointerId);
+					const width = wave?.clientWidth || 1;
+					controller?.seekTo((event.offsetX / width) * snap.duration);
+				}}
+				onpointermove={(event) => {
+					if (event.buttons === 1) {
+						const width = wave?.clientWidth || 1;
+						controller?.seekTo((event.offsetX / width) * snap.duration);
+					}
+				}}
 			></canvas>
 			<p role="status" aria-label="Playback position">{formatTime(position)} of {formatTime(snap.duration)}</p>
 		</section>
@@ -147,34 +167,39 @@
 							onclick={() => controller?.seekToWord(index)}
 						>{word.text}</button>
 					{/if}
+					<!-- The space between words is an expression so the compiler keeps it. -->
+					<!-- eslint-disable-next-line svelte/no-useless-mustaches -->
+					{' '}
 				{/each}
 			</p>
 		</section>
 
 		<aside aria-label="Proposals">
-			<section aria-label="Proposed cold open">
-				<h2>Proposed cold open</h2>
-				{#if snap.coldOpenReverted}
-					<p><s>{snap.coldOpen.quote}</s></p>
-					<p>{snap.coldOpen.reason}</p>
-					<p>Cold open reverted. The episode starts at the top.</p>
-				{:else}
-					<blockquote>{snap.coldOpen.quote}</blockquote>
-					<p>{snap.coldOpen.reason}</p>
-					<button
-						aria-label="Preview the cold open"
-						onclick={() => void controller?.previewColdOpen()}
-					>
-						Preview the cold open
-					</button>
-					<button
-						aria-label="Revert cold open proposal"
-						onclick={() => controller?.revertColdOpen()}
-					>
-						Revert the cold open
-					</button>
-				{/if}
-			</section>
+			{#if snap.hasColdOpen}
+				<section aria-label="Proposed cold open">
+					<h2>Proposed cold open</h2>
+					{#if snap.coldOpenReverted}
+						<p><s>{snap.coldOpen.quote}</s></p>
+						<p>{snap.coldOpen.reason}</p>
+						<p>Cold open reverted. The episode starts at the top.</p>
+					{:else}
+						<blockquote>{snap.coldOpen.quote}</blockquote>
+						<p>{snap.coldOpen.reason}</p>
+						<button
+							aria-label="Preview the cold open"
+							onclick={() => void controller?.previewColdOpen()}
+						>
+							Preview the cold open
+						</button>
+						<button
+							aria-label="Revert cold open proposal"
+							onclick={() => controller?.revertColdOpen()}
+						>
+							Revert the cold open
+						</button>
+					{/if}
+				</section>
+			{/if}
 
 			<section aria-label="Proposed title">
 				<h2>Proposed title</h2>
@@ -230,22 +255,24 @@
 				{/if}
 			</section>
 
-			<section aria-label="Planted for next time">
-				<h2>Planted for next time</h2>
-				{#if snap.callbackReverted}
-					<p><s>{snap.proposedCallback}</s></p>
-					<p>Callback reverted and cleared from the next opening.</p>
-				{:else}
-					<p>{snap.callback}</p>
-					<p>{snap.callbackQuote}</p>
-					<button
-						aria-label="Revert callback proposal"
-						onclick={() => controller?.revertCallback()}
-					>
-						Revert the callback
-					</button>
-				{/if}
-			</section>
+			{#if snap.callback || snap.callbackQuote || snap.callbackReverted}
+				<section aria-label="Planted for next time">
+					<h2>Planted for next time</h2>
+					{#if snap.callbackReverted}
+						<p><s>{snap.proposedCallback}</s></p>
+						<p>Callback reverted and cleared from the next opening.</p>
+					{:else}
+						<p>{snap.callback}</p>
+						<p>{snap.callbackQuote}</p>
+						<button
+							aria-label="Revert callback proposal"
+							onclick={() => controller?.revertCallback()}
+						>
+							Revert the callback
+						</button>
+					{/if}
+				</section>
+			{/if}
 
 			<section aria-label="Decisions">
 				<h2>Decisions</h2>

@@ -298,4 +298,121 @@ describe('draft controller', () => {
 			vi.unstubAllGlobals();
 		}
 	});
+
+	it('carries a proposed cold open on the scripted draft', () => {
+		const { controller } = openDraft();
+		const snap = controller.snapshot;
+		expect(snap.hasColdOpen).toBe(true);
+		expect(snap.coldOpen.quote).not.toBe('');
+		expect(snap.coldOpen.reason).not.toBe('');
+	});
+
+	it('names no cold open and no callback when the detail stores neither', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				Response.json({
+					episode: {
+						id: 'live-1',
+						number: 2,
+						title: 'Live take',
+						state: 'draft',
+						visibility: 'private'
+					},
+					proposals: [
+						{
+							id: 'title-9',
+							kind: 'title',
+							start_word: 0,
+							end_word: 0,
+							reason: 'Live take',
+							decision: ''
+						}
+					],
+					words: [
+						{ text: 'Hello', start: 0, end: 0.4 },
+						{ text: 'there', start: 0.4, end: 0.9 }
+					],
+					audio_url: '/media/user-stem',
+					render_audio_url: ''
+				})
+			)
+		);
+		try {
+			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.ready).toBe(true);
+			});
+			const snap = controller.snapshot;
+			expect(snap.hasColdOpen).toBe(false);
+			expect(snap.coldOpenReverted).toBe(false);
+			expect(snap.callback).toBe('');
+			expect(snap.callbackQuote).toBe('');
+			expect(snap.proposedCallback).toBe('');
+			expect(snap.callbackReverted).toBe(false);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('names the stored cold open when the detail stores one', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(
+				Response.json({
+					episode: {
+						id: 'live-1',
+						number: 2,
+						title: 'Live take',
+						state: 'draft',
+						visibility: 'private'
+					},
+					proposals: [
+						{
+							id: 'cold-9',
+							kind: 'cold_open',
+							start_word: 0,
+							end_word: 1,
+							reason: 'Strong line.',
+							decision: ''
+						}
+					],
+					words: [
+						{ text: 'Hello', start: 0, end: 0.4 },
+						{ text: 'there', start: 0.4, end: 0.9 }
+					],
+					audio_url: '/media/user-stem',
+					render_audio_url: ''
+				})
+			)
+		);
+		try {
+			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.ready).toBe(true);
+			});
+			const snap = controller.snapshot;
+			expect(snap.hasColdOpen).toBe(true);
+			expect(snap.coldOpen.quote).toBe('Hello there');
+			expect(snap.coldOpen.reason).toBe('Strong line.');
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('adopts the element length once it reports one', () => {
+		const { controller } = openDraft();
+		expect(controller.snapshot.duration).toBe(24);
+		controller.player.duration = 30;
+		controller.syncDuration();
+		expect(controller.snapshot.duration).toBe(30);
+		expect(controller.snapshot.regions).toHaveLength(3);
+		controller.player.duration = 30;
+		controller.syncDuration();
+		expect(controller.snapshot.duration).toBe(30);
+	});
 });
