@@ -2306,6 +2306,49 @@ func TestTerminalReconcileDoesNotBlockTheGuestBatch(t *testing.T) {
 	waitIdleJobs(t, drafts.store)
 }
 
+// TestHostWaitRunsTheGuestBatchAlone shortens the host wait to a few
+// polls with no reconcile job, so the wait returns empty replies and
+// no error. Without the bound the wait hangs until the context ends.
+func TestHostWaitRunsTheGuestBatchAlone(t *testing.T) {
+	const owner = "owner-host-wait-alone"
+	fx, drafts, episodeID, sessionID, _ := newOffsetEpisode(t, owner)
+	insertClaim(t, fx, sessionID, 0, "")
+	drafts.hostWait = 3 * timelinePoll
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	replies, err := drafts.awaitHostReplies(ctx, owner, episodeID)
+	if err != nil {
+		t.Fatalf("await = err %v, want empty replies and nil error", err)
+	}
+	if len(replies) != 0 {
+		t.Fatalf("await = %v, want empty replies", replies)
+	}
+}
+
+// TestHostWaitReturnsStoredRepliesBeforeTheBound stores the timeline
+// before the bound, so the wait returns both host replies.
+func TestHostWaitReturnsStoredRepliesBeforeTheBound(t *testing.T) {
+	const owner = "owner-host-wait-stored"
+	fx, drafts, episodeID, sessionID, _ := newOffsetEpisode(t, owner)
+	timelineID, err := fx.media.Persist(t.Context(), bytes.NewReader(twoReplyTimeline(t)), mediastore.Put{
+		ContentType: "application/json",
+		Owner:       owner,
+		Group:       episodeID,
+		Visibility:  mediastore.Private,
+	})
+	if err != nil {
+		t.Fatalf("persist timeline: %v", err)
+	}
+	insertClaim(t, fx, sessionID, 0, timelineID)
+	replies, err := drafts.awaitHostReplies(t.Context(), owner, episodeID)
+	if err != nil {
+		t.Fatalf("await = err %v, want two replies", err)
+	}
+	if len(replies) != 2 {
+		t.Fatalf("await = %v, want two replies", replies)
+	}
+}
+
 // TestRestartDuringTheWaitStillMerges interrupts a waiting transcript
 // before any upload, then stores the two replies. A later schedule
 // runs one batch and merges those words.

@@ -1569,6 +1569,9 @@ type jobs struct {
 	// renderConcurrency caps how many renders run at once. The boot sets
 	// it from the settings file before the runner opens.
 	renderConcurrency int
+	// hostWait caps the host reply wait. Zero means hostRepliesWait.
+	// A short value keeps the wait to a few polls.
+	hostWait time.Duration
 }
 
 // openJobs builds the shared clients once and registers every kind on
@@ -1711,6 +1714,8 @@ func startJobs(ctx context.Context, cfg jobsConfig) (*jobs, error) {
 		// renderConcurrency arrives with the boot, so the render kind
 		// follows the settings file.
 		renderConcurrency: cfg.renderConcurrency,
+		// hostWait starts at the shared bound.
+		hostWait: hostRepliesWait,
 	}
 	renderKind, err := out.renderKind()
 	if err != nil {
@@ -2448,6 +2453,12 @@ func (j *jobs) settleTranscript(ctx context.Context, ownerID, episodeID string, 
 	return out, nil
 }
 
+// hostRepliesWait caps how long a transcript job waits for host
+// replies. A minute covers a normal close with margin, because the
+// reconcile backoff tops out at 23.5 seconds. It stays under the 100
+// second limit.
+const hostRepliesWait = 60 * time.Second
+
 // timelinePoll is the gap between claim reads while a transcript job
 // waits for the provider timeline. The batch stays idle until the read
 // returns.
@@ -2692,8 +2703,19 @@ func (j *jobs) reconcileInFlight(ctx context.Context) (bool, error) {
 
 // awaitHostReplies waits until the provider timeline is stored, or
 // until reconcile finished with none. It returns before the batch.
-// The wait lives in the transcript job, so the completion can return.
+// Past the bound it returns no replies and no error, so the batch runs
+// on the guest words alone. The wait lives in the transcript job, so
+// the completion can return.
 func (j *jobs) awaitHostReplies(ctx context.Context, ownerID, episodeID string) ([]transcript.HostReply, error) {
+	bound := j.hostWait
+	if bound <= 0 {
+		bound = hostRepliesWait
+	}
+	maxPolls := int(bound / timelinePoll)
+	if maxPolls < 1 {
+		maxPolls = 1
+	}
+	polls := 0
 	for {
 		replies, pending, err := j.hostReplies(ctx, ownerID, episodeID)
 		if err != nil {
@@ -2701,6 +2723,11 @@ func (j *jobs) awaitHostReplies(ctx context.Context, ownerID, episodeID string) 
 		}
 		if !pending {
 			return replies, nil
+		}
+		polls++
+		if polls >= maxPolls {
+			log.Printf("reprise transcript: host wait passed for episode %s, running the guest batch alone", episodeID)
+			return nil, nil
 		}
 		timer := time.NewTimer(timelinePoll)
 		select {
