@@ -298,6 +298,10 @@ export class DraftController {
 	editor: TranscriptEditor | null = null;
 	follower: TranscriptFollower | null = null;
 	private stream: JobStream | null = null;
+	private cleanups: Array<() => void> = [];
+	private followTimer: number | null = null;
+	private followWarned = false;
+	private followedJob = '';
 	private snap: DraftSnapshot;
 	private readonly onChange: (snap: DraftSnapshot) => void;
 	private fixtureMode = true;
@@ -330,9 +334,27 @@ export class DraftController {
 	}
 
 	destroy(): void {
+		this.stopFollowPoll();
+		for (const cleanup of this.cleanups) {
+			try {
+				cleanup();
+			} catch {
+				// A spent cleanup never blocks the rest.
+			}
+		}
+		this.cleanups = [];
+		this.followedJob = '';
 		this.stream?.close();
 		this.stream = null;
 		this.player.pause();
+	}
+
+	// Stop the render poll. A finished or abandoned follow leaves no timer.
+	private stopFollowPoll(): void {
+		if (this.followTimer !== null && typeof window !== 'undefined') {
+			window.clearInterval(this.followTimer);
+		}
+		this.followTimer = null;
 	}
 
 	// Retry the backend read after a refusal. The screen offers this
@@ -892,12 +914,16 @@ export class DraftController {
 		void fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}/done`, { method: 'POST' })
 			.then(async (response) => {
 				if (!response.ok) throw new Error(`done ${response.status}`);
-				const body = (await response.json()) as { job_id?: string; queued?: boolean };
-				if (body.queued) {
-					this.onRenderQueued();
-					return;
+				try {
+					const body = (await response.json()) as { job_id?: string; queued?: boolean };
+					if (body.queued) {
+						this.onRenderQueued();
+						return;
+					}
+					this.onRenderStarted(body.job_id ?? null);
+				} catch (error) {
+					this.onFollowFailed(error);
 				}
-				this.onRenderStarted(body.job_id ?? null);
 			})
 			.catch(() => {
 				if (this.fixtureMode) {
@@ -943,18 +969,116 @@ export class DraftController {
 
 	// Follow the render job over the event feed. Only attached when the
 	// backend started a real job, so fixtures never open a dead stream.
+	// The explicit runner keeps the attach working outside a component,
+	// where the mark done answer lands. The poll below then moves the
+	// detail from running to done.
 	private followRender(jobId: string): void {
 		const fetchState = async (): Promise<JobSnapshot> => {
 			const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
 			if (!response.ok) throw new Error(`job ${response.status}`);
 			return (await response.json()) as JobSnapshot;
 		};
+		for (const cleanup of this.cleanups) {
+			try {
+				cleanup();
+			} catch {
+				// A spent cleanup never blocks the rest.
+			}
+		}
+		this.cleanups = [];
+		this.stopFollowPoll();
 		this.stream?.close();
 		this.stream = new JobStream({
 			url: `/api/jobs/${encodeURIComponent(jobId)}/events`,
 			fetchState
 		});
-		this.stream.attach();
+		this.stream.attach((task) => {
+			this.cleanups.push(task());
+		});
+		this.followedJob = jobId;
+		this.startFollowPoll();
+	}
+
+	// The render started but its stream could not be followed. The render
+	// itself runs, so the gallery stays the source of truth. Logged once.
+	private onFollowFailed(error: unknown): void {
+		if (!this.followWarned) {
+			this.followWarned = true;
+			console.warn('Render started but progress could not be followed.', error);
+		}
+		this.snap = {
+			...this.snap,
+			renderStage: 'running',
+			renderDetail:
+				'The render started, but its progress could not be followed. Open the gallery to see its state.'
+		};
+		this.emit();
+	}
+
+	// Poll the followed stream until it ends. The running line stands
+	// while the job lives. A done job reads the episode once, so a ready
+	// episode links on.
+	private startFollowPoll(): void {
+		this.stopFollowPoll();
+		if (typeof window === 'undefined') return;
+		this.followTimer = window.setInterval(() => {
+			void this.checkRender();
+		}, 500);
+	}
+
+	private async checkRender(): Promise<void> {
+		const stream = this.stream;
+		const jobId = this.followedJob;
+		if (!stream || !jobId) return;
+		if (stream.status === 'done') {
+			this.stopFollowPoll();
+			await this.onRenderDone(jobId);
+			return;
+		}
+		if (
+			stream.status === 'error' ||
+			stream.status === 'cancelled' ||
+			stream.status === 'interrupted'
+		) {
+			this.stopFollowPoll();
+			const reason = stream.error?.message ? ` ${stream.error.message}` : '';
+			this.snap = {
+				...this.snap,
+				renderStage: 'done',
+				renderDetail: `Render ${stream.status}.${reason} Open the gallery to see its state.`
+			};
+			this.emit();
+		}
+	}
+
+	private async onRenderDone(jobId: string): Promise<void> {
+		let ready = false;
+		try {
+			const response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`);
+			if (response.ok) {
+				const body: unknown = await response.json();
+				if (isRecord(body)) {
+					const episode = body['episode'];
+					if (isRecord(episode) && episode['state'] === 'ready') ready = true;
+				}
+			}
+		} catch {
+			ready = false;
+		}
+		if (ready) {
+			this.snap = {
+				...this.snap,
+				renderStage: 'done',
+				renderDetail: `Render done for job ${jobId}. The episode is ready at /episode/${this.episodeId}.`
+			};
+		} else {
+			this.snap = {
+				...this.snap,
+				renderStage: 'done',
+				renderDetail: `Render done for job ${jobId}. Open the gallery to see its state.`
+			};
+		}
+		this.emit();
 	}
 
 	cancelMarkDone(): void {

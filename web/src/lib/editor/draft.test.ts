@@ -153,6 +153,52 @@ describe('draft controller', () => {
 		expect(controller.snapshot.renderDetail).toContain('Render running');
 	});
 
+	it('follows a started render instead of calling it refused', async () => {
+		const detail = {
+			episode: { id: 'live-9', number: 9, title: 'Live take', state: 'draft', visibility: 'private' },
+			proposals: [],
+			words: [{ text: 'Hello', start: 0, end: 0.4 }],
+			audio_url: '',
+			render_audio_url: ''
+		};
+		const fetchMock = vi.fn(async (input: unknown) => {
+			const url = typeof input === 'string' ? input : String((input as Request)?.url ?? input);
+			if (url.includes('/done')) {
+				return Response.json({ job_id: 'r-1', queued: false }, { status: 202 });
+			}
+			if (url.includes('/api/jobs/r-1/events')) {
+				return new Response(
+					'id: 1\nevent: progress\ndata: {"job_id":"r-1","stage":"rendering","current":1,"total":4}\n\n',
+					{ status: 200, headers: { 'content-type': 'text/event-stream' } }
+				);
+			}
+			if (url.includes('/api/jobs/r-1')) {
+				return Response.json({ jobId: 'r-1', status: 'running', current: 1, total: 4 });
+			}
+			return Response.json(detail);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+		try {
+			const controller = new DraftController({ episodeId: 'live-9', onChange: () => {} });
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(controller.snapshot.ready).toBe(true);
+			});
+			controller.markDone();
+			expect(controller.snapshot.renderStage).toBe('confirm');
+			controller.markDone();
+			await vi.waitFor(() => {
+				expect(controller.snapshot.renderStage).toBe('running');
+			});
+			expect(controller.snapshot.renderDetail).toContain('r-1');
+			expect(controller.snapshot.renderDetail).not.toContain('refused');
+			expect(controller.snapshot.renderDetail).not.toContain('could not be followed');
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it('formats the readout as minutes and seconds', () => {
 		expect(formatTime(0)).toBe('0:00');
 		expect(formatTime(65)).toBe('1:05');

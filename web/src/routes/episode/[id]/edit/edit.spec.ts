@@ -306,3 +306,69 @@ test('a refused live draft shows Retry and no scripted title', async ({ page }) 
 	await page.getByRole('button', { name: 'Retry' }).click();
 	await expect(page.getByRole('heading', { name: 'Live take' })).toBeVisible();
 });
+
+test('mark done follows its render to done with no refusal', async ({ page }) => {
+	const words = Array.from({ length: 40 }, (_, index) => ({
+		text: `w${index}`,
+		start: 0.4 + index * 0.36,
+		end: 0.4 + index * 0.36 + 0.3
+	}));
+	const audioUrl = `data:audio/wav;base64,${base64(toneWav(20, 8000))}`;
+	let detailCalls = 0;
+	await page.route(
+		(url) => url.pathname === '/api/episodes/live-done',
+		(route) => {
+			detailCalls += 1;
+			return route.fulfill({
+				json: {
+					episode: {
+						id: 'live-done',
+						number: 9,
+						title: 'Live take',
+						state: detailCalls === 1 ? 'draft' : 'ready',
+						visibility: 'private'
+					},
+					proposals: [
+						{ id: 'cut-a', kind: 'cut', start_word: 0, end_word: 2, reason: 'Trim the open.', decision: 'accepted' },
+						{ id: 'title-9', kind: 'title', start_word: 0, end_word: 0, reason: 'Live take', decision: '' },
+						{ id: 'notes-9', kind: 'show_notes', start_word: 0, end_word: 0, reason: 'Some notes.', decision: '' }
+					],
+					words,
+					audio_url: audioUrl,
+					render_audio_url: ''
+				}
+			});
+		}
+	);
+	await page.route((url) => url.pathname === '/api/episodes/live-done/decisions', (route) =>
+		route.fulfill({ json: {} })
+	);
+	await page.route(
+		(url) => url.pathname === '/api/episodes/live-done/done',
+		(route) => route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ job_id: 'r-202', queued: false }) })
+	);
+	await page.route('**/api/jobs/r-202', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ jobId: 'r-202', status: 'done' })
+		})
+	);
+	await page.route('**/api/jobs/r-202/events', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'text/event-stream',
+			body: 'event: done\ndata: {"job_id":"r-202","status":"done"}\n\n'
+		})
+	);
+	await page.goto('/episode/live-done/edit');
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('1 cuts applied');
+
+	await page.getByRole('button', { name: 'Mark episode done' }).click();
+	await page.getByRole('button', { name: 'Confirm mark done' }).click();
+
+	await expect(page.getByText(/Render done/)).toBeVisible({ timeout: 15_000 });
+	await expect(page.getByText('refused')).toHaveCount(0);
+	await expect(page.getByText('could not be followed')).toHaveCount(0);
+	await expect(page.getByText(/\/episode\/live-done/)).toBeVisible();
+});
