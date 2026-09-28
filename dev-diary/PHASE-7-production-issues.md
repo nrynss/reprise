@@ -1222,7 +1222,8 @@ field on the wire fails that test.
 requires:   T7.40, T7.43
 fixture-ok: yes
 size:       M · frontier
-owns:       internal/assemblyai/socket_test.go, web/src/lib/voice/record-state.ts
+owns:       internal/assemblyai/socket_test.go, web/src/lib/voice/record-state.ts,
+             web/src/lib/voice/processing-state.ts, web/src/routes/processing/+page.svelte
 status:     in-progress:implement:t7.47-impl
 ```
 CI is red on every `main` commit. The gate stops at the first
