@@ -63,12 +63,18 @@ func episodeTitle(t *testing.T, db *sql.DB) string {
 // TestRunStoresDraft pins the whole pass: the model hears both stems with
 // the numbered timeline, every proposal lands on real words, cuts default
 // to accepted, the callback persists as stored rows, the receipt is kept,
-// and the reservation settles.
+// and the reservation settles. The timeline runs past thirty seconds so
+// the cold open starts clear of the opening.
 func TestRunStoresDraft(t *testing.T) {
 	t.Parallel()
 	db := openDiary(t)
-	seedForty(t, db)
-	model := &scriptedModel{answer: fullAnswer()}
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "ep-1", "owner-a", 3)
+	addWords(t, db, "owner-a", "ep-1", 60, 1000, 500)
+	model := &scriptedModel{answer: `{"cold_open":{"start_word":35,"end_word":49,"reason":"a laugh opens it"},` +
+		`"cuts":[{"start_word":5,"end_word":7,"reason":"false start"}],` +
+		`"title":"Harbor Light","show_notes":"We talked about the ferry.",` +
+		`"callback":{"start_word":10,"end_word":12,"quote":"w10 w11 w12","text":"the debt"}}`}
 	budgets := &fakeBudget{}
 	var receipt []byte
 	result, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt))
@@ -101,8 +107,8 @@ func TestRunStoresDraft(t *testing.T) {
 	if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM words WHERE episode_id = 'ep-1'").Scan(&words); err != nil {
 		t.Fatalf("count words: %v", err)
 	}
-	if start != 0 || end != 39 || end >= words {
-		t.Fatalf("cold open = [%d, %d] over %d words, want [0, 39] on real words", start, end, words)
+	if start != 35 || end != 49 || end >= words {
+		t.Fatalf("cold open = [%d, %d] over %d words, want [35, 49] on real words", start, end, words)
 	}
 	var decision string
 	if err := db.QueryRowContext(t.Context(),

@@ -26,12 +26,16 @@ func TestDecodeRejectsUnknownFields(t *testing.T) {
 }
 
 // TestTitleFallsBackWhenMissing checks an answer with valid spans but no
-// title stores the spans under a plain title instead of failing.
+// title stores the spans under a plain title instead of failing. The
+// timeline runs past thirty seconds so the cold open starts clear of the
+// opening.
 func TestTitleFallsBackWhenMissing(t *testing.T) {
 	t.Parallel()
 	db := openDiary(t)
-	seedForty(t, db)
-	model := &scriptedModel{answer: `{"cold_open":{"start_word":0,"end_word":39,"reason":"warm"},` +
+	addOwner(t, db, "owner-a")
+	addEpisode(t, db, "ep-1", "owner-a", 3)
+	addWords(t, db, "owner-a", "ep-1", 60, 1000, 500)
+	model := &scriptedModel{answer: `{"cold_open":{"start_word":35,"end_word":49,"reason":"warm"},` +
 		`"cuts":[],"title":"","show_notes":"Notes.","callback":null}`}
 	budgets := &fakeBudget{}
 	var receipt []byte
