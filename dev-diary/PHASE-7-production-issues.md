@@ -1310,7 +1310,7 @@ fixture-ok: yes
 size:       S · frontier
 owns:       internal/broker/reconcile.go, internal/broker/reconcile_test.go,
              internal/broker/end_test.go
-status:     in-progress:land:t7.49-impl@8d1f572de92366e1530254a6a32ff6f51514d551
+status:     done:cd4febb
 ```
 **Defect.** Every reconcile on the four T6.4b round 2 runs failed with
 `provider session is still open`. That covers the reconciles after End and after a tab close.
@@ -1634,6 +1634,13 @@ Record the tokens spent in the handoff.
 
 ### What exists now
 
+T7.49 landed at cd4febb after round 1 APPROVE with zero findings.
+The reconcile waits out the provider close over a 500 ms to 8 s
+backoff before settling. It never settles a guessed duration.
+The broker diff matches reviewed commit 8d1f572. Main had moved,
+so the landing rebased. Race tests on broker passed on the
+rebased commit. T7.48 and T7.49 landed together as the spec
+requires.
 T7.48 landed at cda7ff8 after round 1 APPROVE with zero findings.
 The early provider id report posts to a settle-free provider
 route instead of the session close. A real close still starts
