@@ -1263,7 +1263,7 @@ owns:       web/src/lib/voice/session-calls.ts, web/src/lib/voice/session-calls.
              internal/api/routes.go, internal/api/routes_test.go,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts,
              cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.48-impl@10d6d36b1161a46e2da42b321338ca47dff95022
+status:     done:cda7ff8
 ```
 **Defect.** `reportProviderSession` (`web/src/lib/voice/session-calls.ts`) stores the provider id
 while the take runs. It does that by calling `closeSession`, which posts to
@@ -1387,7 +1387,7 @@ requires:   T7.48
 fixture-ok: yes
 size:       S · mid
 owns:       internal/host/, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     not-started
+status:     in-progress:implement:t7.51-impl
 ```
 **Defect 1.** The Firefox owner held four episodes, two of them drafts, and heard "Welcome to your
 first episode". `host.Build` (`internal/host/host.go`) falls back to the constant `opener`
@@ -1634,6 +1634,14 @@ Record the tokens spent in the handoff.
 
 ### What exists now
 
+T7.48 landed at cda7ff8 after round 1 APPROVE with zero findings.
+The early provider id report posts to a settle-free provider
+route instead of the session close. A real close still starts
+exactly one reconcile. The tree matches reviewed commit 10d6d36.
+Main had moved, so the landing rebased. Race tests on api and
+cmd/reprise passed on the rebased commit. Owns widened by
+decision to the route golden and the web mirror for the new
+entry.
 T7.47 landed at 6fee833 after round 1 APPROVE with zero findings.
 CI was red on every `main` commit. The gate stopped at
 `staticcheck` SA4006 on the T7.43 socket test, which hid four
