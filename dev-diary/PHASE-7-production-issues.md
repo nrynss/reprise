@@ -1896,7 +1896,7 @@ requires:   T7.66
 fixture-ok: yes
 size:       XS · light
 owns:       internal/gemini/live_test.go
-status:     in-progress:land:t7.67-impl@e43d991899fb242b374ee8bbae050f2d99f3643c
+status:     done:a05556c
 ```
 T7.66 round 1 recorded an out of scope M finding. The live
 probe hardcodes `gemini-2.5-flash` while both shipped configs
@@ -1995,6 +1995,11 @@ the next deploy. The service account needs no new role, because the probe ran on
 
 ### What exists now
 
+T7.67 landed at a05556c after round 1 APPROVE with zero findings.
+The live probe resolves the production model id from settings.
+The tree matches reviewed commit e43d991. Main had moved, so
+the landing rebased. Race tests on gemini passed on the rebased
+commit.
 T7.66 landed at c8e7f74 after round 2 APPROVE with zero residue.
 Editorial runs on 3.8 Flash at global with two-sided pricing
 booked at the measured rate, and covers draw with the image
