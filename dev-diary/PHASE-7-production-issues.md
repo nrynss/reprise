@@ -1333,6 +1333,38 @@ The box held both stems, 5554988 and 2609836 bytes. The resume path at
 **Done when:** A test resumes with receipts that carry no byte counts
 and sees no `0 bytes`. Restoring the old sum fails it.
 
+### T7.51: The opener speaks from the owner's real history
+```yaml
+requires:   T7.48
+fixture-ok: yes
+size:       S · frontier
+owns:       internal/host/, internal/memory/callback.go, cmd/reprise/main.go
+status:     not-started
+```
+T6.4b round 2 found two defects in the greeting.
+
+The Firefox owner held four episodes, two of them drafts, and heard
+"Welcome to your first episode". `host.Build` falls back to that opener
+whenever no unused callback exists (`internal/host/host.go:80`). An
+episode count is a stored fact, so the prompt must not assert one it
+never read.
+
+Nothing calls `memory.MarkUsed`. Both of the Chrome owner's callbacks
+still read `used = 0`. The host therefore greets every take with the
+oldest one, from episode 5.
+
+* Say "first episode" only when the owner has no earlier episode. An
+  owner with episodes and no callback hears a plain opener that claims
+  no count.
+* Mark the callback used once the session that carries its greeting
+  starts, so the next take moves on to the next callback.
+* Keep reading only the owner's own rows.
+
+**Done when:** A test with two stored episodes and no callback gets a
+greeting without "first episode". A test mints two sessions for one
+owner with two callbacks and sees two different greetings. Dropping the
+`MarkUsed` call fails the second test.
+
 
 ---
 
@@ -1589,6 +1621,11 @@ stem still steps 45 to 117 ms at reply boundaries, and the Firefox user
 stem steps about 160 ms. Nobody has attributed either. The user stem
 floor sat near -31 to -35 dBFS, against -51 on the first round. That
 may be the room, and the rendered floor is not measured yet.
+The sweep settled runs 1 and 2 at 06:10 UTC, for 40 and 55 seconds,
+and stored both recordings. Their leases had already expired at
+1800 seconds, so the lease rows carry no settled amount. The budget
+tables do carry it. The opener also misread history twice (T7.51).
+Takes closed mid-take leave their episode in `recording`.
 
 ### Notes for the next developer
 
