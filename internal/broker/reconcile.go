@@ -191,8 +191,10 @@ type AlertKind string
 const (
 	// AlertOverCap marks a session connected past its cap plus margin.
 	AlertOverCap AlertKind = "over_cap"
-	// AlertNeedsReview marks a session whose resume could not prove the
-	// settle state, so it settled nothing.
+	// AlertNeedsReview marks a session an operator should check. It fires
+	// when a resume cannot prove the settle state and nothing settled, and
+	// it also fires after the sweep charges the full cap for a session the
+	// provider record cannot price. The detail names which case fired.
 	AlertNeedsReview AlertKind = "needs_review"
 	// AlertSweepOpen marks a session the sweep settled while the provider
 	// still reported it open. The books close at the accrued cost, and

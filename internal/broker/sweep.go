@@ -31,8 +31,9 @@ const SweepKindName = "sweep"
 var ErrSweep = errors.New("broker: sweep sessions")
 
 // ErrProviderGone reports a provider session the status read no longer
-// finds. The sweep settles nothing for it and asks for review, because a
-// settle prices nothing without a duration.
+// finds. The sweep charges the full cap for it and asks for review, because
+// the provider still bills a call its record no longer names. The owner
+// refunds from the alert when the call never ran.
 var ErrProviderGone = errors.New("broker: provider session is gone")
 
 // Candidate is one session row the source believes is still open. The
