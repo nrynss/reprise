@@ -715,7 +715,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect session end: %w", err)
 	}
-	episodes, err := protectTake(spendGate, "take-episodes", takeEpisodesBurst, api.NewEpisodes(episodeSvc))
+	episodes, err := protectTake(spendGate, "take-episodes", takeEpisodesBurst, api.NewEpisodesWithPreview(episodeSvc, render.PreviewStore{DB: db.Writer()}))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect episode reads: %w", err)
 	}
@@ -818,6 +818,9 @@ const (
 	kindEditorial = episode.EditorialKind
 	// kindRender runs the ffmpeg render.
 	kindRender = "render"
+	// kindPreview runs the draft preview mix. The editor plays it first,
+	// because it carries both voices on the word clock.
+	kindPreview = "preview"
 	// kindAnalysis runs the render batch pass with chapters. The episode
 	// detail reads the pass back under this name.
 	kindAnalysis = episode.AnalysisKind
@@ -1207,14 +1210,15 @@ func (p *pipeline) receiptSink(ownerID, episodeID string) func(ctx context.Conte
 
 // kinds registers every pipeline and settle kind on the runner. Paid
 // kinds stay non-idempotent with no resume, so a restart marks them
-// interrupted instead of paying twice. The render, reconcile, and sweep
-// kinds resume. The render kind arrives built, because its resume rebuilds
-// the chain that moves the episode on.
-func (p *pipeline) kinds(renderKind job.Kind, rec *broker.Reconciler, sweeper *broker.Sweeper) map[string]job.Kind {
+// interrupted instead of paying twice. The render, preview, reconcile,
+// and sweep kinds resume. The render and preview kinds arrive built,
+// because the runner needs their resume work before it opens.
+func (p *pipeline) kinds(renderKind, previewKind job.Kind, rec *broker.Reconciler, sweeper *broker.Sweeper) map[string]job.Kind {
 	return map[string]job.Kind{
 		kindEditTranscript:   transcript.Kind,
 		kindEditorial:        editorial.Kind,
 		kindRender:           renderKind,
+		kindPreview:          previewKind,
 		kindAnalysis:         analysis.Kind,
 		kindCover:            cover.Kind,
 		kindMemory:           job.Kind{Limit: 1},
@@ -1713,7 +1717,12 @@ func startJobs(ctx context.Context, cfg jobsConfig) (*jobs, error) {
 		close(out.ready)
 		return nil, err
 	}
-	kinds, err := mergeKinds(cfg.pipe.kinds(renderKind, cfg.rec, cfg.sweeper), cfg.extra...)
+	previewKind, err := out.previewKind()
+	if err != nil {
+		close(out.ready)
+		return nil, err
+	}
+	kinds, err := mergeKinds(cfg.pipe.kinds(renderKind, previewKind, cfg.rec, cfg.sweeper), cfg.extra...)
 	if err != nil {
 		close(out.ready)
 		return nil, err
@@ -2016,6 +2025,9 @@ func (h *stemsComplete) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.convertRawStems(r.Context(), owner.ID, episodeID)
+	if _, _, err := h.drafts.ensurePreview(r.Context(), owner.ID, episodeID); err != nil {
+		log.Printf("reprise preview: schedule for %s: %v", episodeID, err)
+	}
 	jobID, scheduled, err := h.drafts.ensureTranscript(r.Context(), owner.ID, episodeID)
 	if errors.Is(err, job.ErrLimit) {
 		_ = wire.WriteError(w, http.StatusTooManyRequests, codePipelineBusy, "the edit queue is full, retry this completion", nil)
@@ -2910,6 +2922,73 @@ func (j *jobs) startEditorial(ctx context.Context, ownerID, episodeID string) (s
 	return jobID, true, nil
 }
 
+// previewKind registers the preview with the chained resume. The limit
+// follows the render concurrency, because the preview runs the same
+// ffmpeg mix on the same machine. A value below one refuses the boot by
+// name. The render package sets the attempt cap, so a restart resumes
+// through the kind alone. The preview calls nothing paid, so it stays
+// out of the paid set and never marks its episode interrupted.
+func (j *jobs) previewKind() (job.Kind, error) {
+	return render.PreviewKindOf(j.resolver, j.renderConcurrency)
+}
+
+// previewFunc builds the preview work for one episode. The run locates
+// the stems itself, so the schedule carries ids only.
+func (j *jobs) previewFunc(ownerID, episodeID string) job.Func {
+	return j.resolver.PreviewFunc(ownerID, episodeID)
+}
+
+// errNoPreviewWiring reports a preview schedule before the resolver
+// opened. A partial scheduler in a test holds no resolver, so the
+// schedule reports instead of panicking, and the completion moves on
+// without a preview.
+var errNoPreviewWiring = errors.New("reprise: preview resolver is not wired")
+
+// ensurePreview starts one preview job for an episode with both stems
+// linked and no stored preview, and reports whether it started here. A
+// repeat call finds the row or the covering job and starts nothing, so
+// two completions schedule one mix. A terminal pass schedules again,
+// because the mix costs nothing and a retry may land what a failure
+// missed. It returns job.ErrLimit when the kind runs at capacity, and
+// the caller logs and moves on, because the editor falls back to the
+// stem address while no preview exists.
+func (j *jobs) ensurePreview(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
+	if j == nil || j.resolver == nil || j.pipe == nil {
+		return "", false, errNoPreviewWiring
+	}
+	j.schedMu.Lock()
+	defer j.schedMu.Unlock()
+	preview, err := render.PreviewMediaID(ctx, j.pipe.db.Writer(), ownerID, episodeID)
+	if err != nil {
+		return "", false, err
+	}
+	if preview != "" {
+		return "", false, nil
+	}
+	last, err := episode.LastKindJob(ctx, j.pipe.db, episodeID, kindPreview)
+	if err != nil {
+		return "", false, err
+	}
+	if last.Found && !jobTerminal(last.Status) {
+		return "", false, nil
+	}
+	return j.startPreview(ctx, ownerID, episodeID)
+}
+
+// startPreview starts one preview job and stamps the episode on it
+// before returning, so a repeat completion meets a described job. A
+// stamp failure cancels the job and reports the error, so no silent job
+// keeps running.
+func (j *jobs) startPreview(ctx context.Context, ownerID, episodeID string) (string, bool, error) {
+	jobID, err := j.startStamped(ctx, kindPreview,
+		episodeDescriptor{OwnerID: ownerID, EpisodeID: episodeID},
+		j.previewFunc(ownerID, episodeID))
+	if err != nil {
+		return "", false, err
+	}
+	return jobID, true, nil
+}
+
 // stemsLinked reports whether both stem roles rest in the diary for one
 // episode, so a schedule or a recovery never starts a job with half its
 // audio.
@@ -2969,6 +3048,9 @@ func (j *jobs) recoverDraftPipeline(ctx context.Context) {
 		if !j.stemsLinked(ctx, d.owner, d.id) {
 			log.Printf("reprise recover: episode %s links no stem pair, leaving it for review", d.id)
 			continue
+		}
+		if _, _, err := j.ensurePreview(ctx, d.owner, d.id); err != nil {
+			log.Printf("reprise recover: schedule preview for %s: %v", d.id, err)
 		}
 		if _, _, err := j.ensureTranscript(ctx, d.owner, d.id); err != nil {
 			log.Printf("reprise recover: schedule transcript for %s: %v", d.id, err)

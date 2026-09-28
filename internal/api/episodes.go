@@ -57,18 +57,38 @@ type episodeStore interface {
 
 var _ episodeStore = (*episode.Service)(nil)
 
+// previewStore reports the newest preview blob for an episode the owner
+// holds, or empty when no preview exists. The render package implements
+// it. Handlers declare the seam, so tests bind a fake without opening a
+// database.
+type previewStore interface {
+	// PreviewMediaID returns the newest preview media id, or empty when
+	// no preview exists.
+	PreviewMediaID(ctx context.Context, ownerID, episodeID string) (string, error)
+}
+
 // Episodes serves the episode list, detail, decisions, and mark done
 // routes. Create it with NewEpisodes, because the zero value holds no
 // store. Mount wires one value under all four table patterns behind the
 // spend gate and the guest middleware.
 type Episodes struct {
-	store episodeStore
+	store   episodeStore
+	preview previewStore
 }
 
 // NewEpisodes returns the episode routes on one handler. A nil store
-// answers 500, so wiring faults surface instead of hiding.
+// answers 500, so wiring faults surface instead of hiding. The detail
+// carries no preview address until NewEpisodesWithPreview names the
+// preview reader.
 func NewEpisodes(store episodeStore) http.Handler {
-	h := &Episodes{store: store}
+	return NewEpisodesWithPreview(store, nil)
+}
+
+// NewEpisodesWithPreview returns the episode routes on one handler with
+// the preview reader behind the detail. A nil preview leaves the preview
+// address empty, the way episodes without a preview read.
+func NewEpisodesWithPreview(store episodeStore, preview previewStore) http.Handler {
+	h := &Episodes{store: store, preview: preview}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/episodes", h.list)
 	mux.HandleFunc("GET /api/episodes/{id}", h.detail)
@@ -162,6 +182,10 @@ type episodeDetailJSON struct {
 	// AudioURL is /media/{id} for the user stem, otherwise the host
 	// stem, otherwise empty.
 	AudioURL string `json:"audio_url"`
+	// PreviewAudioURL is /media/{id} for the newest draft preview, or
+	// empty until a preview exists. The editor plays it first, because
+	// it carries both voices on the word clock.
+	PreviewAudioURL string `json:"preview_audio_url"`
 	// RenderAudioURL is /media/{id} for the newest render, or empty
 	// when no render exists.
 	RenderAudioURL string `json:"render_audio_url"`
@@ -324,6 +348,14 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the render could not be read", nil)
 		return
 	}
+	var previewID string
+	if h.preview != nil {
+		previewID, err = h.preview.PreviewMediaID(r.Context(), owner, episodeID)
+		if err != nil {
+			_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the preview could not be read", nil)
+			return
+		}
+	}
 	var renderWords []episode.EditWord
 	if renderID != "" {
 		renderWords, err = h.store.RenderedWords(r.Context(), owner, episodeID)
@@ -333,12 +365,13 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	detail := episodeDetailJSON{
-		Episode:        episodeOf(ep),
-		Proposals:      out,
-		Words:          wordsOf(stored),
-		AudioURL:       mediaPath(stemID),
-		RenderAudioURL: mediaPath(renderID),
-		RenderWords:    wordsOf(renderWords),
+		Episode:         episodeOf(ep),
+		Proposals:       out,
+		Words:           wordsOf(stored),
+		AudioURL:        mediaPath(stemID),
+		PreviewAudioURL: mediaPath(previewID),
+		RenderAudioURL:  mediaPath(renderID),
+		RenderWords:     wordsOf(renderWords),
 	}
 	detail.TranscriptOutcome = outcomeOf(outcome)
 	detail.EditorialOutcome = outcomeOf(editorial)

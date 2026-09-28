@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -47,6 +48,58 @@ func seedRenderRow(t *testing.T, db *sqlite.DB, id, owner, episodeID, opusID str
 // secondsNear reports whether two second values match within a millisecond.
 func secondsNear(got, want float64) bool {
 	return math.Abs(got-want) < 0.000001
+}
+
+// stubPreview answers the preview read with one fixed id, so the detail
+// test pins the address mapping without opening the preview table.
+type stubPreview struct {
+	id string
+}
+
+// PreviewMediaID returns the fixed preview id.
+func (s stubPreview) PreviewMediaID(_ context.Context, _, _ string) (string, error) {
+	return s.id, nil
+}
+
+// TestEpisodeDetailServesPreviewAddress requires the detail to carry the
+// preview address once a preview row exists, and to leave it empty while
+// none exists. The editor plays the preview first, because it carries
+// both voices on the word clock.
+func TestEpisodeDetailServesPreviewAddress(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "draft")
+	seedStemRow(t, db, "stem-user", owner.ID, "ep-1", "user-blob", "user")
+
+	detail := func(handler http.Handler, id string) episodeDetailJSON {
+		t.Helper()
+		rec := serve(guests, handler, cookie, httptest.NewRequest(http.MethodGet, "/api/episodes/"+id, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("detail %s status = %d, want 200", id, rec.Code)
+		}
+		var body episodeDetailJSON
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("decode detail %s: %v", id, err)
+		}
+		return body
+	}
+
+	bare := detail(NewEpisodes(newEpisodeService(t, db, nil).svc), "ep-1")
+	if bare.PreviewAudioURL != "" {
+		t.Fatalf("preview address = %q, want empty with no preview reader", bare.PreviewAudioURL)
+	}
+	without := detail(NewEpisodesWithPreview(newEpisodeService(t, db, nil).svc, stubPreview{}), "ep-1")
+	if without.PreviewAudioURL != "" {
+		t.Fatalf("preview address = %q, want empty with no preview row", without.PreviewAudioURL)
+	}
+	with := detail(NewEpisodesWithPreview(newEpisodeService(t, db, nil).svc, stubPreview{id: "preview-blob"}), "ep-1")
+	if with.PreviewAudioURL != "/media/preview-blob" {
+		t.Fatalf("preview address = %q, want the preview blob", with.PreviewAudioURL)
+	}
+	if with.AudioURL != "/media/user-blob" {
+		t.Fatalf("audio address = %q, want the stem beside the preview", with.AudioURL)
+	}
 }
 
 // TestEpisodeDetailServesWordsStemAndRender stores edit words, both

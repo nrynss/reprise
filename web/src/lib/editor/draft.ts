@@ -191,6 +191,7 @@ interface StoredDraft {
 	words: EditWord[];
 	proposals: StoredProposal[];
 	audioUrl: string;
+	previewAudioUrl: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -249,7 +250,13 @@ function readStoredDraft(value: unknown, episodeId: string): StoredDraft {
 		});
 	}
 	const title = textOf(episode, 'title') || `Episode ${episodeId}`;
-	return { title, words, proposals, audioUrl: textOf(value, 'audio_url') };
+	return {
+		title,
+		words,
+		proposals,
+		audioUrl: textOf(value, 'audio_url'),
+		previewAudioUrl: textOf(value, 'preview_audio_url')
+	};
 }
 
 // CutProposals maps a cut id to the stored proposal behind it. A missing
@@ -413,7 +420,11 @@ export class DraftController {
 					? quoteRange(words, callback.start, Math.min(callback.end, words.length - 1))
 					: '',
 			notes: notes?.reason ?? '',
-			audioUrl: stored.audioUrl,
+			// The preview carries both voices on the word clock, so it
+			// plays first. The stem address stays the fallback while no
+			// preview exists. The follower keeps its skip spans, because
+			// the clock is unchanged.
+			audioUrl: stored.previewAudioUrl || stored.audioUrl,
 			channels: null,
 			reverted: {
 				coldOpen: isReverted(cold),

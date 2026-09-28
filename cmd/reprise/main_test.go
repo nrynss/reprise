@@ -28,11 +28,13 @@ import (
 	"github.com/nrynss/keel/gate"
 	keelid "github.com/nrynss/keel/id"
 	"github.com/nrynss/keel/job"
+	jobsqlitestore "github.com/nrynss/keel/job/sqlitestore"
 	"github.com/nrynss/keel/lease"
 	leasesqlitestore "github.com/nrynss/keel/lease/sqlitestore"
 	"github.com/nrynss/keel/mediastore"
 	mediasqlitestore "github.com/nrynss/keel/mediastore/sqlitestore"
 	keelsqlite "github.com/nrynss/keel/sqlite"
+	"github.com/nrynss/keel/stream"
 	"github.com/nrynss/keel/upload"
 	"github.com/nrynss/reprise/internal/analysis"
 	"github.com/nrynss/reprise/internal/api"
@@ -658,9 +660,13 @@ func TestPipelineKindsShareOneClientWithSettingsModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render kind: %v", err)
 	}
-	kinds := fx.pipe.kinds(renderKind, rec, sweeper)
-	if len(kinds) != 8 {
-		t.Fatalf("kinds = %d, want 8 pipeline and settle kinds", len(kinds))
+	previewKind, err := (&jobs{resolver: resolver, renderConcurrency: 1}).previewKind()
+	if err != nil {
+		t.Fatalf("preview kind: %v", err)
+	}
+	kinds := fx.pipe.kinds(renderKind, previewKind, rec, sweeper)
+	if len(kinds) != 9 {
+		t.Fatalf("kinds = %d, want 9 pipeline and settle kinds", len(kinds))
 	}
 	for _, name := range []string{kindEditTranscript, kindEditorial, kindAnalysis, kindCover, kindMemory} {
 		kind, ok := kinds[name]
@@ -671,7 +677,7 @@ func TestPipelineKindsShareOneClientWithSettingsModels(t *testing.T) {
 			t.Fatalf("kind %q resumes, want interrupted with no rerun", name)
 		}
 	}
-	for _, name := range []string{kindRender, broker.KindName, broker.SweepKindName} {
+	for _, name := range []string{kindRender, kindPreview, broker.KindName, broker.SweepKindName} {
 		kind, ok := kinds[name]
 		if !ok {
 			t.Fatalf("kind %q is not registered", name)
@@ -682,6 +688,12 @@ func TestPipelineKindsShareOneClientWithSettingsModels(t *testing.T) {
 	}
 	if kinds[kindRender].MaxAttempts < 2 {
 		t.Fatalf("render attempts = %d, want room for a resumed attempt", kinds[kindRender].MaxAttempts)
+	}
+	if kinds[kindPreview].MaxAttempts < 2 {
+		t.Fatalf("preview attempts = %d, want room for a resumed attempt", kinds[kindPreview].MaxAttempts)
+	}
+	if paidKinds[kindPreview] {
+		t.Fatal("preview kind is paid, want no budget reservation on a free mix")
 	}
 	if fx.pipe.editorialModel != "test-editorial" {
 		t.Fatalf("editorial model = %q, want the settings value", fx.pipe.editorialModel)
@@ -2379,5 +2391,90 @@ func TestInterruptedUploadIsNotScheduledAgain(t *testing.T) {
 	}
 	if n := kindJobsFor(t, fx, kindEditTranscript, episodeID); n != 1 {
 		t.Fatalf("transcript jobs = %d, want the interrupted batch alone", n)
+	}
+}
+
+// openPreviewJobs opens a runner with the preview kind over the fixture
+// database and returns the scheduler around it.
+func openPreviewJobs(t *testing.T, fx *wireFixture) *jobs {
+	t.Helper()
+	jobStore, err := jobsqlitestore.Open(t.Context(), jobsqlitestore.Config{DB: fx.db})
+	if err != nil {
+		t.Fatalf("open job store: %v", err)
+	}
+	events := stream.New(stream.Config{})
+	resolver := &render.Resolver{
+		DB:      fx.db.Writer(),
+		Media:   render.StoreMedia(fx.media, fx.index),
+		WorkDir: fx.pipe.renderWorkDir,
+		Locate:  fx.pipe.locateStems,
+	}
+	previewKind, err := (&jobs{resolver: resolver, renderConcurrency: 1}).previewKind()
+	if err != nil {
+		t.Fatalf("preview kind: %v", err)
+	}
+	runner, err := job.Open(t.Context(), job.Config{
+		Broker: events,
+		Store:  jobStore,
+		Kinds:  map[string]job.Kind{kindPreview: previewKind},
+	})
+	if err != nil {
+		t.Fatalf("open runner: %v", err)
+	}
+	return &jobs{runner: runner, resolver: resolver, pipe: fx.pipe, store: jobStore}
+}
+
+// TestPreviewSchedulesRunsAndStoresRow schedules one preview for a draft
+// episode with both stems linked, and requires a repeat to start
+// nothing. The run mixes the stems and stores the preview row, so the
+// detail serves its address and a later completion meets the row.
+func TestPreviewSchedulesRunsAndStoresRow(t *testing.T) {
+	fx := openWireFixture(t)
+	const owner = "owner-preview-schedule"
+	insertWireUser(t, fx, owner)
+	drafts := openPreviewJobs(t, fx)
+	ctx := t.Context()
+	episodeID := draftEpisode(t, fx, owner)
+	jobID, scheduled, err := drafts.ensurePreview(ctx, owner, episodeID)
+	if err != nil {
+		t.Fatalf("ensure preview: %v", err)
+	}
+	if !scheduled || jobID == "" {
+		t.Fatalf("scheduled = %v job %q, want a preview start", scheduled, jobID)
+	}
+	if again, covered, err := drafts.ensurePreview(ctx, owner, episodeID); err != nil || covered || again != "" {
+		t.Fatalf("repeat ensure = %q, %v, %v, want no second start", again, covered, err)
+	}
+	waitJobStatus(t, drafts.store, jobID, job.StatusDone)
+	mediaID, err := render.PreviewMediaID(ctx, fx.db.Writer(), owner, episodeID)
+	if err != nil {
+		t.Fatalf("preview media: %v", err)
+	}
+	if mediaID == "" {
+		t.Fatal("preview row holds no blob after a done run")
+	}
+	blob, err := render.StoreMedia(fx.media, fx.index).Get(ctx, mediaID)
+	if err != nil {
+		t.Fatalf("read preview blob: %v", err)
+	}
+	if blob.ContentType != render.OpusContentType {
+		t.Fatalf("preview content type = %q, want the streaming opus", blob.ContentType)
+	}
+	if again, covered, err := drafts.ensurePreview(ctx, owner, episodeID); err != nil || covered || again != "" {
+		t.Fatalf("row ensure = %q, %v, %v, want no start beside the row", again, covered, err)
+	}
+	if n := kindJobsFor(t, fx, kindPreview, episodeID); n != 1 {
+		t.Fatalf("preview jobs = %d, want the one pass alone", n)
+	}
+	waitIdleJobs(t, drafts.store)
+}
+
+// TestPreviewKindRefusesDuplicateRegistration registers the preview kind
+// twice and requires the boot to refuse. A second registration would
+// silently replace the first limit and resume policy.
+func TestPreviewKindRefusesDuplicateRegistration(t *testing.T) {
+	core := map[string]job.Kind{kindPreview: {Limit: 1}}
+	if _, err := mergeKinds(core, map[string]job.Kind{kindPreview: {Limit: 1}}); !errors.Is(err, errDuplicateKind) {
+		t.Fatalf("duplicate preview kind merged with err = %v, want the boot refusal", err)
 	}
 }
