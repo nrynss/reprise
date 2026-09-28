@@ -19,6 +19,7 @@ export interface ApiRoute {
 export const API_ROUTES: readonly ApiRoute[] = [
 	{ method: 'POST', pattern: '/api/sessions' },
 	{ method: 'POST', pattern: '/api/sessions/{id}/end' },
+	{ method: 'POST', pattern: '/api/sessions/{id}/provider' },
 	{ method: '', pattern: '/api/uploads/' },
 	{ method: 'GET', pattern: '/api/episodes' },
 	{ method: 'GET', pattern: '/api/episodes/{id}' },
