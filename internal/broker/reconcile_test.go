@@ -1499,3 +1499,220 @@ func assertClaimedBlob(t *testing.T, db *sqlite.DB, dir, blobID, contentType str
 		t.Fatalf("blob %s is %d bytes, row %d, want %d artifact bytes", blobID, len(raw), size, len(want))
 	}
 }
+
+// settleDelayReader stays open for a fixed number of reads, then reports
+// a duration. It counts every read and stop, so a test pins exactly how
+// hard the reconcile worked for its settle.
+type settleDelayReader struct {
+	mu        sync.Mutex
+	openReads int
+	reads     int
+	stopped   bool
+	stops     int
+	ready     ProviderSession
+}
+
+func (s *settleDelayReader) ReadSession(context.Context, string) (ProviderSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reads++
+	if s.reads <= s.openReads {
+		return ProviderSession{}, ErrSessionOpen
+	}
+	return s.ready, nil
+}
+
+func (s *settleDelayReader) StopSocket(context.Context, string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stops++
+	s.stopped = true
+	return nil
+}
+
+func (s *settleDelayReader) stopCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stops
+}
+
+// waitRecorder returns at once and keeps every duration it saw.
+type waitRecorder struct {
+	mu   sync.Mutex
+	seen []time.Duration
+}
+
+func (w *waitRecorder) wait(_ context.Context, d time.Duration) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.seen = append(w.seen, d)
+	return nil
+}
+
+func (w *waitRecorder) durations() []time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]time.Duration(nil), w.seen...)
+}
+
+func openSettleReconciler(t *testing.T, fx *recFixture, sessions SessionReader, waits *waitRecorder) *Reconciler {
+	t.Helper()
+	rec, err := NewReconciler(ReconcilerConfig{
+		DB:       fx.db,
+		Sessions: sessions,
+		Artifacts: recFetcher{blobs: map[string][]byte{
+			"https://artifacts.example/rec-a.ogg": recAudioA,
+			"https://artifacts.example/tl-a.json": recTimelineA,
+		}},
+		Budgets:              fx.budgets,
+		Leases:               fx.leases,
+		Diary:                fx.diary,
+		Media:                fx.media,
+		Alerter:              fx.alerter,
+		MarginSeconds:        DefaultMarginSeconds,
+		RecordingContentType: DefaultRecordingContentType,
+		FetchMaxBytes:        DefaultFetchMaxBytes,
+		Wait:                 waits.wait,
+	})
+	if err != nil {
+		t.Fatalf("new reconciler: %v", err)
+	}
+	return rec
+}
+
+func equalDurations(got, want []time.Duration) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestReconcileWaitsForProviderClose settles a session whose provider
+// still reports open twice after the socket stops. The settle stores
+// both artifacts, the claim row reads settled with both media ids, the
+// socket stops once, and the waits saw 500 ms then 1 s.
+func TestReconcileWaitsForProviderClose(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-wait")
+	reader := &settleDelayReader{
+		openReads: 2,
+		ready: ProviderSession{
+			ID:              "prov-wait",
+			DurationSeconds: 45,
+			RecordingURL:    "https://artifacts.example/rec-a.ogg",
+			TimelineURL:     "https://artifacts.example/tl-a.json",
+		},
+	}
+	waits := &waitRecorder{}
+	rec := openSettleReconciler(t, fx, reader, waits)
+	res, err := rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.ConnectedSeconds != 45 || res.Cost != recRate*45 {
+		t.Fatalf("settled %+v, want 45 seconds at %d", res, recRate*45)
+	}
+	if res.RecordingMediaID == "" || res.TimelineMediaID == "" {
+		t.Fatalf("result %+v stored no recording and timeline pair", res)
+	}
+	settled, recordingID, timelineID := recClaimState(t, fx.db, in.SessionID)
+	if !settled {
+		t.Fatal("claim is not settled after the close waited out")
+	}
+	if recordingID != res.RecordingMediaID || timelineID != res.TimelineMediaID {
+		t.Fatalf("claim ids %q/%q differ from result %+v", recordingID, timelineID, res)
+	}
+	if got := reader.stopCount(); got != 1 {
+		t.Fatalf("socket stopped %d times, want exactly once", got)
+	}
+	if got := waits.durations(); !equalDurations(got, []time.Duration{500 * time.Millisecond, time.Second}) {
+		t.Fatalf("waits %v, want 500ms then 1s", got)
+	}
+	if got := recSpent(t, fx.costs); got != recRate*45 {
+		t.Fatalf("spent %d, want exactly one settle at %d", got, recRate*45)
+	}
+	assertClaimedBlob(t, fx.db, fx.mediaDir, res.RecordingMediaID, "audio/ogg", recAudioA)
+	assertClaimedBlob(t, fx.db, fx.mediaDir, res.TimelineMediaID, "application/json", recTimelineA)
+}
+
+// TestReconcileOpenAfterBackoffStaysUnsettled leaves the provider open
+// through every backoff step. The reconcile returns an error wrapping
+// the open session sentinel, the claim row stays unsettled, and the
+// waits saw all six steps. A single immediate retry would settle
+// nothing here either, so this pins the loop, not one read.
+func TestReconcileOpenAfterBackoffStaysUnsettled(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-never")
+	reader := &settleDelayReader{openReads: 100}
+	waits := &waitRecorder{}
+	rec := openSettleReconciler(t, fx, reader, waits)
+	if _, err := rec.Reconcile(t.Context(), in); !errors.Is(err, ErrSessionOpen) {
+		t.Fatalf("reconcile err %v, want the open session sentinel", err)
+	}
+	settled, recordingID, timelineID := recClaimState(t, fx.db, in.SessionID)
+	if settled {
+		t.Fatal("claim settled on a session that never closed")
+	}
+	if recordingID != "" || timelineID != "" {
+		t.Fatalf("claim holds ids %q/%q with no duration read", recordingID, timelineID)
+	}
+	want := []time.Duration{
+		500 * time.Millisecond, time.Second, 2 * time.Second,
+		4 * time.Second, 8 * time.Second, 8 * time.Second,
+	}
+	if got := waits.durations(); !equalDurations(got, want) {
+		t.Fatalf("waits %v, want all six backoff steps", got)
+	}
+	if got := reader.stopCount(); got != 1 {
+		t.Fatalf("socket stopped %d times, want exactly once", got)
+	}
+	if got := recSpent(t, fx.costs); got != 0 {
+		t.Fatalf("spent %d on an unsettled session, want zero", got)
+	}
+	if held := recReserved(t, fx.costs); held != fx.estimate {
+		t.Fatalf("held %d, want the untouched estimate", held)
+	}
+}
+
+// TestReconcileSettledSessionSkipsStopAndWait runs a second reconcile
+// on a settled session. The settled path returns the stored result
+// without stopping the socket or waiting again.
+func TestReconcileSettledSessionSkipsStopAndWait(t *testing.T) {
+	fx := newRecFixture(t)
+	in := fx.mintSession("prov-wait")
+	reader := &settleDelayReader{
+		openReads: 1,
+		ready: ProviderSession{
+			ID:              "prov-wait",
+			DurationSeconds: 45,
+			RecordingURL:    "https://artifacts.example/rec-a.ogg",
+			TimelineURL:     "https://artifacts.example/tl-a.json",
+		},
+	}
+	waits := &waitRecorder{}
+	rec := openSettleReconciler(t, fx, reader, waits)
+	first, err := rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("first reconcile: %v", err)
+	}
+	stops := reader.stopCount()
+	waitsSeen := len(waits.durations())
+	second, err := rec.Reconcile(t.Context(), in)
+	if err != nil {
+		t.Fatalf("second reconcile: %v", err)
+	}
+	if second != first {
+		t.Fatalf("second result %+v differs from %+v", second, first)
+	}
+	if got := reader.stopCount(); got != stops {
+		t.Fatalf("socket stopped %d times, want no second stop past %d", got, stops)
+	}
+	if got := len(waits.durations()); got != waitsSeen {
+		t.Fatalf("waits ran %d times, want no second wait past %d", got, waitsSeen)
+	}
+}

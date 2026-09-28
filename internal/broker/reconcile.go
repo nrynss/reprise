@@ -69,7 +69,8 @@ var (
 	ErrRead = errors.New("broker: read provider session")
 	// ErrSessionOpen reports a provider session that is still running.
 	// It wraps ErrRead, so a caller that only retries reads still matches.
-	// The reconcile stops the live socket and reads once more.
+	// The reconcile stops the live socket and then reads again after each
+	// backoff step until the provider reports a duration.
 	ErrSessionOpen = fmt.Errorf("broker: provider session is still open: %w", ErrRead)
 	// ErrSettle reports a budget settle or lease close that failed after
 	// the claim was taken. The claim stays, so a resume reviews instead
@@ -307,6 +308,11 @@ type ReconcilerConfig struct {
 	// FetchMaxBytes caps one artifact download. Zero or negative means
 	// the default.
 	FetchMaxBytes int64
+	// Wait pauses between provider reads while a closing session still
+	// reports open. Nil uses a real timer that returns ctx.Err() when
+	// the context ends. Tests pass a Wait that returns at once and
+	// records each duration.
+	Wait func(ctx context.Context, d time.Duration) error
 }
 
 // Reconciler settles live sessions against provider truth. Create it with
@@ -327,6 +333,7 @@ type Reconciler struct {
 	contentType  string
 	timelineType string
 	maxBytes     int64
+	wait         func(ctx context.Context, d time.Duration) error
 	mu           sync.Mutex
 	guards       map[string]*sessionGuard
 }
@@ -416,6 +423,19 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 	if maxBytes <= 0 {
 		maxBytes = DefaultFetchMaxBytes
 	}
+	wait := cfg.Wait
+	if wait == nil {
+		wait = func(ctx context.Context, d time.Duration) error {
+			timer := time.NewTimer(d)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		}
+	}
 	r := &Reconciler{
 		db:           cfg.DB,
 		sessions:     cfg.Sessions,
@@ -429,6 +449,7 @@ func NewReconciler(cfg ReconcilerConfig) (*Reconciler, error) {
 		contentType:  contentType,
 		timelineType: timelineType,
 		maxBytes:     maxBytes,
+		wait:         wait,
 		guards:       map[string]*sessionGuard{},
 	}
 	const schema = `CREATE TABLE IF NOT EXISTS reconcile_state (
@@ -855,8 +876,26 @@ type socketStopper interface {
 	StopSocket(ctx context.Context, providerSessionID string) error
 }
 
+// settleReadBackoff pauses between provider reads while a closing
+// session still reports open. The provider writes the duration a moment
+// after the close, so the first retry straight after the end usually
+// reads open again. The steps total 23.5 seconds, well inside the
+// process budget for one request.
+var settleReadBackoff = [...]time.Duration{
+	500 * time.Millisecond,
+	time.Second,
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
+	8 * time.Second,
+}
+
 // readForSettle reads the provider duration. An open session is ended
-// first, then read once more, so the settle prices the closed call.
+// first, then read again after each backoff step until the read succeeds
+// or fails with something other than an open session. When every step
+// still finds the session open, the error wraps ErrSessionOpen and the
+// caller settles nothing. The sweep settles that session later, once the
+// provider has closed it. The settle never prices a guessed duration.
 // The delete waits until the artifacts are stored.
 func (r *Reconciler) readForSettle(ctx context.Context, providerSessionID string) (ProviderSession, error) {
 	read, err := r.sessions.ReadSession(ctx, providerSessionID)
@@ -873,11 +912,19 @@ func (r *Reconciler) readForSettle(ctx context.Context, providerSessionID string
 	if serr := stop.StopSocket(ctx, providerSessionID); serr != nil {
 		return ProviderSession{}, fmt.Errorf("broker: reconcile: end live socket %s: %w", providerSessionID, serr)
 	}
-	read, err = r.sessions.ReadSession(ctx, providerSessionID)
-	if err != nil {
-		return ProviderSession{}, fmt.Errorf("broker: reconcile: read session %s: %w", providerSessionID, err)
+	for _, backoff := range settleReadBackoff {
+		if werr := r.wait(ctx, backoff); werr != nil {
+			return ProviderSession{}, fmt.Errorf("broker: reconcile: wait for provider close %s: %w", providerSessionID, werr)
+		}
+		read, err = r.sessions.ReadSession(ctx, providerSessionID)
+		if err == nil {
+			return read, nil
+		}
+		if !errors.Is(err, ErrSessionOpen) {
+			return ProviderSession{}, fmt.Errorf("broker: reconcile: read session %s: %w", providerSessionID, err)
+		}
 	}
-	return read, nil
+	return ProviderSession{}, fmt.Errorf("broker: reconcile: read session %s: %w", providerSessionID, ErrSessionOpen)
 }
 
 // endProvider deletes the provider record after the artifacts are stored.

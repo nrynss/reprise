@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nrynss/reprise/internal/assemblyai"
 )
@@ -137,6 +138,7 @@ func TestReconcileStopsOpenSessionThenSettles(t *testing.T) {
 		MarginSeconds:        DefaultMarginSeconds,
 		RecordingContentType: DefaultRecordingContentType,
 		FetchMaxBytes:        DefaultFetchMaxBytes,
+		Wait:                 func(context.Context, time.Duration) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("new reconciler: %v", err)
