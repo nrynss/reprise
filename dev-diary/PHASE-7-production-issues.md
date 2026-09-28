@@ -1159,7 +1159,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       internal/transcript/, internal/episode/, internal/store/migrations/, internal/store/store_test.go,
              internal/editorial/validate.go, internal/editorial/run.go, web/src/lib/editor/
-status:     in-progress:review-r1:t7.44-rev-r1@af4fb8e
+status:     in-progress:remediate-r1:t7.44-rem-r1
 ```
 T7.41 round 1 recorded an out of scope H finding. Host words share
 the edit timeline with the guest. The `words` table has no speaker
@@ -1180,7 +1180,7 @@ requires:   T7.43
 fixture-ok: yes
 size:       S · mid
 owns:       internal/privacy/
-status:     in-progress:review-r1:t7.45-rev-r1@b80efebfb35e9909ec06a1fb009eb51a9c2fab9c
+status:     in-progress:land:t7.45-impl@b80efebfb35e9909ec06a1fb009eb51a9c2fab9c
 ```
 T7.43 round 1 recorded an out of scope H finding. Account erase
 deletes the provider record through `TerminateSession`. That call
@@ -1192,6 +1192,30 @@ writes no `session.end`. A connected socket stays billable.
 
 **Done when:** A test with a held socket sees `session.end` before
 the delete. Calling `TerminateSession` again fails that test.
+
+### T7.46: The detail endpoint forwards the word speaker
+```yaml
+requires:   T7.44
+fixture-ok: yes
+size:       XS · light
+owns:       internal/api/episodes.go
+status:     not-started
+```
+T7.44 round 1 recorded an out of scope H finding. `wordJSON` has
+no speaker field and `wordsOf` drops `EditWord.Speaker`, so the
+detail endpoint never forwards the speaker. The editor keeps
+receiving words with no speaker key and shows every one as
+unknown. A host word never reads as the guest, but it never reads
+as the host either.
+
+* Forward the stored speaker on the word shape the detail
+  endpoint sends, so the editor names host words as the host.
+* Older rows with no speaker keep the old shape the editor
+  already maps to unknown.
+
+**Done when:** A fixture draft with one host reply and one guest
+line reads its speaker through the detail endpoint. Dropping the
+field on the wire fails that test.
 
 ---
 
