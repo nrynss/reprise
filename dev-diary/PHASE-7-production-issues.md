@@ -2243,7 +2243,7 @@ greeting, so no live episode has yet tested the callback opener.
 
 ### T7.73: The editor waveform shows the audio, where playback is, and what to drag
 ```yaml
-requires:   T7.69
+requires:   T7.74
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
@@ -2282,6 +2282,46 @@ nothing that looked draggable. A drag on it still seeked. Two causes, both in th
 
 **Done when:** The tests pass in Chromium and Firefox, and the gate passes in a fresh worktree.
 Removing the playhead drawing fails the first spec.
+
+### T7.74: Mark done follows the render it started instead of calling it refused
+```yaml
+requires:   T7.69
+fixture-ok: yes
+size:       XS · mid
+owns:       web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
+             web/src/routes/episode/[id]/edit/edit.spec.ts
+status:     not-started
+```
+**Defect.** On 2026-09-28 at 19:44:51 UTC, the owner pressed Mark done on episode 10. Traefik logged
+`POST /api/episodes/61ac5b47…/done` answering 202. The render, cover, analysis and marking all
+finished by 19:45:47. The editor still said "The render request was refused. Open the gallery to
+see its current state." It never followed the render.
+
+In `DraftController`'s Mark done path (`web/src/lib/editor/draft.ts`), the `.then` handler calls
+`onRenderStarted(jobId)`, which calls `followRender`. `followRender` runs `this.stream.attach()`
+with no runner, inside a promise callback. The Chaaya `JobStream` then starts its effect outside
+any component context and throws. The surrounding `.catch` turns that into the refusal notice. The
+gallery hit the same trap and passes an explicit runner:
+`stream.attach((task) => { this.cleanups.push(task()); })` in `web/src/routes/threads/threads.ts`.
+The fixture path skips `followRender`, which is why no spec caught it.
+
+**Change.**
+1. In `followRender`, attach with an explicit runner, as the gallery does. Keep the cleanup it
+   returns, and run it in `destroy`.
+2. Narrow the `.catch`. Only a failed fetch or a non-2xx status shows "refused". An error after a
+   2xx, while following, shows "The render started, but its progress could not be followed. Open
+   the gallery to see its state." It is logged once.
+3. Once following, update `renderDetail` from the stream: running, then done. Link to the episode
+   page when the episode reads ready.
+
+**Tests.**
+* `draft.test.ts`: a live controller whose done request answers 202 with
+  `{"job_id":"r-1","queued":false}` ends in `renderStage: 'running'` with no refusal text.
+* `edit.spec.ts`: a live draft route whose done request answers 202, and whose job stream reports
+  done, shows neither "refused" nor an error, and reaches the done state.
+
+**Done when:** The tests pass in Chromium and Firefox, and the gate passes in a fresh worktree.
+Removing the runner from `attach` fails the first test.
 
 ---
 
