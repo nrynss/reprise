@@ -2335,7 +2335,7 @@ size:       S · frontier
 owns:       web/src/lib/editor/draft.ts, web/src/routes/threads/threads.ts,
              web/src/routes/welcome/welcome.ts, web/src/lib/editor/draft.test.ts,
              web/src/routes/threads/threads.test.ts, web/package.json, web/package-lock.json
-status:     in-progress:review-r1:t7.75-rev-r1@9cb299731b339d55c943a7c4e86c1fd7d8b03d13
+status:     in-progress:land:t7.75-impl@9cb299731b339d55c943a7c4e86c1fd7d8b03d13
 ```
 **Defect.** In real Chrome on 2026-09-28, the owner's first Play press on a draft always showed
 "Playback refused. Press play again after a gesture." The second press played. The episode page
