@@ -133,8 +133,8 @@ func TestMigrateAppliesTwiceWithNoChange(t *testing.T) {
 		name, _, _ := strings.Cut(row, "@")
 		basenames = append(basenames, name)
 	}
-	if !slices.Equal(basenames, []string{"0001_schema.sql", "0002_stems_pair_unique.sql"}) {
-		t.Fatalf("ledger holds %q, want both migration files", first)
+	if !slices.Equal(basenames, []string{"0001_schema.sql", "0002_stems_pair_unique.sql", "0003_words_speaker.sql"}) {
+		t.Fatalf("ledger holds %q, want all three migration files", first)
 	}
 	if _, err := store.Open(t.Context(), db); err != nil {
 		t.Fatalf("reopen store: %v", err)

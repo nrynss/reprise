@@ -214,7 +214,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 // numbers them by position, and the proposals point back the same way.
 func loadWords(ctx context.Context, db *sql.DB, episodeID string) ([]word, error) {
 	rows, err := db.QueryContext(ctx,
-		"SELECT text, start_ms, end_ms FROM words WHERE episode_id = ? AND source = ? ORDER BY start_ms ASC, rowid ASC",
+		"SELECT text, start_ms, end_ms, speaker FROM words WHERE episode_id = ? AND source = ? ORDER BY start_ms ASC, rowid ASC",
 		episodeID, "edit")
 	if err != nil {
 		return nil, fmt.Errorf("editorial: load words: %w", err)
@@ -223,7 +223,7 @@ func loadWords(ctx context.Context, db *sql.DB, episodeID string) ([]word, error
 	var out []word
 	for rows.Next() {
 		var w word
-		if err := rows.Scan(&w.Text, &w.StartMs, &w.EndMs); err != nil {
+		if err := rows.Scan(&w.Text, &w.StartMs, &w.EndMs, &w.Speaker); err != nil {
 			return nil, fmt.Errorf("editorial: load words: %w", err)
 		}
 		out = append(out, w)
