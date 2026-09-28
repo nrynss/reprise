@@ -2173,6 +2173,74 @@ press. `publishUserBlock` keeps sending every mic block through `voice.sendAudio
 **Done when:** The tests pass, and the gate passes in a fresh worktree. Sending the live mic block
 while paused fails the spec.
 
+### T7.72: The host takes its brief: send session.update in the provider's current shape
+```yaml
+requires:   T7.71
+fixture-ok: yes
+size:       S · frontier
+owns:       web/src/lib/voice/socket.ts, web/src/lib/voice/socket.test.ts, web/src/lib/voice/mock.ts,
+             web/src/lib/voice/mock.test.ts, web/src/lib/voice/record-state.ts,
+             web/src/lib/voice/testdata/session-update.golden.json,
+             internal/assemblyai/voice_live_test.go
+status:     not-started
+```
+**Defect.** In both live takes of 2026-09-28 at 19:38 and 19:40 UTC, the host never greeted. The
+guest spoke first. The host then introduced itself as a generic voice assistant that could
+"go over your schedule, manage your contacts". It played a podcast host only after the owner
+insisted. The morning takes show the same generic replies. The stored timelines prove the cause.
+`config_changes` holds one entry, the provider's own default at 21 ms, with
+`"system_prompt": ""` and `"greeting": null`. Our update never applied.
+
+`VoiceSocket` (`web/src/lib/voice/socket.ts`) sends
+`{"type":"session.update","system_prompt":…,"greeting":…,"keyterms":…,"tools":[]}` with the fields
+at the top level. That is the shape the 2026-09-19 probe recorded in
+`dev-diary/probes/voice-agent.md`. The current docs
+(https://www.assemblyai.com/docs/voice-agents/voice-agent-api/session-configuration) nest them:
+`{"type":"session.update","session":{"system_prompt":…,"greeting":…,"tools":[],"input":{"keyterms":[…]}}}`.
+The provider ignores the old shape silently. So the host prompt, the greeting that cites a stored
+callback, and the keyterms all go missing, and with them the product's central beat.
+
+No test caught it. `MockVoiceServer` in `web/src/lib/voice/mock.ts` answers any
+`session.update` with the scripted greeting, whatever its shape. `VoiceSocket.route` ignores
+`session.error`, which the provider sends when an update fails validation.
+
+**Change.**
+1. **Shape.** Send
+   `{"type":"session.update","session":{"system_prompt":P,"greeting":G,"tools":[],"input":{"keyterms":K}}}`.
+   Omit `input` when `K` is empty. Build the frame in one exported pure function,
+   `sessionUpdateFrame(config)`.
+2. **Verify.** On `session.updated`, compare `config.system_prompt` and `config.greeting` with
+   what was sent. On a mismatch, or a `session.error` before `session.ready`, the take does not go
+   live. Send `session.end`, close, and fail the start with "The host did not accept its setup.
+   Press start to try again." Log the provider's `code`, `message` and `param`.
+3. **Errors.** Handle `session.error` in `route`. Record the code and message on the socket, and
+   pass them to the record controller, which shows them in the notice.
+4. **Mock.** `MockVoiceServer` emits the greeting only when `session.greeting` is set in the
+   nested shape. It echoes `session.updated` with the resolved config, as the provider does.
+   It answers a top-level shape with `session.error`, code `invalid_format`.
+5. **Golden frame.** `socket.test.ts` writes `sessionUpdateFrame` for a fixed config and asserts it
+   equals `web/src/lib/voice/testdata/session-update.golden.json`.
+6. **Live probe.** Add `internal/assemblyai/voice_live_test.go` behind the `live` tag. It mints a
+   token with the existing client and opens the socket. It sends the golden frame, with its
+   prompt and greeting replaced by test text, and asserts that `session.updated` echoes both. It
+   then sends `session.end`. It never runs in CI. Record its output in the handoff.
+
+**Tests.**
+* `socket.test.ts`: the frame for a config with prompt, greeting and two keyterms matches the golden
+  file. An empty keyterm list omits `input`.
+* `socket.test.ts`: a `session.updated` whose `system_prompt` is empty fails the start with the
+  message above and sends `session.end`. A `session.error` before ready does the same.
+* `mock.test.ts`: a top-level update gets `session.error` and no greeting. A nested one gets the
+  greeting and the echo.
+* The mock record suite's existing specs pass against the stricter mock.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. The live probe shows the
+provider echoing the sent prompt and greeting. Reverting to the top-level shape fails the golden
+test and the mock suite.
+
+**Note.** This blocks the next demo take. Every take so far ran without the host prompt or the
+greeting, so no live episode has yet tested the callback opener.
+
 ---
 
 ## Exit criteria
