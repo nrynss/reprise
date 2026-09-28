@@ -1519,7 +1519,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
              web/src/routes/threads/gallery-finish.test.ts, web/src/routes/episode/[id]/+page.svelte
-status:     in-progress:review-r1:t7.54-rev-r1@11c375212d8c1745431c92bb63baa36259a1e313
+status:     in-progress:land:t7.54-impl@11c375212d8c1745431c92bb63baa36259a1e313
 ```
 Three defects, each pinned by its own test.
 
