@@ -315,12 +315,14 @@ func TestRunReleasesTruncationLookalike(t *testing.T) {
 }
 
 // TestRunFallsBackOnUnusableAnswer checks JSON the pass cannot use still
-// leaves a renderable draft. The call spent, so the reservation settles.
+// leaves a renderable draft. The call spent, so the reservation settles
+// the measured price and the result carries it.
 func TestRunFallsBackOnUnusableAnswer(t *testing.T) {
 	t.Parallel()
 	db := openDiary(t)
 	seedForty(t, db)
-	model := &scriptedModel{answer: "not json"}
+	inner := &scriptedModel{answer: "not json"}
+	model := &usageModel{inner: inner, usage: gemini.Usage{Prompt: 1000, Total: 3000}}
 	budgets := &fakeBudget{}
 	var receipt []byte
 	result, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt))
@@ -333,10 +335,17 @@ func TestRunFallsBackOnUnusableAnswer(t *testing.T) {
 	if title := episodeTitle(t, db); !strings.Contains(title, "Untitled") {
 		t.Fatalf("title = %q, want a plain title", title)
 	}
+	want := editorial.UsagePrice(gemini.Usage{Prompt: 1000, Total: 3000}, testRates())
+	if result.Price != want {
+		t.Fatalf("price = %v, want the measured %v", result.Price, want)
+	}
 	budgets.mu.Lock()
 	defer budgets.mu.Unlock()
 	if len(budgets.settled) != 1 || len(budgets.released) != 0 {
 		t.Fatalf("budget holds %+v, want one settle for the spent call", budgets)
+	}
+	if budgets.settled[0][1] != want {
+		t.Fatalf("settled actual = %v, want the measured %v", budgets.settled[0][1], want)
 	}
 }
 
@@ -365,12 +374,13 @@ func TestRunRefusesWithoutBudget(t *testing.T) {
 }
 
 // TestRunKeepsProviderCopyOnReceiptFailure checks a receipt store failure
-// returns the error with nothing stored and settles the spent call.
+// returns the error with nothing stored and settles the measured price.
 func TestRunKeepsProviderCopyOnReceiptFailure(t *testing.T) {
 	t.Parallel()
 	db := openDiary(t)
 	seedForty(t, db)
-	model := &scriptedModel{answer: fullAnswer()}
+	inner := &scriptedModel{answer: fullAnswer()}
+	model := &usageModel{inner: inner, usage: gemini.Usage{Prompt: 1000, Total: 3000}}
 	budgets := &fakeBudget{}
 	receiptErr := errors.New("disk full")
 	cfg := runCfg(db, model, budgets, &[]byte{})
@@ -382,63 +392,77 @@ func TestRunKeepsProviderCopyOnReceiptFailure(t *testing.T) {
 	if got := rowCount(t, db, "proposals", "ep-1"); got != 0 {
 		t.Fatalf("proposals = %d, want none before the receipt persists", got)
 	}
+	want := editorial.UsagePrice(gemini.Usage{Prompt: 1000, Total: 3000}, testRates())
 	budgets.mu.Lock()
 	defer budgets.mu.Unlock()
 	if len(budgets.settled) != 1 || len(budgets.released) != 0 {
 		t.Fatalf("budget holds %+v, want one settle for the spent call", budgets)
 	}
+	if budgets.settled[0][1] != want {
+		t.Fatalf("settled actual = %v, want the measured %v", budgets.settled[0][1], want)
+	}
 }
 
 // TestRunSettlesSpentCallOnStoreFailure checks a store failure after a
-// billed call still settles the estimate instead of releasing it.
+// billed call still settles the measured price instead of releasing it.
 func TestRunSettlesSpentCallOnStoreFailure(t *testing.T) {
 	t.Parallel()
 	db := openDiary(t)
 	seedForty(t, db)
 	mustExec(t, db, "DROP TABLE decisions")
-	model := &scriptedModel{answer: fullAnswer()}
+	inner := &scriptedModel{answer: fullAnswer()}
+	model := &usageModel{inner: inner, usage: gemini.Usage{Prompt: 1000, Total: 3000}}
 	budgets := &fakeBudget{}
 	var receipt []byte
 	if _, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt)); err == nil {
 		t.Fatal("run succeeded, want the store failure")
 	}
-	model.mu.Lock()
-	calls := model.calls
-	model.mu.Unlock()
+	inner.mu.Lock()
+	calls := inner.calls
+	inner.mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("model calls = %d, want one billed call before the failure", calls)
 	}
+	want := editorial.UsagePrice(gemini.Usage{Prompt: 1000, Total: 3000}, testRates())
 	budgets.mu.Lock()
 	defer budgets.mu.Unlock()
 	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
 		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
 	}
+	if budgets.settled[0][1] != want {
+		t.Fatalf("settled actual = %v, want the measured %v", budgets.settled[0][1], want)
+	}
 }
 
 // TestRunSettlesSpentCallOnFallbackStoreFailure checks a fallback store
-// failure after an unusable answer still settles the billed call instead
-// of releasing it.
+// failure after an unusable answer still settles the measured price
+// instead of releasing it.
 func TestRunSettlesSpentCallOnFallbackStoreFailure(t *testing.T) {
 	t.Parallel()
 	db := openDiary(t)
 	seedForty(t, db)
 	mustExec(t, db, "DROP TABLE proposals")
-	model := &scriptedModel{answer: "not json"}
+	inner := &scriptedModel{answer: "not json"}
+	model := &usageModel{inner: inner, usage: gemini.Usage{Prompt: 1000, Total: 3000}}
 	budgets := &fakeBudget{}
 	var receipt []byte
 	if _, err := editorial.Run(t.Context(), runCfg(db, model, budgets, &receipt)); err == nil {
 		t.Fatal("run succeeded, want the fallback store failure")
 	}
-	model.mu.Lock()
-	calls := model.calls
-	model.mu.Unlock()
+	inner.mu.Lock()
+	calls := inner.calls
+	inner.mu.Unlock()
 	if calls != 1 {
 		t.Fatalf("model calls = %d, want one billed call before the failure", calls)
 	}
+	want := editorial.UsagePrice(gemini.Usage{Prompt: 1000, Total: 3000}, testRates())
 	budgets.mu.Lock()
 	defer budgets.mu.Unlock()
 	if len(budgets.reserved) != 1 || len(budgets.settled) != 1 || len(budgets.released) != 0 {
 		t.Fatalf("budget holds %+v, want one reserve and one settle", budgets)
+	}
+	if budgets.settled[0][1] != want {
+		t.Fatalf("settled actual = %v, want the measured %v", budgets.settled[0][1], want)
 	}
 }
 
@@ -473,10 +497,10 @@ func TestRunSettlesTruncationWhenFallbackStoreFails(t *testing.T) {
 func TestEstimatePricesBothSides(t *testing.T) {
 	t.Parallel()
 	rates := testRates()
-	if got := editorial.Estimate(60, 0, rates); got != cost.USD(3840*0.75e-6+8192*3.75e-6) {
+	if got := editorial.Estimate(60, 0, rates); got != cost.USD(7440*0.75e-6+8192*3.75e-6) {
 		t.Fatalf("estimate = %v, want both sides at the catalog rates", got)
 	}
-	if got := editorial.Estimate(60, 40, rates); got != cost.USD(3850*0.75e-6+8192*3.75e-6) {
+	if got := editorial.Estimate(60, 40, rates); got != cost.USD(7450*0.75e-6+8192*3.75e-6) {
 		t.Fatalf("timeline estimate = %v, want ten more input tokens", got)
 	}
 	if got := editorial.Estimate(60, 0, editorial.Rates{}); got != cost.Price(0) {

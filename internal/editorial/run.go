@@ -104,8 +104,8 @@ type Rates struct {
 const MaxOutputTokens = 8192
 
 // Estimate prices one editorial call before any provider call. Audio
-// bills about 32 tokens a second per stem, and the call carries two
-// stems, so each audio second books 64 input tokens. The timeline books
+// bills about 62 tokens a second per stem, and the call carries two
+// stems, so each audio second books 124 input tokens. The timeline books
 // four characters a token. The answer may reach MaxOutputTokens, so the
 // estimate books the full cap at the output rate. The caller reserves
 // this before the provider call.
@@ -116,7 +116,7 @@ func Estimate(audioSeconds float64, timelineChars int, rates Rates) cost.Price {
 	if timelineChars < 0 {
 		timelineChars = 0
 	}
-	inputTokens := math.Ceil(audioSeconds*64) + float64(timelineChars)/4
+	inputTokens := math.Ceil(audioSeconds*124) + float64(timelineChars)/4
 	dollars := inputTokens*rates.PromptPerMillionUSD/1e6 +
 		float64(MaxOutputTokens)*rates.CompletionPerMillionUSD/1e6
 	if dollars <= 0 {
@@ -211,7 +211,10 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		return Result{Fallback: true, Title: title, Price: estimate}, nil
 	}
 	if err := cfg.SaveRaw(ctx, []byte(reply.JSON)); err != nil {
-		if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+		// The call succeeded, so usage is known. Settle the measured
+		// price rather than the estimate.
+		actual := UsagePrice(reply.Usage, cfg.Rates)
+		if settleErr := cfg.Budgets.Settle(estimate, actual); settleErr != nil {
 			return Result{}, errors.Join(err, fmt.Errorf("editorial: run: settle: %w", settleErr))
 		}
 		settled = true
@@ -220,18 +223,21 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	got, err := decode(reply.JSON)
 	if err != nil {
 		log.Warn("editorial: answer unusable, leaving a renderable draft", "error", err)
+		// The call succeeded, so usage is known. Settle the measured
+		// price rather than the estimate.
+		actual := UsagePrice(reply.Usage, cfg.Rates)
 		if storeErr := store(ctx, cfg.DB, cfg.OwnerID, cfg.EpisodeID, words, draft{Title: plainTitle(len(words))}); storeErr != nil {
-			if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+			if settleErr := cfg.Budgets.Settle(estimate, actual); settleErr != nil {
 				return Result{}, errors.Join(storeErr, fmt.Errorf("editorial: run: settle: %w", settleErr))
 			}
 			settled = true
 			return Result{}, storeErr
 		}
-		if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+		if settleErr := cfg.Budgets.Settle(estimate, actual); settleErr != nil {
 			return Result{}, fmt.Errorf("editorial: run: settle: %w", settleErr)
 		}
 		settled = true
-		return Result{Fallback: true, Title: plainTitle(len(words)), Price: estimate}, nil
+		return Result{Fallback: true, Title: plainTitle(len(words)), Price: actual}, nil
 	}
 	valid := validate(log, words, got)
 	title := valid.Title
@@ -240,7 +246,10 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		valid.Title = title
 	}
 	if err := store(ctx, cfg.DB, cfg.OwnerID, cfg.EpisodeID, words, valid); err != nil {
-		if settleErr := cfg.Budgets.Settle(estimate, estimate); settleErr != nil {
+		// The call succeeded, so usage is known. Settle the measured
+		// price rather than the estimate.
+		actual := UsagePrice(reply.Usage, cfg.Rates)
+		if settleErr := cfg.Budgets.Settle(estimate, actual); settleErr != nil {
 			return Result{}, errors.Join(err, fmt.Errorf("editorial: run: settle: %w", settleErr))
 		}
 		settled = true
