@@ -1314,6 +1314,11 @@ reads, then a duration, settles the session once and stores the
 recording. Removing the backoff fails that test. A provider that never
 closes leaves the session to the sweep, with no settle.
 
+The failed reconcile also never stored the provider timeline. The
+transcript pass therefore ran without the host replies, and both round 2
+transcripts hold only the user's words. The test above also checks that
+the settled session stores its timeline.
+
 ### T7.50: The processing page reports the real stem bytes after a resume
 ```yaml
 requires:   T7.47
@@ -1364,6 +1369,107 @@ oldest one, from episode 5.
 greeting without "first episode". A test mints two sessions for one
 owner with two callbacks and sees two different greetings. Dropping the
 `MarkUsed` call fails the second test.
+
+### T7.52: The editor reads, seeks and leaves like a page
+```yaml
+requires:   T7.47
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts
+status:     not-started
+```
+The owner tried the editor on both round 2 drafts in T6.4b. Six defects
+turned up.
+
+* The transcript reads as one run of text, such as
+  `Oh,hello.Thisisjustatest.`. Each word is a `<button>` with no
+  whitespace between them. Put a space between words, and keep one word
+  per button.
+* The waveform canvas seeks only from the keyboard. Add pointer seek and
+  drag on it.
+* After a cut is reverted, play and seek stop answering until a reload.
+  Both must work after every revert and restore.
+* The position read `0:40 of 0:34`. The shown position never passes
+  the shown length.
+* The editor has no way back to the gallery. Add a link, as the episode
+  page has.
+* An editorial answer with no callback still shows a "Planted for next
+  time" block, empty but with a revert control. Show no block when
+  nothing was planted.
+
+**Done when:** One browser spec loads the fixture draft and checks each
+point. It finds spaced words, seeks by pointer, reverts a cut, then
+plays and seeks again. It also checks the position against the length,
+follows the gallery link, and finds no empty planted block. Removing the
+space fails the first check.
+
+### T7.53: The draft plays the host with the guest
+```yaml
+requires:   T7.52
+fixture-ok: yes
+size:       M · frontier
+owns:       web/src/lib/editor/draft.ts, web/src/routes/episode/[id]/edit/+page.svelte,
+             internal/api/episodes.go
+status:     not-started
+```
+The owner edited both round 2 drafts in T6.4b hearing only their own
+voice. `audio_url` names the user stem alone
+(`internal/api/episodes.go:162`), and the host joins only at render.
+Cuts land on a conversation, so the editor must play the conversation.
+The host stem was stored on both runs.
+
+* The detail endpoint names both stems with their offsets.
+* The draft plays both stems on one clock, with the offsets the render
+  uses. A cut silences both.
+* A draft with one stem still plays that stem.
+
+**Done when:** A browser check plays a fixture draft whose host stem
+holds a marker tone and finds the tone at the render offset. Dropping
+the host source fails it.
+
+### T7.54: An unfinished take says what it is
+```yaml
+requires:   T7.47
+fixture-ok: yes
+size:       S · frontier
+owns:       web/src/routes/threads/threads.ts, web/src/routes/episode/[id]/+page.svelte
+status:     not-started
+```
+The round 2 takes that closed their tab mid-take left episodes 8
+(Chrome) and 4 (Firefox) in `recording`, with no stems. Their pages
+read `Quoted moment at word 0. No stored quote names it.`. That points
+at a moment that does not exist. Firefox also offered Publish on a page
+with no audio.
+
+* A page with no stored quote shows no quoted moment line.
+* An episode with no audio offers no Publish. It says the take ended
+  before it was stored, and it keeps Erase.
+* Record in the handoff whether a closed take can ever resume its
+  stems. If it can, name the task that should offer that.
+
+**Done when:** A spec loads a recording episode with no stems and finds
+no quoted moment, no Publish, and a working Erase. Restoring the moment
+line fails it.
+
+### T7.55: A cold open is a moment, not a word
+```yaml
+requires:   T7.38
+fixture-ok: yes
+size:       XS · mid
+owns:       internal/editorial/
+status:     not-started
+```
+The Firefox draft in T6.4b round 2 proposed the cold open `Hello,`.
+A single greeting word is not a moment worth opening on.
+
+* A proposed cold open shorter than a whole sentence of real content is
+  dropped. The draft then opens at the top, as a reverted cold open
+  does.
+* The prompt asks for a quotable line, and the store enforces the floor.
+  The prompt alone does not.
+
+**Done when:** A test stores an editorial answer whose cold open is one
+word and finds no cold open proposal. Removing the floor fails it.
 
 
 ---
