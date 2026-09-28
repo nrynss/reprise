@@ -1890,6 +1890,73 @@ in `welcome.playwright.config.ts`. CI already installs WebKit. Change no spec.
 runs in a row. The gate passes in a fresh worktree three times in a row, and the review file records
 the three exit codes. WebKit does not launch on the workstation, so run it only in that image.
 
+### T7.66: Run Gemini 3.8 Flash on Vertex global, price it right, and draw real covers
+```yaml
+requires:   T7.56
+fixture-ok: yes
+size:       M · frontier
+owns:       config/reprise.box.toml, config/reprise.local.toml, internal/settings/settings.go,
+             internal/settings/settings_test.go, internal/editorial/run.go,
+             internal/editorial/run_test.go, internal/cover/cover.go, internal/cover/cover_test.go,
+             cmd/reprise/main.go, cmd/reprise/finish.go, cmd/reprise/main_test.go
+status:     not-started
+```
+**Findings.** A probe on 2026-09-28 used the project's own service account against Vertex.
+
+* Every Gemini call runs `gemini-2.5-flash` (`editorial_model` in both config files) at
+  `vertex_location = "us-central1"`.
+* `gemini-3.8-flash` answers only at the `global` location. At `us-central1` it returns 404. At
+  `global` it takes text and inline WAV audio, and it honours `ThinkingBudget`, so the T7.38 and
+  T7.56 budgets keep working.
+* The cover passes `editorial_model` to `GenerateImage`. A text model refuses with
+  `Multi-modal output is not supported`. The one cover production ever drew reads
+  `"Fallback":true` and `Price: 0`. No episode has had a generated cover.
+  `gemini-3.1-flash-image` draws a 1024 by 1024 PNG at `global`.
+* The AssemblyAI LLM Gateway is no substitute. Its chat completions accept text parts only, and
+  this account gets `Your account does not have access to this LLM Gateway model` for every model.
+
+**Prices,** from https://ai.google.dev/gemini-api/docs/pricing, read 2026-09-28.
+* `gemini-3.8-flash`: $0.75 per million input tokens, for every modality, and $3.75 per million
+  output tokens, thinking included. Both double on 2027-01-01.
+* `gemini-3.1-flash-image`: $0.067 for a 1K image.
+
+**Change.**
+1. **Model and location.** In both config files, set `editorial_model = "gemini-3.8-flash"` and
+   `vertex_location = "global"`. Add a `cover_model` setting to `internal/settings`. It is
+   required and is set to `"gemini-3.1-flash-image"` in both files. Pass it to both
+   `cover.Run` call sites, in `cmd/reprise/main.go` and `cmd/reprise/finish.go`, instead of the
+   editorial model.
+2. **Text rates.** In `cmd/reprise/main.go`, set `geminiPromptPerMillionUSD = 0.75` and
+   `geminiCompletionPerMillionUSD = 3.75`. The comment names the model and the 2027 doubling.
+3. **Editorial estimate.** `editorial.Estimate` prices audio minutes at `DollarsPerMinute = 0.0025`
+   and never counts output. The call carries two stems. Audio bills about 32 tokens a second per
+   stem, so 3840 input tokens a minute. The answer may reach `editorialMaxTokens` (8192), thinking
+   included. Reserve both sides. Input is `ceil(audioSeconds * 64)` tokens plus the timeline
+   tokens at 4 characters a token, all at the input rate. Output is 8192 tokens at the output
+   rate. Then **settle on the measured `Usage`**. Price `Prompt` at the input rate and
+   `Total - Prompt` at the output rate. Today the call settles the estimate itself. The rates
+   reach the editorial run from `cmd/reprise/main.go` through its config, as chapters and marking
+   receive theirs.
+4. **Cover price.** Set `DollarsPerImage = 0.067`, and fix its comment. It is no longer a
+   placeholder.
+
+**Tests.**
+* `internal/settings`: both config files load, and each carries `cover_model`.
+* `internal/editorial`: `Estimate` for 60 seconds with an empty timeline equals
+  `3840 * 0.75e-6 + 8192 * 3.75e-6` dollars, to the nanodollar. A run whose scripted usage is
+  1000 prompt and 3000 total settles `1000 * 0.75e-6 + 2000 * 3.75e-6` dollars.
+* `cmd/reprise`: the cover call receives `cover_model`, never `editorial_model`.
+* A `live` tag probe beside `internal/gemini/live_test.go` runs editorial on a 20 second fixture,
+  and a cover, against 3.8 and 3.1 Flash Image at `global`. It records tokens, price and the
+  cover size in the handoff. It never runs in CI.
+
+**Done when:** The tests pass under `go test -race`, and the gate passes in a fresh worktree. The
+live probe draws a real cover and a non-fallback editorial answer. Pointing the cover back at
+`editorial_model` fails the `cmd/reprise` test.
+
+**Note.** The box reads `config/reprise.box.toml` baked into the image, so the change ships with
+the next deploy. The service account needs no new role, because the probe ran on it.
+
 ---
 
 ## Exit criteria
