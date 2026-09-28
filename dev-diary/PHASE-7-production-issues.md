@@ -1180,7 +1180,7 @@ requires:   T7.43
 fixture-ok: yes
 size:       S · mid
 owns:       internal/privacy/
-status:     in-progress:land:t7.45-impl@b80efebfb35e9909ec06a1fb009eb51a9c2fab9c
+status:     done:1046053
 ```
 T7.43 round 1 recorded an out of scope H finding. Account erase
 deletes the provider record through `TerminateSession`. That call
@@ -1233,6 +1233,11 @@ field on the wire fails that test.
 
 ### What exists now
 
+T7.45 landed at 1046053 after round 1 APPROVE with zero findings.
+Erase ends the provider socket through the shared end before the
+delete. A gone socket still deletes. The privacy diff matches
+reviewed commit b80efeb. Main had moved, so the landing rebased.
+Race tests on privacy and retention passed on the rebased commit.
 T7.43 landed at 2a90f30 after round 3 APPROVE with zero residue.
 Round 2 had one C finding. A sweep that settled and then failed
 to end never tried the end again, so the socket stayed billable.
