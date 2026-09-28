@@ -1987,7 +1987,7 @@ size:       M · frontier
 owns:       internal/broker/reconcile.go, internal/broker/reconcile_test.go,
              internal/broker/sweep.go, internal/broker/sweep_test.go, internal/broker/end_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:implement:t7.68-impl
+status:     in-progress:review-r1:t7.68-rev-r1@7707217aef32920f54142b3a867ba1d970b6844c
 ```
 **Defect.** Both live takes on 2026-09-28 at 18:26 and 18:28 UTC, on `a0a9339`, settled within
 seconds of End. Chrome settled 40 seconds and Firefox 40, against owner timers of 41 and 39. Both
@@ -2091,7 +2091,7 @@ size:       S · mid
 owns:       web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts,
              web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
              web/src/routes/threads/gallery-finish.test.ts
-status:     in-progress:review-r1:t7.70-rev-r1@b3a734bd1c7fa81e0c02abcdaf7dbbbedf9ec4b7
+status:     in-progress:land:t7.70-impl@b3a734bd1c7fa81e0c02abcdaf7dbbbedf9ec4b7
 ```
 **Defect.** The episodes routes allow 48 requests a minute per client (`takeEpisodesBurst` in
 `cmd/reprise/main.go`). On 2026-09-28, after two takes, `GET /api/episodes` answered 429 for the
