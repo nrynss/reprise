@@ -24,9 +24,9 @@ type sessionStore interface {
 
 var _ sessionStore = (*episode.Service)(nil)
 
-// SessionEnd serves the session end route. Create it with NewSessionEnd,
-// because the zero value holds no store. Mount wires it under the end
-// table pattern behind the spend gate and the guest middleware.
+// SessionEnd serves the session end and provider routes. Create it with NewSessionEnd,
+// because the zero value holds no store. Mount wires it under both
+// table patterns behind the spend gate and the guest middleware.
 type SessionEnd struct {
 	store sessionStore
 }
@@ -37,6 +37,7 @@ func NewSessionEnd(store sessionStore) http.Handler {
 	h := &SessionEnd{store: store}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/sessions/{id}/end", h.end)
+	mux.HandleFunc("POST /api/sessions/{id}/provider", h.end)
 	return mux
 }
 
@@ -79,7 +80,7 @@ func decodeSessionEndBody(w http.ResponseWriter, r *http.Request) (sessionEndReq
 	return body, true
 }
 
-// end answers POST /api/sessions/{id}/end by recording the provider id
+// end answers the end and provider routes by recording the provider id
 // on the diary session. An empty provider id leaves a stored id in place.
 // The answer echoes the id the row holds. Unknown and foreign sessions
 // both answer 404, and a repeat end stays harmless.

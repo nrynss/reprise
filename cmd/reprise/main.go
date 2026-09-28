@@ -1711,7 +1711,9 @@ func (j *jobs) settleEnd(inner http.Handler) http.Handler {
 // session. The reconciler settles the mint hold to the real connected
 // seconds exactly once, so each mint releases and the daily ceiling
 // stops leaking. A repeat end starts a repeat job, and the claim
-// inside settles money only on the first pass.
+// inside settles money only on the first pass. A provider report only
+// records the id and starts no job, so the early id never ends the
+// call it names.
 type settleOnEnd struct {
 	inner   http.Handler
 	banks   *broker.Broker
@@ -1738,13 +1740,17 @@ func (w *statusWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
-// ServeHTTP records the close first, then settles it. A refused end
-// settles nothing, and a close the end never recorded waits for the
-// sweep instead of pricing silence.
+// ServeHTTP records the provider id first, then settles a real close.
+// A refused end settles nothing, and a provider report starts no job,
+// so the early id never ends the call it names. A close the end never
+// recorded waits for the sweep instead of pricing silence.
 func (s *settleOnEnd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	s.inner.ServeHTTP(rec, r)
 	if r.Method != http.MethodPost || rec.status != http.StatusOK {
+		return
+	}
+	if !strings.HasSuffix(r.URL.Path, "/end") {
 		return
 	}
 	sessionID := r.PathValue("id")

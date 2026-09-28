@@ -52,6 +52,7 @@ type Route struct {
 var routeTable = []Route{
 	{Method: "POST", Pattern: "/api/sessions"},
 	{Method: "POST", Pattern: "/api/sessions/{id}/end"},
+	{Method: "POST", Pattern: "/api/sessions/{id}/provider"},
 	{Method: "", Pattern: "/api/uploads/"},
 	{Method: "GET", Pattern: "/api/episodes"},
 	{Method: "GET", Pattern: "/api/episodes/{id}"},
@@ -129,7 +130,8 @@ type Dependencies struct {
 	Sessions http.Handler
 	// Episodes serves the episode list, detail, decisions, and done.
 	Episodes http.Handler
-	// SessionEnd records the provider close on a diary session.
+	// SessionEnd records the provider id the browser reports, through
+	// the end route at close and the provider route mid-take.
 	SessionEnd http.Handler
 	// Threads serves the cross episode index.
 	Threads http.Handler
@@ -207,7 +209,7 @@ func (d Dependencies) handlerFor(route Route) http.Handler {
 	switch route.Method + " " + route.Pattern {
 	case "POST /api/sessions":
 		return d.Sessions
-	case "POST /api/sessions/{id}/end":
+	case "POST /api/sessions/{id}/end", "POST /api/sessions/{id}/provider":
 		return d.SessionEnd
 	case "GET /api/episodes", "GET /api/episodes/{id}",
 		"POST /api/episodes/{id}/decisions", "POST /api/episodes/{id}/done":

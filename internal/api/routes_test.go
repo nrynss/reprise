@@ -33,6 +33,7 @@ const goldenDir = "../../web/src/lib/api/testdata"
 var expectedTable = []Route{
 	{Method: "POST", Pattern: "/api/sessions"},
 	{Method: "POST", Pattern: "/api/sessions/{id}/end"},
+	{Method: "POST", Pattern: "/api/sessions/{id}/provider"},
 	{Method: "", Pattern: "/api/uploads/"},
 	{Method: "GET", Pattern: "/api/episodes"},
 	{Method: "GET", Pattern: "/api/episodes/{id}"},
@@ -285,6 +286,7 @@ func TestMountServesHandlersThroughChain(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/sessions"},
 		{http.MethodPost, "/api/sessions/e01/end"},
+		{http.MethodPost, "/api/sessions/e01/provider"},
 		{http.MethodGet, "/api/episodes"},
 		{http.MethodGet, "/api/episodes/e01"},
 		{http.MethodPost, "/api/episodes/e01/decisions"},

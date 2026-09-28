@@ -796,6 +796,70 @@ func TestSettleEndSettlesExactlyOnce(t *testing.T) {
 	}
 }
 
+// settleProbeStarter counts the reconcile starts the settle wrapper
+// requests. The started func never runs, so the test pins the start
+// alone with no provider traffic.
+type settleProbeStarter struct {
+	calls int
+	kinds []string
+}
+
+// StartKind records the call and answers a fixed id.
+func (s *settleProbeStarter) StartKind(_ context.Context, kind string, _ job.Func) (string, error) {
+	s.calls++
+	s.kinds = append(s.kinds, kind)
+	return "job-probe", nil
+}
+
+// TestProviderReportRecordsWithoutSettle posts the learned provider id to
+// the provider route, then closes on the end route. The provider post
+// answers 200 with no reconcile job. The end post starts exactly one.
+func TestProviderReportRecordsWithoutSettle(t *testing.T) {
+	fx := openWireFixture(t)
+	sessionBroker := openWireBroker(t, fx)
+	diary, err := broker.NewSQLiteDiary(fx.db)
+	if err != nil {
+		t.Fatalf("open diary: %v", err)
+	}
+	rec := openTestReconciler(t, fx, diary, sessionBroker.Leases())
+
+	session, _ := mintWireSession(t, fx, sessionBroker)
+	if _, err := fx.db.Writer().ExecContext(t.Context(),
+		`UPDATE sessions SET provider_session_id = ? WHERE id = ?`, "prov-1", session.SessionID); err != nil {
+		t.Fatalf("record provider close: %v", err)
+	}
+	starter := &settleProbeStarter{}
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	wrapped := &settleOnEnd{inner: inner, banks: sessionBroker, starter: starter, rec: rec}
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/sessions/{id}/end", wrapped)
+	mux.Handle("POST /api/sessions/{id}/provider", wrapped)
+	post := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"provider_session_id":"prov-1"}`))
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	if got := post("/api/sessions/" + session.SessionID + "/provider"); got.Code != http.StatusOK {
+		t.Fatalf("provider status = %d, want 200", got.Code)
+	}
+	if starter.calls != 0 {
+		t.Fatalf("starts after provider post = %d, want none", starter.calls)
+	}
+	if got := post("/api/sessions/" + session.SessionID + "/end"); got.Code != http.StatusOK {
+		t.Fatalf("end status = %d, want 200", got.Code)
+	}
+	if starter.calls != 1 {
+		t.Fatalf("starts after end post = %d, want exactly one", starter.calls)
+	}
+	if len(starter.kinds) != 1 || starter.kinds[0] != broker.KindName {
+		t.Fatalf("started kinds = %v, want one reconcile", starter.kinds)
+	}
+}
+
 // TestRestartFailsInterruptedPaidJobs leaves a transcript job running,
 // then boots the job wiring the way a restart does. Recovery marks the
 // job interrupted, and the restart pass fails its episode for an explicit

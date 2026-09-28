@@ -95,10 +95,17 @@ function closeBody(stub: ReturnType<typeof vi.fn>, index: number): string {
 	return typeof init?.body === 'string' ? init.body : '';
 }
 
+function requestUrl(stub: ReturnType<typeof vi.fn>, index: number): string {
+	const call = stub.mock.calls[index] as unknown[] | undefined;
+	const url = call?.[0];
+	return typeof url === 'string' ? url : '';
+}
+
 describe('closeSession', () => {
 	it('resolves when the close record lands', async () => {
 		const stub = stubFetchSequence([() => jsonResponse(200, { ok: true })]);
 		await expect(closeSession('s1', 'prov-9')).resolves.toBeUndefined();
+		expect(requestUrl(stub, 0)).toBe('/api/sessions/s1/end');
 		expect(closeBody(stub, 0)).toBe(JSON.stringify({ provider_session_id: 'prov-9' }));
 	});
 
@@ -143,9 +150,11 @@ describe('closeSession', () => {
 });
 
 describe('reportProviderSession', () => {
-	it('posts the learned id before any end', async () => {
+	it('posts the learned id to the provider route before any end', async () => {
 		const stub = stubFetchSequence([() => jsonResponse(200, { ok: true })]);
 		await expect(reportProviderSession('s1', 'prov-9')).resolves.toBe(true);
+		expect(requestUrl(stub, 0)).toBe('/api/sessions/s1/provider');
+		expect(requestUrl(stub, 0).endsWith('/end')).toBe(false);
 		expect(closeBody(stub, 0)).toBe(JSON.stringify({ provider_session_id: 'prov-9' }));
 		expect(closeBody(stub, 0)).not.toBe(JSON.stringify({ provider_session_id: '' }));
 	});

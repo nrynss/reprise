@@ -47,8 +47,10 @@ export async function closeSession(sessionId: string, providerSessionId: string)
 }
 
 // reportProviderSession stores the provider id while the take still runs.
-// A crashed or suspended page sends no close at all, so this early record
-// is what lets the sweep find and settle the session. An empty id stores
+// It posts to the provider route, which records the id and starts no
+// settle, so the early id never ends the call it names. A crashed or
+// suspended page sends no close at all, so this early record is what
+// lets the sweep find and settle the session. An empty id stores
 // nothing and reports false. A refused record reports false instead of
 // throwing, because the take must keep running and the end record still
 // carries the id later.
@@ -57,8 +59,14 @@ export async function reportProviderSession(
 	providerSessionId: string
 ): Promise<boolean> {
 	if (providerSessionId === '') return false;
+	const path = `/api/sessions/${encodeURIComponent(sessionId)}/provider`;
+	const init: RequestInit = {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ provider_session_id: providerSessionId })
+	};
 	try {
-		await closeSession(sessionId, providerSessionId);
+		await readJsonAnswer('provider session', path, init);
 		return true;
 	} catch {
 		return false;

@@ -515,6 +515,48 @@ func TestSessionEndRecordsProviderClose(t *testing.T) {
 	}
 }
 
+// TestSessionEndProviderRouteRecordsProviderClose posts the learned
+// provider id to the provider route mid-take and requires the same 200
+// JSON the end route answers, with the id on the row.
+func TestSessionEndProviderRouteRecordsProviderClose(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "recording")
+	seedSessionRow(t, db, "sess-1", owner.ID, "ep-1")
+	handler := NewSessionEnd(newEpisodeService(t, db, nil).svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/sess-1/provider",
+		strings.NewReader(`{"provider_session_id":"prov-9"}`))
+	rec := serve(guests, handler, cookie, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("provider status = %d, want 200", rec.Code)
+	}
+	var body sessionEndJSON
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode provider: %v", err)
+	}
+	if body.SessionID != "sess-1" || body.EpisodeID != "ep-1" || body.ProviderSessionID != "prov-9" {
+		t.Fatalf("provider = %+v, want sess-1 on ep-1 with prov-9", body)
+	}
+	var stored string
+	if err := db.Reader().QueryRowContext(t.Context(),
+		"SELECT provider_session_id FROM sessions WHERE id = 'sess-1'").Scan(&stored); err != nil {
+		t.Fatalf("read provider id: %v", err)
+	}
+	if stored != "prov-9" {
+		t.Fatalf("provider id = %q, want prov-9", stored)
+	}
+
+	foreign, _ := mintGuest(t, guests)
+	foreignReq := httptest.NewRequest(http.MethodPost, "/api/sessions/sess-1/provider",
+		strings.NewReader(`{"provider_session_id":"prov-9"}`))
+	rec = serve(guests, handler, foreign, foreignReq)
+	if status, code := envelopeCode(t, rec); status != http.StatusNotFound || code != CodeSessionNotFound {
+		t.Fatalf("foreign provider status = %d code = %q, want 404 session_not_found", status, code)
+	}
+}
+
 // TestSessionEndAcceptsEmptyClose posts the empty close the browser
 // sends and requires a 200 with the row stored. Malformed bodies still
 // refuse loudly, and a repeat empty close stays harmless.
