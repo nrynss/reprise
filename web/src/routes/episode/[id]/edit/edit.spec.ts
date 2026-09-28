@@ -201,6 +201,44 @@ test('revert a cut, then play and seek still answer', async ({ page }) => {
 	await expect(position).toHaveText('0:12 of 0:24');
 });
 
+test('revert every cut, then play and drag still answer', async ({ page }) => {
+	await page.goto(DRAFT);
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');
+	// The first cut starts at word 0, as the draft that stranded Firefox did.
+	await page.getByRole('button', { name: 'Revert cut: False start at the top of the answer.' }).click();
+	await page.getByRole('button', { name: 'Revert cut: Bus timetable tangent that goes nowhere.' }).click();
+	await page.getByRole('button', { name: 'Revert cut: Trailing fragment after the harvest line.' }).click();
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('0 cuts applied');
+
+	await page.getByRole('button', { name: 'Play draft' }).click();
+	const position = page.getByRole('status', { name: 'Playback position' });
+	await expect(position).toHaveText(/0:0[1-9] of 0:24/, { timeout: 15_000 });
+
+	await page.getByRole('button', { name: 'Pause draft' }).click();
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error('waveform has no box');
+	await canvas.click({ position: { x: Math.floor(box.width / 2), y: 5 } });
+	await expect(position).toHaveText('0:12 of 0:24');
+});
+
+test('revert the live cut, then play and drag still answer', async ({ page }) => {
+	await serveLiveDraft(page);
+	await page.getByRole('button', { name: 'Revert cut: Trim the open.' }).click();
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('0 cuts applied');
+
+	await page.getByRole('button', { name: 'Play draft' }).click();
+	const position = page.getByRole('status', { name: 'Playback position' });
+	await expect(position).toHaveText(/0:0[1-9] of 0:20/, { timeout: 15_000 });
+
+	await page.getByRole('button', { name: 'Pause draft' }).click();
+	const canvas = page.getByRole('slider', { name: 'Draft waveform. Arrow keys seek.' });
+	const box = await canvas.boundingBox();
+	if (!box) throw new Error('waveform has no box');
+	await canvas.click({ position: { x: Math.floor(box.width / 2), y: 5 } });
+	await expect(position).toHaveText('0:10 of 0:20');
+});
+
 test('the shown length follows the audio, and the position never passes it', async ({ page }) => {
 	await serveLiveDraft(page);
 	const position = page.getByRole('status', { name: 'Playback position' });

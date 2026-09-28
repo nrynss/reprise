@@ -36,7 +36,7 @@ jobs:
 
       # Playwright needs its own browser builds.
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium webkit
+        run: npx playwright install --with-deps chromium webkit firefox
         working-directory: web
 
       - name: Run the gate
