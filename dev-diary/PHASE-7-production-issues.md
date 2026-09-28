@@ -2091,7 +2091,7 @@ size:       S · mid
 owns:       web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts,
              web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
              web/src/routes/threads/gallery-finish.test.ts
-status:     in-progress:land:t7.70-impl@b3a734bd1c7fa81e0c02abcdaf7dbbbedf9ec4b7
+status:     done:bd5a25a
 ```
 **Defect.** The episodes routes allow 48 requests a minute per client (`takeEpisodesBurst` in
 `cmd/reprise/main.go`). On 2026-09-28, after two takes, `GET /api/episodes` answered 429 for the
@@ -2189,6 +2189,11 @@ while paused fails the spec.
 
 ### What exists now
 
+T7.70 landed at bd5a25a after round 1 APPROVE with zero findings.
+Episode detail reads run on a 3 second budget and 429s pause
+instead of failing. The tree matches reviewed commit b3a734b.
+Main had moved, so the landing rebased. The budgeted pins
+passed on the rebased commit.
 T7.71 landed at 201ebcc after round 1 APPROVE with zero findings.
 The take pauses while End asks: frozen clock, silenced mic with
 stem zeros, dropped host audio, resume on Cancel. The tree
