@@ -879,6 +879,19 @@ export function galleryPass(detail: LiveDetail): GalleryPass | null {
 		const note = stoppedPassNote('render', render) || FAILED_EPISODE_NOTE;
 		return { jobId: render.jobId, status: render.status, note, proposed };
 	}
+	// A ready episode whose analysis failed names that failure on its
+	// card. The render already plays, so the episode still ships.
+	if (state === 'ready' && detail.analysisOutcome) {
+		const stopped = stoppedPassNote('analysis', detail.analysisOutcome);
+		if (stopped !== '') {
+			return {
+				jobId: detail.analysisOutcome.jobId,
+				status: detail.analysisOutcome.status,
+				note: `${stopped} The episode still ships without chapters.`,
+				proposed
+			};
+		}
+	}
 	if (!failed && (detail.episode.state !== 'draft' || proposed || transcript.status !== 'done')) return base;
 	const editorial = detail.editorialOutcome;
 	if (!editorial) {
@@ -1313,7 +1326,10 @@ export class GalleryController {
 			const status = known && isTerminalStatus(known) ? known : entry.stream.status;
 			this.statuses[entry.jobId] = status;
 			const running = !isTerminalStatus(status);
-			if (!running && known && !isTerminalStatus(known)) this.recheck(entry.jobId);
+			// A pass that already read done still re-reads the detail once.
+			// No stream transition ever fires for it, so without this the
+			// card keeps the line its done state shows forever.
+			if (!running) this.recheck(entry.jobId);
 			const stage = entry.stream.stage ? `${entry.stream.stage} · ` : '';
 			const note = this.notes[entry.jobId] ?? '';
 			const detail =
@@ -1776,7 +1792,11 @@ export class EpisodeController {
 			this.expose(null);
 			return;
 		}
-		const word = Number(queryValue(search, 'w') ?? '');
+		const rawMoment = queryValue(search, 'w');
+		// A missing or empty moment reads as no moment. Number('') is 0,
+		// so the raw value decides first and only a present, finite,
+		// non-negative number parks the playhead.
+		const word = rawMoment === null || rawMoment.trim() === '' ? Number.NaN : Number(rawMoment);
 		const momentWord = Number.isFinite(word) && word >= 0 ? Math.floor(word) : null;
 		let moments: LiveThreadHit[] = [];
 		try {
@@ -2097,6 +2117,13 @@ export function renderClockWords(
 		placed.push({ text: word.text, start: at(word.start), end: at(word.end) });
 	});
 	return placed;
+}
+
+// Whether the release section offers the publish control. Only a stored
+// episode can publish. A take that ended before it was stored shows a
+// no-audio line instead, and every state keeps Erase.
+export function canPublish(screen: { state: string; published: boolean }): boolean {
+	return !screen.published && screen.state === 'ready';
 }
 
 // The editor link for a live draft, or null for every other episode.

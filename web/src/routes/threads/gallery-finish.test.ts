@@ -124,6 +124,19 @@ describe('gallery pass after mark done', () => {
 		);
 		expect(pass).toEqual({ jobId: 'job-t', status: 'done', note: '', proposed: true });
 	});
+
+	it('names a failed analysis on a ready episode', () => {
+		const pass = galleryPass(
+			detail('ready', {
+				render_outcome: outcome('job-r', 'done'),
+				analysis_outcome: outcome('job-a', 'error', 'batch refused')
+			})
+		);
+		expect(pass?.jobId).toBe('job-a');
+		expect(pass?.note).toBe(
+			'The analysis pass failed: batch refused. The episode still ships without chapters.'
+		);
+	});
 });
 
 // Serve one episode whose detail walks through the given bodies, one per
@@ -223,6 +236,31 @@ describe('live gallery after mark done', () => {
 			return shown === READY || snap.rows[0]?.state === 'failed';
 		});
 		expect(wrong).toEqual([]);
+		controller.destroy();
+	}, 10000);
+
+	it('ends a rendering card on the stored ready state with the failed analysis named', async () => {
+		serveWalk([
+			detailBody('rendering', { render_outcome: outcome('job-r', 'done') }),
+			detailBody('ready', {
+				render_outcome: outcome('job-r', 'done'),
+				analysis_outcome: outcome('job-a', 'error', 'batch refused')
+			})
+		]);
+		const snaps: GallerySnapshot[] = [];
+		const controller = new GalleryController((snap) => snaps.push(structuredClone(snap)));
+		controller.mount('');
+		await vi.waitFor(() => expect(snaps.at(-1)?.rows[0]?.state).toBe('ready'), { timeout: 8000 });
+		await vi.waitFor(
+			() => {
+				const row = snaps.at(-1)?.rows[0];
+				expect(row?.state).toBe('ready');
+				expect(controller.cardFor(row?.jobId ?? '').detail).toContain(
+					'The analysis pass failed: batch refused.'
+				);
+			},
+			{ timeout: 8000 }
+		);
 		controller.destroy();
 	}, 10000);
 });

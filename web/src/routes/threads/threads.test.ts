@@ -7,6 +7,7 @@ import {
 	browserStore,
 	buildTone,
 	buildWords,
+	canPublish,
 	draftEditHref,
 	emptyScreen,
 	encodeWavBytes,
@@ -582,6 +583,89 @@ describe('release controls', () => {
 			});
 			expect(snaps.at(-1)?.published).toBe(false);
 			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+function stubMomentEpisode(state: string): void {
+	vi.stubGlobal(
+		'fetch',
+		vi.fn(async (input: RequestInfo | URL) => {
+			const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+			if (url.includes('/api/threads')) {
+				return Response.json({ name_threads: [], circled_topics: [] });
+			}
+			return Response.json({
+				episode: { id: 'e1', number: 1, title: 'First take', state, visibility: 'private' },
+				proposals: [],
+				words: [{ text: 'Hello', start: 0, end: 0.4 }],
+				audio_url: '',
+				render_audio_url: ''
+			});
+		})
+	);
+}
+
+async function mountMomentEpisode(search: string): Promise<ReturnType<typeof emptyScreen>> {
+	const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+	const controller = new EpisodeController('e1', (snap) => snaps.push(snap));
+	controller.mount(search);
+	try {
+		await vi.waitFor(() => {
+			expect(snaps.at(-1)?.ready).toBe(true);
+		});
+		return snaps.at(-1) ?? emptyScreen('e1');
+	} finally {
+		controller.destroy();
+	}
+}
+
+describe('quoted moments', () => {
+	it('treats a missing or empty moment as no moment', async () => {
+		stubMomentEpisode('ready');
+		try {
+			const missing = await mountMomentEpisode('');
+			expect(missing.momentWord).toBeNull();
+			expect(missing.momentQuote).toBeNull();
+			expect(missing.notice).not.toContain('Quoted moment');
+			const empty = await mountMomentEpisode('?w=');
+			expect(empty.momentWord).toBeNull();
+			expect(empty.notice).not.toContain('Quoted moment');
+			const numbered = await mountMomentEpisode('?w=12');
+			expect(numbered.momentWord).toBe(12);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('drops a moment that names no usable word offset', async () => {
+		stubMomentEpisode('ready');
+		try {
+			expect((await mountMomentEpisode('?w=words')).momentWord).toBeNull();
+			expect((await mountMomentEpisode('?w=-2')).momentWord).toBeNull();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('publish gate', () => {
+	it('offers publish only on a stored episode', () => {
+		expect(canPublish({ state: 'ready', published: false })).toBe(true);
+		expect(canPublish({ state: 'recording', published: false })).toBe(false);
+		expect(canPublish({ state: 'rendering', published: false })).toBe(false);
+		expect(canPublish({ state: 'ready', published: true })).toBe(false);
+	});
+
+	it('a take that ended before storage exposes no publish control', async () => {
+		stubMomentEpisode('recording');
+		try {
+			const snap = await mountMomentEpisode('');
+			expect(snap.state).toBe('recording');
+			expect(snap.audioUrl).toBe('');
+			expect(canPublish(snap)).toBe(false);
 		} finally {
 			vi.unstubAllGlobals();
 		}

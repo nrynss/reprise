@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import { pageTitle } from '$lib/shell';
 	import {
+		canPublish,
 		draftEditHref,
 		emptyScreen,
 		EpisodeController,
@@ -122,8 +123,10 @@
 					<p>Fixture link: https://reprise.nryn.dev/e/{snap.id}-fixture</p>
 				{/if}
 				<button onclick={() => controller?.publishState()}>Revoke link</button>
-			{:else}
+			{:else if canPublish(snap)}
 				<button onclick={() => controller?.publishState()}>Publish…</button>
+			{:else if snap.state === 'recording'}
+				<p>This take ended before it was stored. There is nothing to play or publish.</p>
 			{/if}
 			{#if snap.live}
 				{#if snap.state === 'ready'}
