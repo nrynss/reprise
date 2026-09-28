@@ -1159,7 +1159,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       internal/transcript/, internal/episode/, internal/store/migrations/, internal/store/store_test.go,
              internal/editorial/validate.go, internal/editorial/run.go, web/src/lib/editor/
-status:     in-progress:remediate-r1:t7.44-rem-r1
+status:     in-progress:review-r2:t7.44-rev-r2@655f95e2c121cd0510e8e6149bcc643b72dead20
 ```
 T7.41 round 1 recorded an out of scope H finding. Host words share
 the edit timeline with the guest. The `words` table has no speaker
