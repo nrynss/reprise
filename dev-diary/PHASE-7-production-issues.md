@@ -1159,7 +1159,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       internal/transcript/, internal/episode/, internal/store/migrations/, internal/store/store_test.go,
              internal/editorial/validate.go, internal/editorial/run.go, web/src/lib/editor/
-status:     in-progress:land:t7.44-rem-r1@655f95e2c121cd0510e8e6149bcc643b72dead20
+status:     done:2c11452
 ```
 T7.41 round 1 recorded an out of scope H finding. Host words share
 the edit timeline with the guest. The `words` table has no speaker
@@ -1233,6 +1233,15 @@ field on the wire fails that test.
 
 ### What exists now
 
+T7.44 landed at 2c11452 after round 2 APPROVE with zero residue.
+Round 1 had two H findings. The ledger pin ignored the new
+speaker migration and the editorial loader never read the
+speaker column. The landed pass expects the third migration and
+selects the column into the timeline. The tree matches reviewed
+commit 655f95e. Main had moved, so the landing rebased. The full
+Go race suite passed on the rebased commit. Host words keep
+their speaker from store to timeline. The detail endpoint still
+drops the speaker. T7.46 owns that.
 T7.45 landed at 1046053 after round 1 APPROVE with zero findings.
 Erase ends the provider socket through the shared end before the
 delete. A gone socket still deletes. The privacy diff matches
