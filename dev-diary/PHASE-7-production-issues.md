@@ -1135,7 +1135,7 @@ requires:   T7.36, T7.39
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/assemblyai/, internal/broker/
-status:     in-progress:land:t7.43-rem-r2@9daf9260c8b5739a74325c744e67a27739b44dfa
+status:     done:2a90f30
 ```
 T7.36 round 1 approved the client end. The same round recorded an
 out of scope H finding. A tab close whose `session.end` frame never
@@ -1208,6 +1208,14 @@ the delete. Calling `TerminateSession` again fails that test.
 
 ### What exists now
 
+T7.43 landed at 2a90f30 after round 3 APPROVE with zero residue.
+Round 2 had one C finding. A sweep that settled and then failed
+to end never tried the end again, so the socket stayed billable.
+The landed pass marks a failed end pending and retries it on the
+next sweep without settling twice. The broker diff matches
+reviewed commit 9daf926. Main had moved, so the landing rebased.
+Race tests on both packages passed on the rebased commit. Erase
+still deletes without the end. T7.45 owns that.
 T7.41 landed at b19efd5 after round 3 APPROVE with zero residue.
 Round 2 had three H findings. A partial timeline parse failed the
 job while reconcile was still writing, a terminal reconcile in
