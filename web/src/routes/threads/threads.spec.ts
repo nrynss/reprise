@@ -239,7 +239,7 @@ test('the gallery lists episodes newest first with states', async ({ page }) => 
 	const titles = await list.getByRole('heading', { level: 2 }).allTextContents();
 	expect(titles[0]).toBe('The only place nobody needs anything');
 	expect(titles[titles.length - 1]).toBe('The garden was ours first');
-	await expect(page.getByText('Working · rendering', { exact: false })).toBeVisible({ timeout: 10_000 });
+	await expect(page.getByText('Rendering… 75%')).toBeVisible({ timeout: 10_000 });
 });
 
 test('the episode transcript seeks on word click', async ({ page }) => {
