@@ -424,7 +424,7 @@ requires:   T8.4, T8.11, T8.13, T8.14, T8.15
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/identity/status.go, internal/identity/status_test.go
-status:     not-started
+status:     in-progress:implement:t8.12-impl
 ```
 T8.6 round 1 proved the account page trusts `localStorage` alone: a seeded
 store renders a signed-in screen with zero API calls, desynced from the
