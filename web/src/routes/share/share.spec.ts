@@ -94,7 +94,7 @@ test('the privacy page states kept, deleted, and soft deletion', async ({ page }
 	await expect(page.getByRole('heading', { name: 'What Reprise keeps, and for how long' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Private by default' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'What erasing removes' })).toBeVisible();
-	await expect(page.getByText('the speech provider deletes softly')).toBeVisible();
+	await expect(page.getByText('backups can hold a copy for a time')).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Guest recordings' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Sessions end explicitly' })).toBeVisible();
 });
