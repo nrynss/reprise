@@ -26,6 +26,7 @@ interface LiveRow {
 	title: string;
 	state: string;
 	visibility: string;
+	cover_path?: string;
 }
 
 function seasonBody(rows: LiveRow[]): string {
@@ -275,6 +276,37 @@ test('the episode shows its cover, a bare release row, and erases to the gallery
 	await page.getByRole('button', { name: 'Confirm erase' }).click();
 	await expect(page).toHaveURL(/\/\?fixture=1&erased=1/);
 	await expect(page.getByText('Episode erased.')).toBeVisible();
+});
+
+test('a live episode shows its cover image and falls back to the tile', async ({ page }) => {
+	await stubEpisodeApi(
+		page,
+		[
+			{
+				id: 'e9',
+				number: 9,
+				title: 'Ninth real',
+				state: 'ready',
+				visibility: 'private',
+				cover_path: '/api/episodes/e9/cover'
+			},
+			{ id: 'e10', number: 10, title: 'Tenth real', state: 'ready', visibility: 'private' }
+		],
+		{ e9: { outcome: null }, e10: { outcome: null } }
+	);
+	await page.goto('/episode/e9');
+	await expect(page.getByRole('heading', { name: 'Ninth real' })).toBeVisible();
+	const cover = page.locator('img.cover');
+	await expect(cover).toBeVisible();
+	await expect(cover).toHaveAttribute('src', '/api/episodes/e9/cover');
+	await expect(cover).toHaveAttribute('alt', 'Cover of episode 9');
+	await expect(page.locator('.cover.tile')).toHaveCount(0);
+
+	await page.goto('/episode/e10');
+	await expect(page.getByRole('heading', { name: 'Tenth real' })).toBeVisible();
+	await expect(page.locator('.cover.tile')).toBeVisible();
+	await expect(page.locator('.cover.tile')).toContainText('EP.10');
+	await expect(page.locator('img.cover')).toHaveCount(0);
 });
 
 test('a live episode walks its release controls against the routes', async ({ page }) => {

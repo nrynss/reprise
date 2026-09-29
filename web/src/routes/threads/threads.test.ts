@@ -252,6 +252,45 @@ describe('live season', () => {
 		expect(season[0]?.title).toBe('Third');
 	});
 
+	it('carries the cover path from the list and the detail', async () => {
+		const { liveRow, parseEpisodeDetail, parseSeasonList } = await import('./threads');
+		const season = parseSeasonList(
+			JSON.stringify({
+				episodes: [
+					{
+						id: 'e9',
+						number: 9,
+						title: 'Ninth',
+						state: 'ready',
+						visibility: 'private',
+						cover_path: '/api/episodes/e9/cover'
+					},
+					{ id: 'e10', number: 10, title: 'Tenth', state: 'ready', visibility: 'private' }
+				]
+			})
+		);
+		expect(season.find((episode) => episode.id === 'e9')?.coverPath).toBe(
+			'/api/episodes/e9/cover'
+		);
+		expect(season.find((episode) => episode.id === 'e10')?.coverPath).toBe('');
+		const detail = parseEpisodeDetail(
+			JSON.stringify({
+				episode: {
+					id: 'e9',
+					number: 9,
+					title: 'Ninth',
+					state: 'ready',
+					visibility: 'private',
+					cover_path: '/api/episodes/e9/cover'
+				},
+				proposals: []
+			})
+		);
+		expect(detail.episode.coverPath).toBe('/api/episodes/e9/cover');
+		expect(liveRow(detail.episode, '').coverPath).toBe('/api/episodes/e9/cover');
+		expect(liveRow({ ...detail.episode, coverPath: '' }, '').coverPath).toBe('');
+	});
+
 	it('rejects a body with no episode list', async () => {
 		const { parseSeasonList } = await import('./threads');
 		expect(() => parseSeasonList('{}')).toThrow();
