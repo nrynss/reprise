@@ -119,9 +119,8 @@ test('confirm opens processing before a throttled upload finishes', async ({ pag
 	await expect(page.getByRole('link', { name: 'Back to the gallery', exact: true })).toBeVisible();
 	await expect(page.getByText('Uploading the take.')).toBeVisible();
 	await expect(page.getByText('Both stems durable')).toHaveCount(0);
-	await expect(page.getByText('done: Transcript ready.', { exact: true })).toBeVisible({ timeout: 15_000 });
-	await expect(page.getByText('done: Proposals ready.', { exact: true })).toBeVisible();
-	await expect(page.getByText('done: The draft is ready.', { exact: true })).toBeVisible();
+	await expect(page.getByText('Your draft is ready.', { exact: true })).toBeVisible({ timeout: 15_000 });
+	await expect(page.getByText('Ready', { exact: true })).toHaveCount(4);
 	await expect(page.getByRole('link', { name: 'Open the episode', exact: true })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Back to the gallery', exact: true })).toBeVisible();
 });
@@ -202,7 +201,8 @@ test('a reload during the upload posts the resumed stem pair', async ({ page }) 
 	expect(body['host_media_id']).toBe(ids.hostId);
 	expect(body['user_sample_rate']).toBe(Math.round(ids.rate));
 	expect(body['host_sample_rate']).toBe(24000);
-	await expect(page.getByText('done: The draft is ready.', { exact: true })).toBeVisible({ timeout: 15_000 });
+	await expect(page.getByText('Your draft is ready.', { exact: true })).toBeVisible({ timeout: 15_000 });
+	await expect(page.getByText('Ready', { exact: true })).toHaveCount(4);
 	await expect(page.getByText('waiting:')).toHaveCount(0);
 	await expect(page.getByRole('link', { name: 'Open the episode', exact: true })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Back to the gallery', exact: true })).toBeVisible();

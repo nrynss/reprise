@@ -318,9 +318,8 @@ test('leaving the page sends the close message exactly once', async ({ page }) =
 
 test('processing draws scripted jobs through the shared follower', async ({ page }) => {
 	await page.goto('/processing?episode=e1&transcript=t1&editorial=e1&mock=1&uploads=done&userBytes=10&hostBytes=20');
-	await expect(page.getByText('done: Transcript ready.', { exact: true })).toBeVisible();
-	await expect(page.getByText('done: Proposals ready.', { exact: true })).toBeVisible();
-	await expect(page.getByText('done: The draft is ready.', { exact: true })).toBeVisible();
+	await expect(page.getByText('Your draft is ready.', { exact: true })).toBeVisible();
+	await expect(page.getByText('Ready', { exact: true })).toHaveCount(4);
 	const steps = await page.evaluate(() => {
 		const target = window as unknown as {
 			__processing: { steps(): Array<{ state: string }> };
