@@ -286,7 +286,7 @@ size:       S · mid
 owns:       cmd/reprise/privacy.go, internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go,
              web/src/routes/account/+page.svelte, web/src/routes/account/account.spec.ts
-status:     not-started
+status:     in-progress:implement:t8.14-impl
 ```
 T8.7 ships deletion behind an unmounted handler and an unregistered job
 kind: the route 404s and a restart drops a running deletion. The account
