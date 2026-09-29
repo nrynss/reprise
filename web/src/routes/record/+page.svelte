@@ -82,35 +82,26 @@
 <main>
 	<GalleryLink />
 	<h1>{snap.phase === 'live' ? 'On air' : 'Record'}</h1>
-	<p role="status">{snap.notice}</p>
+	<p class="sub" role="status">{snap.notice}</p>
 
 	{#if snap.phase === 'preflight' || snap.phase === 'starting'}
-		<section aria-label="Session checks">
-			<h2>Before you start</h2>
-			<ul>
-				<li>Microphone: granted when you press start.</li>
-				<li>Connection: opens with the session request.</li>
-				<li>
-					Memory: {snap.greeting.length > 0
-						? snap.greeting
-						: 'the host greets you once the session opens.'}
-				</li>
-			</ul>
+		<div class="actions start-wrap">
 			<button
 				id="record-start"
+				class="button start-big"
 				disabled={activeController === null || snap.phase !== 'preflight'}
 				onclick={() => void activeController?.start()}
 				aria-label="Start session"
 			>
 				{snap.phase === 'starting' ? 'Opening…' : 'Start session'}
 			</button>
-		</section>
+		</div>
 	{/if}
 
 	{#if snap.phase === 'live' || snap.phase === 'ending'}
-		<section aria-label="Live session">
+		<section class="section" aria-label="Live session">
 			<h2>Live session</h2>
-			<p aria-label="Elapsed time">{snap.elapsed}</p>
+			<p class="clock" aria-label="Elapsed time">{snap.elapsed}</p>
 			<p
 				aria-label="Input level"
 				aria-valuenow={Math.round(snap.levelDb)}
@@ -120,59 +111,70 @@
 			>
 				Input level {Math.round(snap.levelDb)} dB
 			</p>
-			{#if snap.greeting.length > 0}
-				<blockquote>{snap.greeting}</blockquote>
-			{/if}
-			<ol aria-label="Conversation" aria-live="polite">
-				{#each snap.turns as turn, index (index)}
-					<li><strong>{turn.role === 'host' ? 'Host' : 'You'}:</strong> {turn.text}</li>
-				{/each}
-			</ol>
+			<div class="actions">
+				<button
+					id="record-end"
+					disabled={snap.phase !== 'live'}
+					aria-label={snap.armed ? 'Confirm end session' : 'End session'}
+				>
+					{snap.armed ? 'Confirm end session' : 'End session'}
+				</button>
+				{#if snap.armed && snap.phase === 'live'}
+					<button
+						id="record-end-cancel"
+						class="button secondary"
+						type="button"
+						aria-label="Cancel end">Cancel</button
+					>
+				{/if}
+			</div>
 			{#if snap.capWarning && snap.phase === 'live'}
 				<div role="alert">
 					<p>{snap.capText}</p>
 					<button id="record-end-now" aria-label="End session now">End session now</button>
 				</div>
 			{/if}
-			<button
-				id="record-end"
-				disabled={snap.phase !== 'live'}
-				aria-label={snap.armed ? 'Confirm end session' : 'End session'}
-			>
-				{snap.armed ? 'Confirm end session' : 'End session'}
-			</button>
-			{#if snap.armed && snap.phase === 'live'}
-				<button id="record-end-cancel" type="button" aria-label="Cancel end">Cancel</button>
+			{#if snap.greeting.length > 0}
+				<blockquote>{snap.greeting}</blockquote>
 			{/if}
+			<ol class="turns" aria-label="Conversation" aria-live="polite">
+				{#each snap.turns as turn, index (index)}
+					<li><strong>{turn.role === 'host' ? 'Host' : 'You'}:</strong> {turn.text}</li>
+				{/each}
+			</ol>
 		</section>
 	{/if}
 
 	{#if snap.phase === 'ending' && snap.completionFailed}
-		<section aria-label="Draft move retry">
+		<section class="section" aria-label="Draft move retry">
 			<h2>Draft move retry</h2>
-			<button id="record-retry" aria-label="Retry draft move">Retry draft move</button>
+			<div class="actions">
+				<button id="record-retry" aria-label="Retry draft move">Retry draft move</button>
+			</div>
 		</section>
 	{/if}
 
 	{#if snap.phase === 'recovering'}
-		<section aria-label="Recovered upload">
+		<section class="section" aria-label="Recovered upload">
 			<h2>Recovered upload</h2>
 		</section>
 	{/if}
 
 	{#if completionVisible}
-		<section aria-label="Draft move">
+		<section class="section" aria-label="Draft move">
 			<h2>Draft move</h2>
 			{#if completionFailed}
 				<div role="alert">
 					<p>{completionText}</p>
-					<button
-						id="stems-retry"
-						disabled={!retryReady}
-						aria-label="Retry draft move"
-					>
-						Retry draft move
-					</button>
+					<div class="actions">
+						<button
+							id="stems-retry"
+							disabled={!retryReady}
+							aria-label="Retry draft move"
+						>
+							Retry draft move
+						</button>
+					</div>
 				</div>
 			{:else}
 				<p role="status">{completionText}</p>
@@ -182,14 +184,40 @@
 </main>
 
 <style>
-	main {
-		max-width: 40rem;
-		margin: 0 auto;
-		padding: 4rem 1.5rem;
-		font-family: system-ui, sans-serif;
+	/* The one large start control. The shared primary pill carries the
+	shape, and this size makes it the clear next move. The wrap centres
+	it, and the shared actions group stacks it full width on a phone. */
+	.start-wrap {
+		justify-content: center;
+		margin-block: 2.5rem;
+	}
+	.start-big {
+		font-size: 1.25rem;
+		padding: 1rem 2.75rem;
+		min-height: 3.5rem;
+	}
+	/* The live clock. Large tabular figures hold still as they tick,
+	so the time reads at a glance in the hand. */
+	.clock {
+		font-size: clamp(2.5rem, 2rem + 8vw, 4rem);
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
+		line-height: 1.1;
+		margin: 0 0 0.5rem;
+		max-width: none;
+	}
+	.turns {
+		list-style: none;
+		padding: 0;
+		margin: 1.5rem 0 0;
+	}
+	.turns li {
+		max-width: 65ch;
+		margin-block: 0.5rem;
 	}
 	blockquote {
 		border-left: 2px solid currentColor;
 		padding-left: 1rem;
+		max-width: 65ch;
 	}
 </style>

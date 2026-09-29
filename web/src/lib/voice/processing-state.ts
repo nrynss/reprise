@@ -77,8 +77,45 @@ export const TRANSCRIBING_DETAIL = 'Transcribing your take.';
 
 // The line a watched pass shows when its live progress stops. The last
 // shown step still stands, so the screen keeps it.
-export const PROGRESS_STOPPED_DETAIL =
-	'Progress stopped updating. The last shown step still stands.';
+export const PROGRESS_STOPPED_DETAIL = "Couldn't update. Try again.";
+
+// The sub line above the processing steps. It says what the moment
+// needs and nothing else.
+export const PROCESSING_SUB = "We're getting your draft ready.";
+
+// The overall line once every step has finished.
+export const PROCESSING_READY_NOTICE = 'Your draft is ready.';
+
+// Status words for the four processing rows. Each row shows one of
+// these, so the state reads at a glance without opening any row.
+export const UPLOADING_STATUS = 'Uploading…';
+export const TRANSCRIBING_STATUS = 'Transcribing…';
+export const WRITING_STATUS = 'Writing your draft…';
+export const READY_STATUS = 'Ready';
+export const WAITING_STATUS = 'Waiting';
+export const STOPPED_STATUS = 'Stopped';
+
+// showsDetail says whether a processing row shows its detail line. A
+// row shows detail only when the detail carries more than the status
+// word. The upload carries its total, and a failed row carries the
+// error sentence. Every other row rests on its status word.
+export function showsDetail(step: ProcessingStep): boolean {
+	if (step.state === 'failed') return true;
+	if (step.name !== 'Upload') return false;
+	return step.state === 'running' || step.state === 'done';
+}
+// statusWord reads the one word a processing row shows. A finished row
+// reads Ready and a failed row reads Stopped. A running row names its
+// own work, so the upload, the transcription and the writing each read
+// differently while they run.
+export function statusWord(step: ProcessingStep): string {
+	if (step.state === 'done') return READY_STATUS;
+	if (step.state === 'failed') return STOPPED_STATUS;
+	if (step.state === 'waiting') return WAITING_STATUS;
+	if (step.name === 'Upload') return UPLOADING_STATUS;
+	if (step.name === 'Transcription') return TRANSCRIBING_STATUS;
+	return WRITING_STATUS;
+}
 
 let pendingHandoff: ProcessingHandoff | null = null;
 
@@ -102,7 +139,7 @@ function idleStep(name: string, detail: string): ProcessingStep {
 export function emptyProcessing(): ProcessingSnapshot {
 	return {
 		episode: '',
-		upload: idleStep('Upload', 'Waiting for the take.'),
+		upload: idleStep('Upload', 'Waiting.'),
 		transcription: idleStep('Transcription', 'Waiting.'),
 		editorial: idleStep('Editorial pass', 'Waiting.'),
 		draft: idleStep('Draft', 'Waiting.')
@@ -411,7 +448,7 @@ export class ProcessingController {
 					this.snapshot.upload = {
 						name: 'Upload',
 						state: 'done',
-						detail: 'The stems are stored.',
+						detail: 'Saved.',
 						percent: 100
 					};
 				}
@@ -481,7 +518,7 @@ export class ProcessingController {
 		this.snapshot.upload = {
 			...this.snapshot.upload,
 			state: 'running',
-			detail: 'Completing the persisted upload.',
+			detail: UPLOADING_STATUS,
 			percent: 0
 		};
 		this.emit();
@@ -524,7 +561,7 @@ export class ProcessingController {
 				this.snapshot.upload = {
 					...this.snapshot.upload,
 					state: 'waiting',
-					detail: 'No persisted upload waits.',
+					detail: 'Nothing to upload yet.',
 					percent: 0
 				};
 				this.emit();

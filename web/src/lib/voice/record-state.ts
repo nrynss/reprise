@@ -120,10 +120,39 @@ const TONE_SECONDS = 2;
 // its progress. A short upload still finishes here first.
 const UPLOAD_HANDOFF_MS = 250;
 
+// The line the record page shows before the take opens. It says where
+// to stand and what to press, and nothing else.
+export const RECORD_READY_NOTICE = "Find a quiet spot. When you're ready, press Start.";
+
+// The line shown while the take opens.
+export const RECORD_OPENING_NOTICE = 'Opening the session.';
+
+// The line shown while the take runs.
+export const RECORD_LIVE_NOTICE = 'On air. The host hears you.';
+
+// The fallback line when the take will not open and the throw names
+// nothing the page can repeat. Named throws still surface as they are,
+// so the refused call stays visible.
+export const RECORD_OPEN_FAILED_NOTICE = 'The session did not open.';
+
+// The line shown after the first End press freezes the take.
+export const RECORD_PAUSED_NOTICE = 'Paused. End this take? Cancel resumes it.';
+
+// The line shown while the take ends.
+export const RECORD_ENDING_NOTICE = 'Ending the session.';
+
+// The line shown when the microphone will not open.
+export const RECORD_MIC_FAILED_NOTICE = "Couldn't open the microphone. Try again.";
+
+// The line shown when the host side reports an error mid-take. The take
+// keeps running, so the line says to keep talking instead of repeating
+// the provider detail.
+export const RECORD_HOST_ERROR_NOTICE = 'The host cut out. Keep talking.';
+
 // emptySnapshot gives the page an initial render with no session behind it.
 export const emptySnapshot: RecordSnapshot = {
 	phase: 'preflight',
-	notice: 'Check the microphone, then start the take.',
+	notice: RECORD_READY_NOTICE,
 	turns: [],
 	levelDb: -100,
 	elapsed: '0:00',
@@ -343,7 +372,7 @@ export class RecordController {
 	async start(): Promise<void> {
 		if (this.phase !== 'preflight') return;
 		this.phase = 'starting';
-		this.notice = 'Opening the session.';
+		this.notice = RECORD_OPENING_NOTICE;
 		this.uploadFailure = null;
 		this.pendingEnd = null;
 		this.pendingProviderId = '';
@@ -363,7 +392,7 @@ export class RecordController {
 			this.takeStart = this.context?.currentTime ?? 0;
 			this.armStemClock();
 			this.phase = 'live';
-			this.notice = 'On air. The host hears you.';
+			this.notice = RECORD_LIVE_NOTICE;
 			this.startCap();
 			this.emit();
 			this.timer = window.setInterval(() => {
@@ -387,7 +416,7 @@ export class RecordController {
 			this.stemOrigin = 0;
 			this.abandonCapture();
 			this.phase = 'preflight';
-			this.notice = error instanceof Error ? error.message : 'The session did not open.';
+			this.notice = error instanceof Error ? error.message : RECORD_OPEN_FAILED_NOTICE;
 			this.emit();
 		}
 	}
@@ -402,7 +431,7 @@ export class RecordController {
 			// still bills. The cap timer keeps running.
 			if (this.context !== null) this.pausedSince = this.context.currentTime;
 			this.flushHostStem();
-			this.notice = 'Paused. End this take? Cancel resumes it.';
+			this.notice = RECORD_PAUSED_NOTICE;
 			this.emit();
 			return;
 		}
@@ -417,7 +446,7 @@ export class RecordController {
 		}
 		this.pausedSince = null;
 		this.armed = false;
-		this.notice = 'On air. The host hears you.';
+		this.notice = RECORD_LIVE_NOTICE;
 		this.emit();
 	}
 
@@ -433,7 +462,7 @@ export class RecordController {
 		this.phase = 'ending';
 		this.armed = false;
 		this.pausedSince = null;
-		this.notice = 'Ending the session.';
+		this.notice = RECORD_ENDING_NOTICE;
 		this.emit();
 		const voice = this.voice;
 		const session = this.session;
@@ -507,7 +536,7 @@ export class RecordController {
 					hostBytes
 				};
 				this.completionPosted = false;
-				this.failTake(`${this.uploadFailure} Your stems stay stored. Press retry.`);
+				this.failTake(`${this.uploadFailure} Try again.`);
 				return;
 			}
 			this.guard?.close();
@@ -608,7 +637,7 @@ export class RecordController {
 	// so the start control remains the retry and no half take records.
 	private requireUploadsOpen(): void {
 		const failure = describeUploadFailure(this.userUpload, this.hostUpload);
-		if (failure !== null) throw new Error(`${failure} Press start to try again.`);
+		if (failure !== null) throw new Error(`${failure} Press Start to try again.`);
 	}
 
 	// failTake freezes the take on a loud named failure. The clock stops, the
@@ -647,7 +676,7 @@ export class RecordController {
 	): Promise<{ userBytes: number; hostBytes: number; transcriptJob: string }> {
 		await finishing;
 		const failure = describeUploadFailure(this.userUpload, this.hostUpload);
-		if (failure !== null) throw new Error(`${failure} The stems stay stored.`);
+		if (failure !== null) throw new Error(`${failure} Try again.`);
 		const userBytes = this.userUpload?.receipt?.sizeBytes ?? 0;
 		const hostBytes = this.hostUpload?.receipt?.sizeBytes ?? 0;
 		const episode = this.session?.episode_id ?? '';
@@ -852,7 +881,7 @@ export class RecordController {
 		if (context === null || recorder === null || recorder.state !== 'recording') {
 			const reason = recorder?.error;
 			if (reason instanceof Error) throw reason;
-			throw new Error('The microphone did not open.');
+			throw new Error(RECORD_MIC_FAILED_NOTICE);
 		}
 		this.player = new PcmStreamPlayer({ context, streamRate: 24000 });
 		await this.openUploads();
@@ -981,8 +1010,8 @@ export class RecordController {
 			onProviderId: (id) => {
 				void this.reportProviderId(id);
 			},
-			onSessionError: (detail) => {
-				this.notice = `The host reported an error (${detail.code}). ${detail.message}`;
+			onSessionError: () => {
+				this.notice = RECORD_HOST_ERROR_NOTICE;
 				this.emit();
 			}
 		});
