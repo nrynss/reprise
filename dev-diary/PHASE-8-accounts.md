@@ -251,7 +251,7 @@ fixture-ok: yes
 size:       L · frontier
 owns:       internal/identity/google.go, internal/identity/google_test.go,
              web/src/routes/account/google/
-status:     in-progress:implement:t8.8-impl
+status:     in-progress:review-r1:t8.8-rev-r1@38ba0c3ad89f10a0c6e6769d039719d6ce277282
 ```
 The authorization code flow in `future-auth-plan.md`: state, nonce and PKCE. The callback validates
 issuer, audience, expiry, nonce, signature and `sub`. The identity key is `google:<sub>`, never the
@@ -304,6 +304,31 @@ page still holds its entry inert.
 route, survives a restart mid-deletion, and the account page links the
 delete screen. The gate passes in a fresh worktree.
 
+### T8.15: Google wiring
+```yaml
+requires:   T8.8, T8.14
+fixture-ok: yes
+size:       S · mid
+owns:       internal/api/routes.go, internal/api/routes_test.go,
+             cmd/reprise/main.go, cmd/reprise/main_test.go,
+             web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts,
+             web/package.json
+status:     not-started
+```
+T8.8 ships the Google handler unmounted: both API paths 404 and the
+google spec runs outside the e2e chain.
+
+* Mount `GET /api/login/google/start` and `GET /api/login/google/callback`
+  in the route table and the boot, configured from the Google settings
+  (empty client id leaves the start refusing plainly, never crashing).
+  Update the golden and the browser mirror if they list routes
+  individually.
+* Append the google Playwright config to the `test:e2e` chain.
+
+**Done when:** A booted binary answers the start with a provider redirect
+and the callback refuses a bad state. The google spec passes through the
+chain on Chromium. The gate passes in a fresh worktree.
+
 ### T8.13: Operator wiring
 ```yaml
 requires:   T8.9, T8.11
@@ -331,7 +356,7 @@ worktree.
 
 ### T8.10b: Live sign-in and operator run ★
 ```yaml
-requires:   T8.7, T8.8, T8.9
+requires:   T8.7, T8.8, T8.9, T8.14, T8.15
 fixture-ok: no
 size:       S · frontier
 owns:       dev-diary/probes/accounts-live.md
@@ -387,7 +412,7 @@ golden test fails on the added entry until they carry it.
 
 ### T8.12: Session-status route
 ```yaml
-requires:   T8.4, T8.11, T8.13, T8.14
+requires:   T8.4, T8.11, T8.13, T8.14, T8.15
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/identity/status.go, internal/identity/status_test.go
