@@ -175,7 +175,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:land:t9.6-rem-r1@97b71cee7a731dcf8b1fcc0b5440b5680cdf00c6
+status:     done:78ec2ca
 ```
 * The `.wide` column above 1280px. The transcript is left-aligned, never justified, at `65ch`.
 * The player controls and the proposal actions use the shared button kinds at one height.
@@ -267,6 +267,13 @@ The gate passes in a fresh worktree three times in a row, because the gate grew.
 
 ### What exists now
 
+T9.6 landed at 78ec2ca after round 2 APPROVE with zero residue.
+The editor rides the wide column with a flat proposal list, shared
+buttons, and plain-words notices. Round 1 had 11 H stale-pin
+findings on specs pinning the old wording; owns widened to those
+three spec files by decision and the remediation updated the
+assertions with no product change. Reviewed commits e395fed and
+97b71ce rebased clean. Unit pins pass on the landed commit.
 T9.1 landed at fe79d31 after round 1 APPROVE with zero findings.
 The owner cover route, cover paths on list and detail, the display
 name account routes, and the share author all ride the wire with
