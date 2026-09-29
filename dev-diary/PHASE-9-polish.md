@@ -213,7 +213,7 @@ requires:   T9.5
 fixture-ok: yes
 size:       XS · mid
 owns:       web/src/routes/threads/+page.svelte, web/src/routes/threads/threads.ts
-status:     in-progress:implement:t9.7-impl
+status:     in-progress:land:t9.7-impl@5e13fd3f556a90253f85bb9e93b112fe5717a973
 ```
 * Flat sections. Each thread is one card, and its quotes are a plain list inside it, not cards
   within a card.
