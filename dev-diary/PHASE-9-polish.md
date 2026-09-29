@@ -153,6 +153,13 @@ status:     in-progress:review-r1:t9.4-rev-r1@69f85387c6e5c2118a0fc8a9ad5aface51
 **Done when:** The layout checks pass, a spec finds equal card heights and a cover image on a card with a
 cover, and the gate passes in a fresh worktree.
 
+**Decision, 2026-09-30.** Owns widened to
+`web/src/routes/threads/threads.spec.ts`, which pins the old `Working`
+card rendering at line 242. Round 1 returned 1 H stale-pin finding:
+the plain progress line replaces that rendering by design, same
+pattern as T7.82, T9.3 and T9.6. The remediation updates the assert
+with no product change.
+
 ### T9.5: Episode page
 ```yaml
 requires:   T9.4
@@ -221,7 +228,7 @@ requires:   T9.1, T9.2
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/account/, web/src/routes/share/, web/src/routes/welcome/
-status:     in-progress:review-r1:t9.8-rev-r1@8620d0b372ff67cdf73f398fb97423e3ef382df5
+status:     in-progress:land:t9.8-rem-r1@b26bc0709a0263da057a222b3e40fb9e75e04f2f
 ```
 * **Account and delete pages.** Use the shared shell and buttons, with a signed-in "Name on shared
   episodes" field saving through `PUT /api/account/name`. The copy follows `voice.md`.
@@ -237,6 +244,13 @@ status:     in-progress:review-r1:t9.8-rev-r1@8620d0b372ff67cdf73f398fb97423e3ef
 
 **Done when:** The layout checks pass on all three routes. Specs cover "by {author}", no author line
 when unset, and a footer link to `/` with no "private" or "public". The gate passes in a fresh worktree.
+
+**Decision, 2026-09-29.** Owns widened to one line in
+`web/src/lib/api/types.ts`: the `HttpMethod` union, which omits `PUT`
+while the route table lists `PUT /api/account/name`. Round 1 proved
+the failure predates this task (file byte-identical to base, fails
+svelte-check there too) and belongs to T9.1's file. The remediation
+adds `PUT` to the union with no runtime change, so the gate can pass.
 
 ---
 
