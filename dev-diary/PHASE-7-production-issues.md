@@ -2666,6 +2666,37 @@ is kept." No test pins them either way.
 **Done when:** The extended copy gate fails when either line is restored to its
 build vocabulary. The gate passes in a fresh worktree.
 
+### T7.84: A deploy reaches every open browser: cache headers on the app
+```yaml
+requires:   T7.83
+fixture-ok: yes
+size:       XS · mid
+owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
+status:     not-started
+```
+**Defect.** On 2026-09-29 at 16:55 UTC, the owner's processing screen still read "Following the
+job." That string left the code with T7.81, which was in the build deployed at 16:12, whose code
+reads "Transcribing your take." So the browser ran an older app. `appHandler` in
+`cmd/reprise/main.go` wraps `http.FileServer` and sets no `Cache-Control` on anything. The HTML
+shell answers with only `Last-Modified`, so a browser may reuse it by heuristic and keep loading
+the old hashed bundles after a deploy. The hashed bundles under `/_app/immutable/` answer
+`cache-control: max-age=14400`. That is Cloudflare's default browser TTL, filled in because the
+origin sends none, although those files never change under one name.
+
+**Change.** In `appHandler`, before serving:
+* A path under `/_app/immutable/` gets `Cache-Control: public, max-age=31536000, immutable`.
+* Every HTML response gets `Cache-Control: no-cache`. That covers `/`, `/index.html`, any
+  `.html` file and the `fallback.html` single-page fallback. A browser then revalidates on each
+  visit and picks up a new build at once.
+* Everything else in the build, such as `favicon.svg` and `/_app/version.json`, gets
+  `Cache-Control: no-cache` as well.
+
+**Tests** in `main_test.go`: against a temporary web directory, `/` and an unknown client route
+(the fallback) answer `no-cache`, and `/_app/immutable/x.js` answers `max-age=31536000, immutable`.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. After the next deploy, a
+`curl -D -` from a workstation shows both headers on the live site. Record it in the handoff.
+
 ---
 
 ## Exit criteria

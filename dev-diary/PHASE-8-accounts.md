@@ -526,7 +526,7 @@ fails it.
 
 ### T8.19: A display name for shared episodes
 ```yaml
-requires:   T8.16, T8.17
+requires:   T8.16, T8.17, T7.84
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/migrations/0003_display_name.sql, internal/identity/profile.go,
