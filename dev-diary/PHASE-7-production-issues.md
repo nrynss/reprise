@@ -2697,6 +2697,49 @@ origin sends none, although those files never change under one name.
 **Done when:** The tests pass, and the gate passes in a fresh worktree. After the next deploy, a
 `curl -D -` from a workstation shows both headers on the live site. Record it in the handoff.
 
+### T7.85: The owner sees the cover, and publishing shows just the link
+```yaml
+requires:   T7.84
+fixture-ok: yes
+size:       M · mid
+owns:       internal/api/episodes.go, internal/api/playback_test.go, internal/api/routes.go,
+             internal/api/routes_test.go, web/src/lib/api/types.ts, web/src/lib/api/testdata/routes.json,
+             cmd/reprise/privacy.go, cmd/reprise/main.go, cmd/reprise/main_test.go,
+             web/src/routes/episode/[id]/+page.svelte, web/src/routes/threads/threads.ts,
+             web/src/routes/threads/threads.test.ts, web/src/routes/+page.svelte
+status:     not-started
+```
+**Defect.** On 2026-09-29 the owner published episode 12. The cover appeared only on the public page.
+The episode page showed the eyebrow "EP.12 · ready · public", a separate "Public" line, and the
+notice "Public at /share/…. Full address https://…. Only the finished audio opens behind it." The
+owner asked for the image and the link, nothing more.
+
+The cover is served only behind a share token: `GET /api/share/{token}/cover`, mounted in
+`cmd/reprise/privacy.go`. The episode detail carries no cover address, so neither the episode page
+nor the gallery card can show one. The notice is built in `threads.ts`, in the publish path.
+
+**Change.**
+1. Add `GET /api/episodes/{id}/cover` for the owner only. Reuse the ownership check the detail uses.
+   Serve the stored cover PNG with `Cache-Control: private, no-cache`. A missing cover answers 404,
+   and so does a foreign episode.
+2. Add `cover_path` to the episode detail. It is `/api/episodes/{id}/cover` when a cover is stored,
+   and empty otherwise. Add the route to the table and the browser mirror.
+3. **Episode page.** Show the cover at the top, as the share page does. Drop the eyebrow's state
+   and visibility words, keeping only "EP.12". Drop the "Public" and "Private" line. When the
+   episode is published, show one row with the full link, Copy link and Revoke. Show no notice on
+   publish, because the row appears. When unpublished, show Publish only.
+4. **Gallery.** A card whose episode has a cover shows it in place of the "EP.12" tile.
+
+**Tests.**
+* `playback_test.go`: the detail carries `cover_path` when a cover exists, and empty when none. The
+  cover route answers 200 with `image/png` to the owner, and 404 to another user and to an episode
+  with no cover.
+* `threads.test.ts`: publishing sets the link row and leaves no notice text. No live notice contains
+  "Only the finished audio".
+* A spec checks that the episode page shows an `img` whose `src` is the cover path.
+
+**Done when:** The tests pass in Chromium and Firefox, and the gate passes in a fresh worktree.
+
 ---
 
 ## Exit criteria
