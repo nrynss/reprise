@@ -2576,7 +2576,7 @@ owns:       web/src/routes/episode/[id]/+page.svelte, web/src/lib/components/Sea
              web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts,
              web/src/lib/copy.test.ts
-status:     in-progress:implement:t7.81-impl
+status:     in-progress:review-r1:t7.81-rev-r1@c76afa9d95ec0256247dbcf85e7545e0602dd4f5
 ```
 **Defect 1.** On 2026-09-29 the owner saw "Threads" and "Edit" as bare links on the episode page.
 T7.77 styled only the Gallery and Threads pages and the back link. In the `<nav aria-label="Season">`
