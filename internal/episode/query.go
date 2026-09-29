@@ -70,3 +70,27 @@ func (s *Service) Get(ctx context.Context, ownerID, episodeID string) (Episode, 
 	}
 	return ep, nil
 }
+
+// ShareToken returns the stored share token for one episode the owner
+// holds while that episode is public. A private episode, an unknown id,
+// and a foreign id all answer empty with no error, so the detail never
+// invents a link and never confirms that a private episode exists.
+func (s *Service) ShareToken(ctx context.Context, ownerID, episodeID string) (string, error) {
+	if s == nil || s.db == nil || ownerID == "" || episodeID == "" {
+		return "", fmt.Errorf("episode: share token %q: %w", episodeID, ErrInvalid)
+	}
+	var token, visibility string
+	err := s.db.Reader().QueryRowContext(ctx,
+		`SELECT share_token, visibility FROM episodes
+		 WHERE id = ? AND owner_id = ?`, episodeID, ownerID).Scan(&token, &visibility)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("episode: share token %q: %w", episodeID, err)
+	}
+	if visibility != "public" {
+		return "", nil
+	}
+	return token, nil
+}

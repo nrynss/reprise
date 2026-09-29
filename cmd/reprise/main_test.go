@@ -46,6 +46,7 @@ import (
 	"github.com/nrynss/reprise/internal/host"
 	"github.com/nrynss/reprise/internal/identity"
 	"github.com/nrynss/reprise/internal/memory"
+	"github.com/nrynss/reprise/internal/privacy"
 	"github.com/nrynss/reprise/internal/render"
 	"github.com/nrynss/reprise/internal/settings"
 	reprisestore "github.com/nrynss/reprise/internal/store"
@@ -2858,5 +2859,159 @@ func TestEditCreateAsksForNeitherFeature(t *testing.T) {
 	}
 	if _, ok := seen.body["auto_highlights"]; ok {
 		t.Fatalf("auto_highlights = %v, want the key absent on the edit pass", seen.body["auto_highlights"])
+	}
+}
+
+// shareProbeSessions ends no provider session. Publish never calls it,
+// so the double only satisfies the constructor.
+type shareProbeSessions struct{}
+
+// TerminateSession reports a clean delete the test never triggers.
+func (shareProbeSessions) TerminateSession(context.Context, string) (assemblyai.TerminateResult, error) {
+	return assemblyai.TerminateResult{Deleted: true}, nil
+}
+
+// shareProbeTranscripts removes no provider copy. Publish never calls
+// it, so the double only satisfies the constructor.
+type shareProbeTranscripts struct{}
+
+// Delete reports success without touching anything.
+func (shareProbeTranscripts) Delete(context.Context, string) error { return nil }
+
+// Get answers one transcript the test never reads.
+func (shareProbeTranscripts) Get(_ context.Context, id string) (assemblyai.Transcript, error) {
+	return assemblyai.Transcript{ID: id, Status: "completed"}, nil
+}
+
+// shareProbeOwns checks ownership against one fixed owner. The publish
+// path reads ownership from the request context, so the test names the
+// minted guest directly instead of signing a cookie for the service.
+type shareProbeOwns struct {
+	owner string
+}
+
+// Owns reports whether ownerID is the test owner.
+func (o shareProbeOwns) Owns(_ context.Context, ownerID string) bool { return ownerID == o.owner }
+
+// seedShareEpisode stores one episode with its render blobs, the way a
+// finished take leaves them before publish.
+func seedShareEpisode(t *testing.T, fx *wireFixture, owner, episodeID string, number int64) {
+	t.Helper()
+	ctx := t.Context()
+	persist := func(body string) string {
+		blob, err := fx.media.Persist(ctx, bytes.NewReader([]byte(body)), mediastore.Put{
+			ContentType: "audio/ogg",
+			Owner:       owner,
+			Group:       episodeID,
+			Visibility:  mediastore.Private,
+		})
+		if err != nil {
+			t.Fatalf("persist blob: %v", err)
+		}
+		return blob
+	}
+	opus := persist("render opus " + episodeID)
+	aac := persist("render aac " + episodeID)
+	if _, err := fx.db.Writer().ExecContext(ctx, `INSERT INTO episodes
+		(id, owner_id, number, title, state, visibility, share_token, seeded)
+		VALUES (?, ?, ?, ?, 'ready', 'private', ?, 0)`,
+		episodeID, owner, number, "Episode "+episodeID, "seed-"+episodeID); err != nil {
+		t.Fatalf("seed episode: %v", err)
+	}
+	renderID, err := keelid.New()
+	if err != nil {
+		t.Fatalf("mint render id: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx, `INSERT INTO renders
+		(id, owner_id, episode_id, input_hash, opus_media_id, aac_media_id, loudness)
+		VALUES (?, ?, ?, 'hash', ?, ?, -16)`, renderID, owner, episodeID, opus, aac); err != nil {
+		t.Fatalf("seed render: %v", err)
+	}
+}
+
+// TestPublicDetailReloadCarriesSharePath boots the wired episode routes,
+// publishes one episode through the publish service, and requires the
+// reloaded detail to carry its share path. A private episode carries
+// empty, and the same detail behind a nil token reader carries empty
+// too, so reverting the wiring fails this test.
+func TestPublicDetailReloadCarriesSharePath(t *testing.T) {
+	ctx := t.Context()
+	fx := openWireFixture(t)
+	identitySvc, err := identity.New(ctx, identity.Config{DB: fx.db, SigningKey: "share-path-test-signing-key"})
+	if err != nil {
+		t.Fatalf("open identity: %v", err)
+	}
+	episodeSvc, err := episode.NewService(episode.Config{DB: fx.db})
+	if err != nil {
+		t.Fatalf("open episode service: %v", err)
+	}
+	wired := identitySvc.Middleware(episodeRoutes(fx.db, episodeSvc))
+	serve := func(handler http.Handler, cookie *http.Cookie, id string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/episodes/"+id, nil)
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	first := serve(wired, nil, "missing")
+	var cookie *http.Cookie
+	for _, c := range first.Result().Cookies() {
+		if c.Name == identity.CookieName {
+			cookie = c
+		}
+	}
+	if cookie == nil {
+		t.Fatal("first detail set no session cookie")
+	}
+	cookieReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	cookieReq.AddCookie(cookie)
+	user, err := identitySvc.Resolve(cookieReq)
+	if err != nil {
+		t.Fatalf("resolve minted guest: %v", err)
+	}
+
+	seedShareEpisode(t, fx, user.ID, "ep-public", 1)
+	seedShareEpisode(t, fx, user.ID, "ep-private", 2)
+	publishSvc, err := privacy.New(privacy.Config{
+		DB:          fx.db,
+		Media:       fx.media,
+		CoverDir:    t.TempDir(),
+		Sessions:    shareProbeSessions{},
+		Transcripts: shareProbeTranscripts{},
+		Owns:        shareProbeOwns{owner: user.ID},
+	})
+	if err != nil {
+		t.Fatalf("open publish service: %v", err)
+	}
+	token, err := publishSvc.Publish(ctx, "ep-public")
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	shareOf := func(handler http.Handler, id string) string {
+		t.Helper()
+		rec := serve(handler, cookie, id)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("detail %s status = %d, want 200: %s", id, rec.Code, rec.Body.String())
+		}
+		var body struct {
+			SharePath string `json:"share_path"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode detail %s: %v", id, err)
+		}
+		return body.SharePath
+	}
+	if got := shareOf(wired, "ep-public"); got != "/share/"+token {
+		t.Fatalf("public share path = %q, want /share/%s", got, token)
+	}
+	if got := shareOf(wired, "ep-private"); got != "" {
+		t.Fatalf("private share path = %q, want empty", got)
+	}
+
+	bare := identitySvc.Middleware(api.NewEpisodesWithPreview(episodeSvc, render.PreviewStore{DB: fx.db.Writer()}))
+	if got := shareOf(bare, "ep-public"); got != "" {
+		t.Fatalf("nil reader share path = %q, want empty", got)
 	}
 }

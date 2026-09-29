@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nrynss/keel/id"
+	"github.com/nrynss/reprise/internal/episode"
 	"github.com/nrynss/reprise/internal/privacy"
 )
 
@@ -188,6 +189,50 @@ func TestPublishKeepsEpisodePrivateWhenBlobMissing(t *testing.T) {
 	}
 	if visibility != privacy.VisibilityPrivate {
 		t.Fatalf("episode visibility %q, want private", visibility)
+	}
+}
+
+// TestShareTokenReaderFollowsPublish pins the owner scoped episode to
+// token reader against real publish writes. A published episode reports
+// its stored token, a private one reports empty, and a foreign owner
+// reads empty too. Unpublish clears the token again, so a reloaded
+// detail loses the link exactly when the episode goes private.
+func TestShareTokenReaderFollowsPublish(t *testing.T) {
+	fx := openFixture(t)
+	fx.as("owner-a")
+	seed := fx.seeds["owner-a"]
+	other := fx.seeds["owner-b"]
+	reads, err := episode.NewService(episode.Config{DB: fx.db})
+	if err != nil {
+		t.Fatalf("open episode service: %v", err)
+	}
+
+	if got, err := reads.ShareToken(t.Context(), "owner-a", seed.episode); err != nil || got != "" {
+		t.Fatalf("private token = %q, err %v, want empty", got, err)
+	}
+	if got, err := reads.ShareToken(t.Context(), "owner-b", seed.episode); err != nil || got != "" {
+		t.Fatalf("foreign token = %q, err %v, want empty", got, err)
+	}
+
+	token, err := fx.svc.Publish(t.Context(), seed.episode)
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if got, err := reads.ShareToken(t.Context(), "owner-a", seed.episode); err != nil || got != token {
+		t.Fatalf("public token = %q, err %v, want %q", got, err, token)
+	}
+	if got, err := reads.ShareToken(t.Context(), "owner-b", other.episode); err != nil || got != "" {
+		t.Fatalf("other private token = %q, err %v, want empty", got, err)
+	}
+
+	if _, err := fx.svc.Unpublish(t.Context(), seed.episode); err != nil {
+		t.Fatalf("unpublish: %v", err)
+	}
+	if got, err := reads.ShareToken(t.Context(), "owner-a", seed.episode); err != nil || got != "" {
+		t.Fatalf("unpublished token = %q, err %v, want empty", got, err)
+	}
+	if _, err := reads.ShareToken(t.Context(), "", seed.episode); !errors.Is(err, episode.ErrInvalid) {
+		t.Fatalf("empty owner err %v, want invalid", err)
 	}
 }
 

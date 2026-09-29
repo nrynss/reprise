@@ -726,7 +726,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect session end: %w", err)
 	}
-	episodes, err := protectTake(spendGate, "take-episodes", takeEpisodesBurst, api.NewEpisodesWithPreview(episodeSvc, render.PreviewStore{DB: db.Writer()}))
+	episodes, err := protectTake(spendGate, "take-episodes", takeEpisodesBurst, episodeRoutes(db, episodeSvc))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect episode reads: %w", err)
 	}
@@ -789,6 +789,14 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	go jobs.runAdvanceLoop(ctx)
 	wired = true
 	return sessionBroker.Leases(), nil
+}
+
+// episodeRoutes serves the episode list and detail over the episode
+// service. The service also reads the stored share token behind the
+// detail, so a public episode answers its share path on every load and
+// a private one answers empty.
+func episodeRoutes(db *sqlite.DB, episodeSvc *episode.Service) http.Handler {
+	return api.NewEpisodesWithShare(episodeSvc, render.PreviewStore{DB: db.Writer()}, episodeSvc)
 }
 
 // episodeConfig wires the episode service over the scheduler. Mark done
