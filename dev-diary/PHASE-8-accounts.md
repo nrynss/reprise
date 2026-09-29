@@ -109,8 +109,8 @@ checks both unique constraints and the index. The gate passes in a fresh worktre
 requires:   none
 fixture-ok: yes
 size:       XS · light
-owns:       internal/settings/, config/, deploy/
-status:     in-progress:implement:t8.3-impl
+owns:       internal/settings/, config/, deploy/, cmd/reprise/boot_test.go
+status:     in-progress:review-r1:t8.3-rev-r1@3b838c3a592004488b14b51ae8a3a9a93a73650a
 ```
 Every setting this phase needs, added once so later tasks share no path.
 
@@ -126,6 +126,11 @@ Every setting this phase needs, added once so later tasks share no path.
 
 **Done when:** Both config files load in `settings_test.go` with the new fields. A missing
 `resend_api_key` fails boot by name. The gate passes in a fresh worktree.
+
+**Decision, 2026-09-29.** Owns widened to `cmd/reprise/boot_test.go`, the test helper
+only. The new required settings break five tests sharing its `bootSettings`, so the
+helper must carry the new keys for the gate to pass. T8.4 owns `main.go` and
+`main_test.go` in that directory, never this helper, so no task collides.
 
 ---
 
