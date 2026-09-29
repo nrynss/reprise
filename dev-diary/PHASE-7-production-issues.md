@@ -2672,7 +2672,7 @@ requires:   T7.83
 fixture-ok: yes
 size:       S · frontier
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.84-impl@24e7bc2dcdb8914c850f756fe06dbf1c7cac6b8c
+status:     done:f32229a
 ```
 **Defect.** On 2026-09-29 at 16:55 UTC, the owner's processing screen still read "Following the
 job." That string left the code with T7.81, which was in the build deployed at 16:12, whose code
@@ -2731,6 +2731,13 @@ handoff.
 
 ### What exists now
 
+T7.84 landed at f32229a after round 1 APPROVE with zero findings.
+Immutable bundles cache for a year while every HTML shell and client
+fallback revalidates, so a deploy reaches open browsers at once. An
+interrupted host reply that ends before it starts clamps to zero
+length instead of failing the transcript. Reviewed commit 24e7bc2
+rebased clean. Race tests pass on the landed commit. The live `curl`
+header check rides with the next deploy.
 T7.83 landed at f9fdfaf after round 1 APPROVE with zero findings.
 The gallery card progress lines speak plain words behind named
 constants and call-site pins. Reviewed commit d637521 rebased
