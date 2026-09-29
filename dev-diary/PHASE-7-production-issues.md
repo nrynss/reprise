@@ -2623,7 +2623,7 @@ owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.sp
              web/src/routes/threads/threads.test.ts, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts,
              web/src/lib/voice/processing-state.ts, web/src/lib/copy.test.ts
-status:     in-progress:land:t7.82-rem-r1@61936d5899da67abd06c469de5e43e333d3eaa47
+status:     done:7052fab
 ```
 T7.81 round 1 recorded two out of scope L notes. The shared `erase()` path in `threads.ts`
 returns live notices naming build vocabulary (`job` ids, `endpoint` accepted and refused lines,
@@ -2646,6 +2646,26 @@ widening is the right call. (The status-line flip the decision first described
 turned out to be a stale branch base, not an out of owns edit. A rebase
 landing preserves the live status line, so no revert is needed.)
 
+### T7.83: The gallery card progress lines speak plain words
+```yaml
+requires:   T7.82
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
+             web/src/lib/copy.test.ts
+status:     not-started
+```
+T7.82 round 2 left one out of scope L note standing. The gallery card helpers in
+`threads.ts` return live progress lines naming build vocabulary: `cardFor` answers
+"Waiting for the job." and `refresh` answers "The job stream failed. The mark above
+is kept." No test pins them either way.
+
+* Rewrite both in plain words, following the T7.81 copy. Export them as named
+  constants and extend `copy.test.ts` through its existing word list.
+
+**Done when:** The extended copy gate fails when either line is restored to its
+build vocabulary. The gate passes in a fresh worktree.
+
 ---
 
 ## Exit criteria
@@ -2662,6 +2682,15 @@ landing preserves the live status line, so no revert is needed.)
 
 ### What exists now
 
+T7.82 landed at 7052fab after round 2 APPROVE with zero residue.
+Round 1 had four L findings, all stale exact-copy assertions
+pinning the old erase and render wording. The remediation updated
+the assertions to the new named notices with no product change.
+Reviewed commits 2a2f951 and 61936d5 rebased clean (the stacked
+round-file commit dropped itself at rebase). Unit pins pass
+348 of 348 on the landed commit. Two out of scope notes stay open:
+the gallery card progress lines in `threads.ts` still name jobs,
+scoped into T7.83.
 T7.81 landed at 3f7b623 after round 1 APPROVE with zero in-scope
 findings. The episode page renders pill tabs with a filled Edit
 pill, and the six live notices speak plain words behind a copy
