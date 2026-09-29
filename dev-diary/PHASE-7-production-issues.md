@@ -2653,7 +2653,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
              web/src/lib/copy.test.ts
-status:     in-progress:review-r1:t7.83-rev-r1@d637521e180ed218b464be97fa52031fd8403740
+status:     in-progress:land:t7.83-impl@d637521e180ed218b464be97fa52031fd8403740
 ```
 T7.82 round 2 left one out of scope L note standing. The gallery card helpers in
 `threads.ts` return live progress lines naming build vocabulary: `cardFor` answers
