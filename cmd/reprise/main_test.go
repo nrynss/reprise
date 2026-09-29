@@ -3015,3 +3015,34 @@ func TestPublicDetailReloadCarriesSharePath(t *testing.T) {
 		t.Fatalf("nil reader share path = %q, want empty", got)
 	}
 }
+
+// TestBootMountsLoginRoutes checks the boot wires the sign-in code routes
+// behind the guest middleware. Empty bodies answer 400, which proves the
+// table mounted the login handler instead of a stub, without sending mail.
+func TestBootMountsLoginRoutes(t *testing.T) {
+	loaded := bootSettings(t, t.TempDir())
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	mux := http.NewServeMux()
+	if _, err := wireAPI(ctx, mux, loaded, bootPlan{advancePeriod: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	for _, path := range []string{"/api/login/code", "/api/login/verify"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`)))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST %s status = %d, want 400", path, rec.Code)
+		}
+		var body struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("POST %s: decode refusal: %v", path, err)
+		}
+		if body.Error.Code != identity.CodeInvalidRequest {
+			t.Fatalf("POST %s code = %q, want invalid request", path, body.Error.Code)
+		}
+	}
+}

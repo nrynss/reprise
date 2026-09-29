@@ -47,6 +47,8 @@ var expectedTable = []Route{
 	{Method: "GET", Pattern: "/api/admin/limits"},
 	{Method: "POST", Pattern: "/api/admin/limits/pause"},
 	{Method: "POST", Pattern: "/api/admin/limits/owner"},
+	{Method: "POST", Pattern: "/api/login/code"},
+	{Method: "POST", Pattern: "/api/login/verify"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
 
@@ -223,6 +225,7 @@ func mountedDeps(t *testing.T, guestCalls, handlerCalls *int) Dependencies {
 		SessionEnd:        recordingHandler{calls: handlerCalls},
 		Threads:           recordingHandler{calls: handlerCalls},
 		Admin:             recordingHandler{calls: handlerCalls},
+		Login:             recordingHandler{calls: handlerCalls},
 		Uploads:           recordingHandler{calls: handlerCalls},
 		Media:             recordingHandler{calls: handlerCalls},
 		Events:            stream.New(stream.Config{}),
@@ -295,6 +298,8 @@ func TestMountServesHandlersThroughChain(t *testing.T) {
 		{http.MethodGet, "/api/admin/limits"},
 		{http.MethodPost, "/api/admin/limits/pause"},
 		{http.MethodPost, "/api/admin/limits/owner"},
+		{http.MethodPost, "/api/login/code"},
+		{http.MethodPost, "/api/login/verify"},
 		{http.MethodPost, "/api/uploads"},
 		{http.MethodPut, "/api/uploads/e01/chunks/0"},
 		{http.MethodGet, "/media/blob1"},

@@ -48,7 +48,8 @@ type Route struct {
 // handler takes the upload prefix later, mounted at its base path. The job
 // stream takes the events route later, serving one job topic. The blob
 // store takes the media route later, behind the ownership check. The admin
-// trio takes the limits handler, behind the owner proof.
+// trio takes the limits handler, behind the owner proof. The login pair
+// takes the sign-in handler, behind the guest middleware like the rest.
 var routeTable = []Route{
 	{Method: "POST", Pattern: "/api/sessions"},
 	{Method: "POST", Pattern: "/api/sessions/{id}/end"},
@@ -66,6 +67,8 @@ var routeTable = []Route{
 	{Method: "GET", Pattern: limits.PatternLimits},
 	{Method: "POST", Pattern: limits.PatternPause},
 	{Method: "POST", Pattern: limits.PatternOwnerLimit},
+	{Method: "POST", Pattern: "/api/login/code"},
+	{Method: "POST", Pattern: "/api/login/verify"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
 
@@ -114,7 +117,8 @@ type GuestSessions interface {
 // store still serves the table. Sessions is the session broker. Episodes serves the
 // episode list, detail, decisions, and mark done routes. SessionEnd
 // records the provider close the browser already sent. Threads serves the
-// cross episode index. Admin is the limits handler. Uploads is the chunked
+// cross episode index. Admin is the limits handler. Login serves the
+// sign-in code request and verify routes. Uploads is the chunked
 // upload handler, configured with UploadBasePath. Media is the blob store.
 // Events is the stream broker serving one job topic per request. The two
 // owner ceilings must agree whenever Sessions or Admin is present, because
@@ -137,6 +141,9 @@ type Dependencies struct {
 	Threads http.Handler
 	// Admin answers the caps, the switch, and spend.
 	Admin http.Handler
+	// Login serves the sign-in code request and verify routes through
+	// its own mux.
+	Login http.Handler
 	// Uploads receives stem chunks.
 	Uploads http.Handler
 	// Media serves private blobs.
@@ -220,6 +227,8 @@ func (d Dependencies) handlerFor(route Route) http.Handler {
 		"POST " + limits.PatternPause,
 		"POST " + limits.PatternOwnerLimit:
 		return d.Admin
+	case "POST /api/login/code", "POST /api/login/verify":
+		return d.Login
 	case " " + UploadBasePath + "/":
 		return d.Uploads
 	case "GET /media/{id}":

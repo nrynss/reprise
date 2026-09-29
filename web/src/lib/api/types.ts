@@ -33,6 +33,8 @@ export const API_ROUTES: readonly ApiRoute[] = [
 	{ method: 'GET', pattern: '/api/admin/limits' },
 	{ method: 'POST', pattern: '/api/admin/limits/pause' },
 	{ method: 'POST', pattern: '/api/admin/limits/owner' },
+	{ method: 'POST', pattern: '/api/login/code' },
+	{ method: 'POST', pattern: '/api/login/verify' },
 	{ method: 'GET', pattern: '/media/{id}' }
 ];
 

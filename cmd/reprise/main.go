@@ -58,6 +58,7 @@ import (
 	"github.com/nrynss/reprise/internal/host"
 	"github.com/nrynss/reprise/internal/identity"
 	"github.com/nrynss/reprise/internal/limits"
+	"github.com/nrynss/reprise/internal/mail"
 	"github.com/nrynss/reprise/internal/memory"
 	"github.com/nrynss/reprise/internal/render"
 	"github.com/nrynss/reprise/internal/settings"
@@ -619,7 +620,28 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	if err := analysis.Migrate(ctx, db); err != nil {
 		return nil, fmt.Errorf("reprise: migrate analysis schema: %w", err)
 	}
-	identitySvc, err := identity.New(ctx, identity.Config{DB: db, SigningKey: signingKey})
+	loginCodeKey, err := loaded.Secrets.LoginCodeKey.Reveal()
+	if err != nil {
+		return nil, fmt.Errorf("reprise: reveal login code key: %w", err)
+	}
+	resendKey, err := loaded.Secrets.ResendAPIKey.Reveal()
+	if err != nil {
+		return nil, fmt.Errorf("reprise: reveal mail key: %w", err)
+	}
+	mailClient, err := mail.New(mail.Config{
+		APIKey:  resendKey,
+		From:    loaded.MailFrom,
+		ReplyTo: loaded.MailReplyTo,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reprise: open mail client: %w", err)
+	}
+	identitySvc, err := identity.New(ctx, identity.Config{
+		DB:           db,
+		SigningKey:   signingKey,
+		LoginCodeKey: loginCodeKey,
+		Mail:         mailClient,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open guest sessions: %w", err)
 	}
@@ -755,6 +777,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 		SessionEnd:        sessionEnd,
 		Threads:           threads,
 		Admin:             admin,
+		Login:             identitySvc.LoginHandler(),
 		Uploads:           uploads,
 		Media:             media,
 		Events:            events,
