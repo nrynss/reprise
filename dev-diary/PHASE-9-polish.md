@@ -113,7 +113,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
              web/src/lib/voice/record-state.ts, web/src/lib/voice/processing-state.ts
-status:     not-started-TEMP
+status:     in-progress:review-r1:t9.3-rev-r1@c99a918e6f7f37e7f1f339566d17177471e18c5d
 ```
 * Record uses the shared shell. It rendered as a white, unstyled page on 2026-09-29. Start is the
   one large primary button, centred, and the live view keeps the clock and End in reach on a phone.
@@ -133,7 +133,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/threads/threads.ts,
              web/src/routes/threads/gallery-cards.test.ts, web/src/routes/gallery.spec.ts
-status:     not-started
+status:     in-progress:implement:t9.4-impl
 ```
 * Cards on the shared `.cards` grid, all the same height. A card shows its cover when `cover_path`
   is set, and otherwise the "EP.12" tile.
@@ -175,7 +175,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     not-started-TEMP
+status:     in-progress:land:t9.6-rem-r1@97b71cee7a731dcf8b1fcc0b5440b5680cdf00c6
 ```
 * The `.wide` column above 1280px. The transcript is left-aligned, never justified, at `65ch`.
 * The player controls and the proposal actions use the shared button kinds at one height.
@@ -184,6 +184,13 @@ status:     not-started-TEMP
 
 **Done when:** The layout checks pass, the edit suite passes in Chromium and Firefox, and the gate passes in
 a fresh worktree.
+
+**Decision, 2026-09-29.** Owns widened to `web/src/lib/editor/draft.test.ts`,
+`web/src/lib/editor/draft.decisions.test.ts` and
+`web/src/lib/editor/draft.prototype-keys.test.ts`, the specs that pin the old
+wording. Round 1 returned 11 H stale-pin findings: the voice rewrite breaks
+those exact-copy assertions by design, same pattern as T7.82. The remediation
+updates the assertions to the new named notices with no product change.
 
 ### T9.7: Threads
 ```yaml
@@ -206,7 +213,7 @@ requires:   T9.1, T9.2
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/account/, web/src/routes/share/, web/src/routes/welcome/
-status:     not-started
+status:     in-progress:implement:t9.8-impl
 ```
 * **Account and delete pages.** Use the shared shell and buttons, with a signed-in "Name on shared
   episodes" field saving through `PUT /api/account/name`. The copy follows `voice.md`.
