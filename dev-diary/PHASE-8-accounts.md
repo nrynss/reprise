@@ -333,7 +333,7 @@ owns:       internal/identity/signout.go, internal/identity/signout_test.go,
              internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go, web/package.json,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts
-status:     in-progress:land:t8.11-rem-r1@e608d32528275d3e0ab98e7aee7465b8ff5894a5
+status:     done:c1659b4
 ```
 T8.6 round 1 proved no sign-out route exists: the account page calls
 `POST /api/login/signout` against an unrouted path, so the session cookie
@@ -400,6 +400,14 @@ in a fresh worktree.
 
 ### What exists now
 
+T8.11 landed at c1659b4 after round 2 APPROVE with zero residue.
+Sign-out revokes the session and mints a fresh guest behind one
+shared body, with the golden and mirror carrying the route and the
+account spec running in the e2e chain. Round 1 had one H (golden
+and mirror missing the entry). Reviewed commits aabac5b and
+e608d32 rebased clean. Race tests pass on the landed commit.
+T8.6's sign-out sentence is met, and T8.13 unblocks on this
+landing.
 T8.9 landed at 9094573 after round 1 APPROVE with zero findings.
 `OperatorAuth` gates admin endpoints behind the operators setting,
 with 401 for guests and 403 `operator_required` for signed-in
