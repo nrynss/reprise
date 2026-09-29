@@ -189,7 +189,6 @@
 </svelte:head>
 
 <main>
-	<p class="eyebrow">Season one</p>
 	<h1>{ACCOUNT_HEADING}</h1>
 	<p class="sub">{ACCOUNT_SUB}</p>
 	<nav aria-label="Season">
@@ -223,7 +222,7 @@
 					/>
 					<p class="help">{EMAIL_HELP}</p>
 				</div>
-				<Button.Root type="submit" disabled={busy}>{SEND_CODE}</Button.Root>
+				<Button.Root type="submit" class="button" disabled={busy}>{SEND_CODE}</Button.Root>
 			{:else}
 				<div class="field">
 					<Label.Root for="account-code">{CODE_LABEL}</Label.Root>
@@ -237,10 +236,11 @@
 						required
 					/>
 				</div>
-				<Button.Root type="submit" disabled={busy}>{CHECK_CODE}</Button.Root>
+				<Button.Root type="submit" class="button" disabled={busy}>{CHECK_CODE}</Button.Root>
 				<div class="resend">
 					<Button.Root
 						type="button"
+						class="button secondary"
 						disabled={busy || resendWait > 0}
 						onclick={() => void send()}
 					>
@@ -257,11 +257,20 @@
 			<p>{CONFLICT_BODY}</p>
 			<div class="choices">
 				<div>
-					<Button.Root type="button" disabled={busy} onclick={() => keep()}>{KEEP_DIARY}</Button.Root>
+					<Button.Root
+						type="button"
+						class="button secondary"
+						disabled={busy}
+						onclick={() => keep()}>{KEEP_DIARY}</Button.Root>
 					<p class="help">{KEEP_HELP}</p>
 				</div>
 				<div>
-					<Button.Root type="button" disabled={busy} onclick={() => void check('switch')}>
+					<Button.Root
+						type="button"
+						class="button secondary"
+						disabled={busy}
+						onclick={() => void check('switch')}
+					>
 						{SWITCH_ACCOUNT}
 					</Button.Root>
 					<p class="help">{SWITCH_HELP}</p>
@@ -274,10 +283,14 @@
 		<section aria-label="Signed in">
 			<p role="status">{signedInNotice(email)}</p>
 			<div class="choices">
-				<Button.Root type="button" disabled={busy} onclick={() => void quit()}>{SIGN_OUT}</Button.Root>
+				<Button.Root
+					type="button"
+					class="button secondary"
+					disabled={busy}
+					onclick={() => void quit()}>{SIGN_OUT}</Button.Root>
 				<!-- The deletion screen owns its own steps, so this entry links there. -->
 				<div>
-					<a href={resolve('/account/delete')}>{DELETE_ACCOUNT}</a>
+					<a class="button secondary warning" href={resolve('/account/delete')}>{DELETE_ACCOUNT}</a>
 				</div>
 			</div>
 		</section>
@@ -285,14 +298,6 @@
 </main>
 
 <style>
-	.eyebrow {
-		text-transform: uppercase;
-		letter-spacing: 0.12em;
-		font-size: 0.8rem;
-	}
-	.sub {
-		max-width: 34rem;
-	}
 	.field {
 		display: grid;
 		gap: 0.4rem;
@@ -302,12 +307,6 @@
 	.help {
 		font-size: 0.9rem;
 		opacity: 0.85;
-	}
-	input {
-		padding: 0.55rem 0.8rem;
-		border-radius: 8px;
-		border: 1px solid currentColor;
-		font-size: 1rem;
 	}
 	.resend {
 		margin-top: 0.75rem;

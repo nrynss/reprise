@@ -125,7 +125,6 @@
 </svelte:head>
 
 <main>
-	<p class="eyebrow">Season one</p>
 	<h1>{DELETE_HEADING}</h1>
 	<p class="sub">{DELETE_SUB}</p>
 	<nav aria-label="Season">
@@ -158,7 +157,7 @@
 				/>
 				<p class="help">{EMAIL_HELP}</p>
 			</div>
-			<Button.Root type="submit" disabled={busy}>{SEND_CODE}</Button.Root>
+			<Button.Root type="submit" class="button" disabled={busy}>{SEND_CODE}</Button.Root>
 		</form>
 	{/if}
 
@@ -182,9 +181,9 @@
 				/>
 				<p class="help">{DELETE_CODE_HELP}</p>
 			</div>
-			<Button.Root type="submit" disabled={busy}>{CHECK_CODE}</Button.Root>
+			<Button.Root type="submit" class="button" disabled={busy}>{CHECK_CODE}</Button.Root>
 			<div class="resend">
-				<Button.Root type="button" disabled={busy} onclick={() => void send()}>
+				<Button.Root type="button" class="button secondary" disabled={busy} onclick={() => void send()}>
 					{RESEND_CODE}
 				</Button.Root>
 			</div>
@@ -195,10 +194,20 @@
 		<section aria-label="Confirm deletion">
 			<p>{DELETE_BODY}</p>
 			<div class="choices">
-				<Button.Root type="button" disabled={busy} onclick={() => void remove()}>
+				<Button.Root
+					type="button"
+					class="button secondary warning"
+					disabled={busy}
+					onclick={() => void remove()}
+				>
 					{DELETE_CONFIRM}
 				</Button.Root>
-				<Button.Root type="button" disabled={busy} onclick={() => keep()}>
+				<Button.Root
+					type="button"
+					class="button secondary"
+					disabled={busy}
+					onclick={() => keep()}
+				>
 					{DELETE_CANCEL}
 				</Button.Root>
 			</div>
@@ -216,14 +225,6 @@
 </main>
 
 <style>
-	.eyebrow {
-		text-transform: uppercase;
-		letter-spacing: 0.12em;
-		font-size: 0.8rem;
-	}
-	.sub {
-		max-width: 34rem;
-	}
 	.field {
 		display: grid;
 		gap: 0.4rem;
@@ -233,12 +234,6 @@
 	.help {
 		font-size: 0.9rem;
 		opacity: 0.85;
-	}
-	input {
-		padding: 0.55rem 0.8rem;
-		border-radius: 8px;
-		border: 1px solid currentColor;
-		font-size: 1rem;
 	}
 	.resend {
 		margin-top: 0.75rem;

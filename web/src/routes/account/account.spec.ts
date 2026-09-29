@@ -130,6 +130,32 @@ test('switching signs in, and signing out starts over', async ({ page }) => {
 	expect(signouts).toHaveLength(1);
 });
 
+test('the account page shares the gallery shell and pill buttons', async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.goto('/account');
+	await expect(page.getByText('Season one')).toHaveCount(0);
+	const shell = page.locator('main');
+	await expect(shell).toBeVisible();
+	expect(await shell.evaluate((element) => getComputedStyle(element).maxWidth)).toBe('832px');
+	const box = await shell.boundingBox();
+	const viewport = page.viewportSize();
+	if (box === null || viewport === null) throw new Error('The page reported no layout.');
+	const left = box.x;
+	const right = viewport.width - (box.x + box.width);
+	expect(Math.abs(left - right)).toBeLessThanOrEqual(2);
+	const send = page.getByRole('button', { name: 'Send the code' });
+	await expect(send).toBeVisible();
+	expect(await send.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(
+		'rgb(232, 163, 61)'
+	);
+	expect(await send.evaluate((element) => getComputedStyle(element).borderRadius)).toBe('100px');
+	const accountLink = seasonNav(page).getByRole('link', { name: 'Sign in' });
+	await expect(accountLink).toBeVisible();
+	expect(await accountLink.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(
+		'rgb(232, 163, 61)'
+	);
+});
+
 test('a capped resend names the wait and reopens after it', async ({ page }) => {
 	let calls = 0;
 	await stubCode(page, async (route) => {
