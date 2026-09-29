@@ -451,7 +451,7 @@ size:       XS · light
 owns:       internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts
-status:     in-progress:implement:t8.16-impl
+status:     in-progress:review-r1:t8.16-rev-r1@7958f5da648c9fe5f999db58b216fe6257630c13
 ```
 T8.12 ships the status handler unmounted: the path 404s and the golden
 does not list it.
@@ -463,6 +463,27 @@ does not list it.
 **Done when:** A booted binary answers the status for a guest and a
 signed-in user. The golden and mirror tests pass. The gate passes in a
 fresh worktree.
+
+### T8.17: The gate scan trips on the Google query parsing
+```yaml
+requires:   T8.8
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/account/google/google.ts,
+             web/src/routes/account/google/google.test.ts
+status:     not-started
+```
+The gate's Svelte 4 leakage scan (`\b(get)\s*\(`, meant for Svelte
+stores) matches `params.get(` in `google.ts`, so the gate is red on
+`main`. T8.8's review ran the scan by hand and missed it.
+
+* Read the query without a `.get(` call shape (for example through
+  `Object.fromEntries`), keeping behavior identical. Do not weaken
+  the gate pattern instead: the check is load-bearing elsewhere.
+
+**Done when:** The exact gate grep from `tools/check.sh:131` returns
+empty on `main`, and the google unit tests still pass. The gate
+passes in a fresh worktree past the leakage step.
 
 ---
 
