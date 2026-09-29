@@ -816,7 +816,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect session end: %w", err)
 	}
-	episodes, err := protectTake(spendGate, "take-episodes", takeEpisodesBurst, episodeRoutes(db, episodeSvc))
+	episodes, err := protectTake(spendGate, "take-episodes", takeEpisodesBurst, episodeRoutes(db, episodeSvc, loaded))
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect episode reads: %w", err)
 	}
@@ -865,6 +865,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 		Admin:             admin,
 		Login:             loginAll,
 		Account:           accountDelete,
+		Profile:           identitySvc.ProfileHandler(),
 		Uploads:           uploads,
 		Media:             media,
 		Events:            events,
@@ -904,9 +905,48 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 // episodeRoutes serves the episode list and detail over the episode
 // service. The service also reads the stored share token behind the
 // detail, so a public episode answers its share path on every load and
-// a private one answers empty.
-func episodeRoutes(db *sqlite.DB, episodeSvc *episode.Service) http.Handler {
-	return api.NewEpisodesWithShare(episodeSvc, render.PreviewStore{DB: db.Writer()}, episodeSvc)
+// a private one answers empty. Covers read from the cover directory, so
+// each row and the detail carry the owner cover path while one exists.
+func episodeRoutes(db *sqlite.DB, episodeSvc *episode.Service, loaded settings.Settings) http.Handler {
+	coverDir := filepath.Join(loaded.MediaDir, "covers")
+	return api.NewEpisodesWithCover(episodeSvc, render.PreviewStore{DB: db.Writer()}, episodeSvc, episodeCover{dir: coverDir})
+}
+
+// episodeCover serves owner covers from the cover directory. Files are
+// named for their episode, so a lookup needs no row. The episode handler
+// already checked ownership, so a missing file answers not found.
+type episodeCover struct {
+	// dir holds one PNG per episode named for its episode id.
+	dir string
+}
+
+// HasCover reports whether the cover file exists.
+func (c episodeCover) HasCover(_ context.Context, _, episodeID string) (bool, error) {
+	if episodeID == "" || c.dir == "" {
+		return false, nil
+	}
+	if _, err := os.Stat(filepath.Join(c.dir, episodeID+".png")); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("reprise: cover exists: %w", err)
+	}
+	return true, nil
+}
+
+// CoverBytes returns the stored PNG bytes. A missing file reports the
+// episode not found sentinel, so the handler answers 404.
+func (c episodeCover) CoverBytes(_ context.Context, _, episodeID string) ([]byte, error) {
+	if episodeID == "" || c.dir == "" {
+		return nil, fmt.Errorf("reprise: cover %q: %w", episodeID, episode.ErrNotFound)
+	}
+	raw, err := os.ReadFile(filepath.Join(c.dir, episodeID+".png"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("reprise: cover %q: %w", episodeID, episode.ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reprise: read cover %q: %w", episodeID, err)
+	}
+	return raw, nil
 }
 
 // episodeConfig wires the episode service over the scheduler. Mark done

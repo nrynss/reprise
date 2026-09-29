@@ -24,7 +24,8 @@ import (
 
 // Share is the metadata the share page renders for one token. AudioID
 // is the public render blob the page streams from the media store.
-// CoverPath is the cover endpoint behind the same token.
+// CoverPath is the cover endpoint behind the same token. Author is the
+// owner display name or empty. It never carries an address.
 type Share struct {
 	// EpisodeID is the shared episode.
 	EpisodeID string `json:"episode_id"`
@@ -32,6 +33,8 @@ type Share struct {
 	Title string `json:"title"`
 	// Number orders the episode within its owner.
 	Number int64 `json:"number"`
+	// Author is the owner display name, empty while unset.
+	Author string `json:"author"`
 	// AudioID is the public streaming render blob.
 	AudioID string `json:"audio_media_id"`
 	// CoverPath is the cover endpoint behind the same token.
@@ -52,10 +55,11 @@ func (s *Service) LookupShare(ctx context.Context, token string) (Share, error) 
 	var number int64
 	var title string
 	var episodeID string
+	var ownerID string
 	err := s.db.Reader().QueryRowContext(ctx,
-		`SELECT id, title, number FROM episodes
+		`SELECT id, owner_id, title, number FROM episodes
 		 WHERE share_token = ? AND visibility = ?`, token, VisibilityPublic).Scan(
-		&episodeID, &title, &number)
+		&episodeID, &ownerID, &title, &number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Share{}, fmt.Errorf("privacy: share: %w", ErrNotFound)
 	}
@@ -76,10 +80,29 @@ func (s *Service) LookupShare(ctx context.Context, token string) (Share, error) 
 		EpisodeID: episodeID,
 		Title:     title,
 		Number:    number,
+		Author:    s.authorOf(ctx, ownerID),
 		AudioID:   audio,
 		CoverPath: "/api/share/" + token + "/cover",
 	}
 	return out, nil
+}
+
+// authorOf returns the owner display name or empty. It never returns an
+// address. A missing name column or a missing user reads empty, so older
+// copies keep serving the share page while the migration catches up.
+func (s *Service) authorOf(ctx context.Context, ownerID string) string {
+	if ownerID == "" {
+		return ""
+	}
+	var name sql.NullString
+	if err := s.db.Reader().QueryRowContext(ctx,
+		"SELECT display_name FROM users WHERE id = ?", ownerID).Scan(&name); err != nil {
+		return ""
+	}
+	if !name.Valid {
+		return ""
+	}
+	return name.String
 }
 
 // coverPath returns the cover file for an episode. The cover writer

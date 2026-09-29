@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/nrynss/keel/sqlite"
 	"github.com/nrynss/reprise/internal/analysis"
+	"github.com/nrynss/reprise/internal/episode"
 )
 
 // seedWordRow writes one word and fails the test on error.
@@ -102,11 +104,129 @@ func TestEpisodeDetailServesPreviewAddress(t *testing.T) {
 	}
 }
 
+// coverFixture serves fixed PNG bytes for episodes holding a cover. Tests
+// bind it behind the episode routes without touching the filesystem.
+type coverFixture struct {
+	blobs map[string][]byte
+}
+
 // shareFixture wraps an episode store with fixed share tokens, so the
 // detail test pins the share path without opening the publish tables.
 type shareFixture struct {
 	episodeStore
 	tokens map[string]string
+}
+
+// HasCover reports whether the episode holds a cover.
+func (c coverFixture) HasCover(_ context.Context, _, episodeID string) (bool, error) {
+	_, ok := c.blobs[episodeID]
+	return ok, nil
+}
+
+// CoverBytes returns the stored PNG or episode not found when missing.
+func (c coverFixture) CoverBytes(_ context.Context, _, episodeID string) ([]byte, error) {
+	png, ok := c.blobs[episodeID]
+	if !ok {
+		return nil, errors.Join(errors.New("cover is missing"), episode.ErrNotFound)
+	}
+	return png, nil
+}
+
+// TestEpisodeCoverServesOwnerOnly requires the owner cover to serve PNG to
+// the owner with a private no-cache header, and to answer 404 for a
+// foreign episode and for an episode with no cover.
+func TestEpisodeCoverServesOwnerOnly(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	foreignCookie, _ := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "ready")
+	seedEpisodeRow(t, db, "ep-2", owner.ID, 2, "ready")
+	png := []byte{0x89, 0x50, 0x4e, 0x47, 0x01}
+	handler := NewEpisodesWithCover(newEpisodeService(t, db, nil).svc, nil, nil,
+		coverFixture{blobs: map[string][]byte{"ep-1": png}})
+
+	get := func(cookie *http.Cookie, id string) *httptest.ResponseRecorder {
+		return serve(guests, handler, cookie,
+			httptest.NewRequest(http.MethodGet, "/api/episodes/"+id+"/cover", nil))
+	}
+
+	rec := get(cookie, "ep-1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("owner cover status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("cover type = %q, want image/png", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, no-cache" {
+		t.Fatalf("cover cache = %q, want private no-cache", got)
+	}
+	if rec.Body.String() != string(png) {
+		t.Fatalf("cover body = %q, want the stored bytes", rec.Body.String())
+	}
+
+	if rec := get(foreignCookie, "ep-1"); rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign cover status = %d, want 404", rec.Code)
+	}
+	if rec := get(cookie, "ep-2"); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing cover status = %d, want 404", rec.Code)
+	}
+	if rec := get(cookie, "missing"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown cover status = %d, want 404", rec.Code)
+	}
+	bare := NewEpisodes(newEpisodeService(t, db, nil).svc)
+	if rec := serve(guests, bare, cookie,
+		httptest.NewRequest(http.MethodGet, "/api/episodes/ep-1/cover", nil)); rec.Code != http.StatusNotFound {
+		t.Fatalf("bare cover status = %d, want 404 with no cover reader", rec.Code)
+	}
+}
+
+// TestEpisodeCoverPathRidesListAndDetail requires the list rows and the
+// detail to carry the cover path while a cover exists, and empty
+// otherwise. The detail keeps its share path beside the cover path.
+func TestEpisodeCoverPathRidesListAndDetail(t *testing.T) {
+	t.Parallel()
+	db, guests := openDiary(t)
+	cookie, owner := mintGuest(t, guests)
+	seedEpisodeRow(t, db, "ep-1", owner.ID, 1, "ready")
+	seedEpisodeRow(t, db, "ep-2", owner.ID, 2, "ready")
+	handler := NewEpisodesWithCover(newEpisodeService(t, db, nil).svc, nil,
+		shareFixture{tokens: map[string]string{}},
+		coverFixture{blobs: map[string][]byte{"ep-1": {0x89}}})
+
+	rec := serve(guests, handler, cookie, httptest.NewRequest(http.MethodGet, "/api/episodes", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", rec.Code)
+	}
+	listed := episodeListBody(t, rec)
+	if len(listed.Episodes) != 2 {
+		t.Fatalf("list = %+v, want two rows", listed)
+	}
+	if listed.Episodes[0].CoverPath != "/api/episodes/ep-1/cover" {
+		t.Fatalf("ep-1 cover path = %q, want the cover route", listed.Episodes[0].CoverPath)
+	}
+	if listed.Episodes[1].CoverPath != "" {
+		t.Fatalf("ep-2 cover path = %q, want empty with no cover", listed.Episodes[1].CoverPath)
+	}
+
+	detail := func(id string) episodeDetailJSON {
+		t.Helper()
+		rec := serve(guests, handler, cookie, httptest.NewRequest(http.MethodGet, "/api/episodes/"+id, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("detail %s status = %d, want 200", id, rec.Code)
+		}
+		var body episodeDetailJSON
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("decode detail %s: %v", id, err)
+		}
+		return body
+	}
+	if got := detail("ep-1"); got.CoverPath != "/api/episodes/ep-1/cover" || got.Episode.CoverPath != "/api/episodes/ep-1/cover" {
+		t.Fatalf("ep-1 detail cover = %q nested %q, want the cover route", got.CoverPath, got.Episode.CoverPath)
+	}
+	if got := detail("ep-2"); got.CoverPath != "" || got.Episode.CoverPath != "" {
+		t.Fatalf("ep-2 detail cover = %q nested %q, want empty", got.CoverPath, got.Episode.CoverPath)
+	}
 }
 
 // ShareToken returns the fixed token for one episode, or empty when the

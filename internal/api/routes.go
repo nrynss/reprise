@@ -61,6 +61,7 @@ var routeTable = []Route{
 	{Method: "GET", Pattern: "/api/episodes/{id}"},
 	{Method: "POST", Pattern: "/api/episodes/{id}/decisions"},
 	{Method: "POST", Pattern: "/api/episodes/{id}/done"},
+	{Method: "GET", Pattern: "/api/episodes/{id}/cover"},
 	{Method: "GET", Pattern: "/api/jobs/{id}/events"},
 	{Method: "POST", Pattern: "/api/episodes/{id}/publish"},
 	{Method: "DELETE", Pattern: "/api/episodes/{id}/publish"},
@@ -75,6 +76,8 @@ var routeTable = []Route{
 	{Method: "GET", Pattern: "/api/login/status"},
 	{Method: "GET", Pattern: "/api/login/google/start"},
 	{Method: "GET", Pattern: "/api/login/google/callback"},
+	{Method: "GET", Pattern: "/api/account"},
+	{Method: "PUT", Pattern: "/api/account/name"},
 	{Method: "POST", Pattern: "/api/account/delete"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
@@ -122,11 +125,12 @@ type GuestSessions interface {
 // leaves its route on the stub, except the privacy routes the feature
 // hook mounts, which Mount leaves unregistered. A process without that
 // store still serves the table. Sessions is the session broker. Episodes serves the
-// episode list, detail, decisions, and mark done routes. SessionEnd
+// episode list, detail, cover, decisions, and mark done routes. SessionEnd
 // records the provider close the browser already sent. Threads serves the
 // cross episode index. Admin is the limits handler. Login serves the
 // sign-in code request, the verify, and the sign-out routes through its
-// mux. Account serves the account deletion route. Uploads is the chunked
+// mux. Account serves the account deletion route. Profile serves the
+// account read and the display name write. Uploads is the chunked
 // upload handler, configured with UploadBasePath. Media is the blob store.
 // Events is the stream broker serving one job topic per request. The two
 // owner ceilings must agree whenever Sessions or Admin is present, because
@@ -140,7 +144,7 @@ type Dependencies struct {
 	Identity GuestSessions
 	// Sessions starts live sessions.
 	Sessions http.Handler
-	// Episodes serves the episode list, detail, decisions, and done.
+	// Episodes serves the episode list, detail, cover, decisions, and done.
 	Episodes http.Handler
 	// SessionEnd records the provider id the browser reports, through
 	// the end route at close and the provider route mid-take.
@@ -154,6 +158,8 @@ type Dependencies struct {
 	Login http.Handler
 	// Account serves the account deletion route.
 	Account http.Handler
+	// Profile serves the account read and the display name write.
+	Profile http.Handler
 	// Uploads receives stem chunks.
 	Uploads http.Handler
 	// Media serves private blobs.
@@ -229,7 +235,7 @@ func (d Dependencies) handlerFor(route Route) http.Handler {
 		return d.Sessions
 	case "POST /api/sessions/{id}/end", "POST /api/sessions/{id}/provider":
 		return d.SessionEnd
-	case "GET /api/episodes", "GET /api/episodes/{id}",
+	case "GET /api/episodes", "GET /api/episodes/{id}", "GET /api/episodes/{id}/cover",
 		"POST /api/episodes/{id}/decisions", "POST /api/episodes/{id}/done":
 		return d.Episodes
 	case "GET /api/threads":
@@ -244,6 +250,8 @@ func (d Dependencies) handlerFor(route Route) http.Handler {
 		return d.Login
 	case "POST /api/account/delete":
 		return d.Account
+	case "GET /api/account", "PUT /api/account/name":
+		return d.Profile
 	case " " + UploadBasePath + "/":
 		return d.Uploads
 	case "GET /media/{id}":

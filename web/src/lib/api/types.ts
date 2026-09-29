@@ -25,6 +25,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
 	{ method: 'GET', pattern: '/api/episodes/{id}' },
 	{ method: 'POST', pattern: '/api/episodes/{id}/decisions' },
 	{ method: 'POST', pattern: '/api/episodes/{id}/done' },
+	{ method: 'GET', pattern: '/api/episodes/{id}/cover' },
 	{ method: 'GET', pattern: '/api/jobs/{id}/events' },
 	{ method: 'POST', pattern: '/api/episodes/{id}/publish' },
 	{ method: 'DELETE', pattern: '/api/episodes/{id}/publish' },
@@ -39,6 +40,8 @@ export const API_ROUTES: readonly ApiRoute[] = [
 	{ method: 'GET', pattern: '/api/login/status' },
 	{ method: 'GET', pattern: '/api/login/google/start' },
 	{ method: 'GET', pattern: '/api/login/google/callback' },
+	{ method: 'GET', pattern: '/api/account' },
+	{ method: 'PUT', pattern: '/api/account/name' },
 	{ method: 'POST', pattern: '/api/account/delete' },
 	{ method: 'GET', pattern: '/media/{id}' }
 ];

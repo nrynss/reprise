@@ -76,14 +76,28 @@ type shareLookup interface {
 	ShareToken(ctx context.Context, ownerID, episodeID string) (string, error)
 }
 
+// coverStore reports whether a cover exists and serves its bytes. The boot
+// implements it over the cover directory, and tests bind a fake, so the
+// episode routes never touch the filesystem directly. A nil store leaves
+// every cover path empty and every cover read at 404.
+type coverStore interface {
+	// HasCover reports whether a cover exists for one episode the owner holds.
+	HasCover(ctx context.Context, ownerID, episodeID string) (bool, error)
+	// CoverBytes returns the stored PNG for one episode the owner holds.
+	// It reports episode.ErrNotFound when no cover exists, so the handler
+	// answers 404 either way and never confirms what exists.
+	CoverBytes(ctx context.Context, ownerID, episodeID string) ([]byte, error)
+}
+
 // Episodes serves the episode list, detail, decisions, and mark done
 // routes. Create it with NewEpisodes, because the zero value holds no
-// store. Mount wires one value under all four table patterns behind the
+// store. Mount wires one value under all five table patterns behind the
 // spend gate and the guest middleware.
 type Episodes struct {
 	store   episodeStore
 	preview previewStore
 	share   shareLookup
+	cover   coverStore
 }
 
 // NewEpisodes returns the episode routes on one handler. A nil store
@@ -106,10 +120,19 @@ func NewEpisodesWithPreview(store episodeStore, preview previewStore) http.Handl
 // share lookup leaves the share path empty, the way episodes without a
 // public link read.
 func NewEpisodesWithShare(store episodeStore, preview previewStore, share shareLookup) http.Handler {
-	h := &Episodes{store: store, preview: preview, share: share}
+	return NewEpisodesWithCover(store, preview, share, nil)
+}
+
+// NewEpisodesWithCover returns the episode routes on one handler with the
+// preview reader, the share token reader, and the cover reader behind the
+// list and the detail. A nil cover leaves every cover path empty and every
+// cover read at 404, the way episodes without a cover read.
+func NewEpisodesWithCover(store episodeStore, preview previewStore, share shareLookup, cover coverStore) http.Handler {
+	h := &Episodes{store: store, preview: preview, share: share, cover: cover}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/episodes", h.list)
 	mux.HandleFunc("GET /api/episodes/{id}", h.detail)
+	mux.HandleFunc("GET /api/episodes/{id}/cover", h.serveCover)
 	mux.HandleFunc("POST /api/episodes/{id}/decisions", h.decide)
 	mux.HandleFunc("POST /api/episodes/{id}/done", h.done)
 	return mux
@@ -128,6 +151,9 @@ type episodeJSON struct {
 	State string `json:"state"`
 	// Visibility is private until an explicit publish.
 	Visibility string `json:"visibility"`
+	// CoverPath is /api/episodes/{id}/cover while a cover exists, or
+	// empty otherwise. The gallery shows the cover when set.
+	CoverPath string `json:"cover_path"`
 }
 
 // episodeListJSON lists the owner episodes, oldest number first.
@@ -216,6 +242,10 @@ type episodeDetailJSON struct {
 	// new. The episode view shows it as a link every time, without
 	// waiting for a fresh publish answer.
 	SharePath string `json:"share_path"`
+	// CoverPath is /api/episodes/{id}/cover while a cover exists, or
+	// empty otherwise. Only the owner reads the detail, so it exposes
+	// nothing new.
+	CoverPath string `json:"cover_path"`
 }
 
 // transcriptOutcomeJSON carries one pass outcome on the wire. Error stays
@@ -272,7 +302,8 @@ func episodeOf(ep episode.Episode) episodeJSON {
 }
 
 // list answers GET /api/episodes with the owner episodes. A stranger
-// lists nothing, because the store scopes on the request guest.
+// lists nothing, because the store scopes on the request guest. Each row
+// carries its cover path, empty while no cover exists.
 func (h *Episodes) list(w http.ResponseWriter, r *http.Request) {
 	owner, ok := ownerOf(w, r)
 	if !ok {
@@ -289,7 +320,14 @@ func (h *Episodes) list(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]episodeJSON, 0, len(eps))
 	for _, ep := range eps {
-		out = append(out, episodeOf(ep))
+		row := episodeOf(ep)
+		path, err := h.coverPathOf(r.Context(), owner, ep.ID)
+		if err != nil {
+			_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the covers could not be read", nil)
+			return
+		}
+		row.CoverPath = path
+		out = append(out, row)
 	}
 	writeJSON(w, http.StatusOK, episodeListJSON{Episodes: out})
 }
@@ -402,6 +440,13 @@ func (h *Episodes) detail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	detail.SharePath = sharePath
+	coverPath, err := h.coverPathOf(r.Context(), owner, episodeID)
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the covers could not be read", nil)
+		return
+	}
+	detail.CoverPath = coverPath
+	detail.Episode.CoverPath = coverPath
 	detail.TranscriptOutcome = outcomeOf(outcome)
 	detail.EditorialOutcome = outcomeOf(editorial)
 	detail.RenderOutcome = outcomeOf(rendered)
@@ -436,6 +481,67 @@ func mediaPath(id string) string {
 		return ""
 	}
 	return "/media/" + id
+}
+
+// coverPathOf returns /api/episodes/{id}/cover while a cover exists, or
+// empty otherwise. A store without a cover reader reports empty, so rows
+// without a cover read the way they always did.
+func (h *Episodes) coverPathOf(ctx context.Context, ownerID, episodeID string) (string, error) {
+	if h.cover == nil {
+		return "", nil
+	}
+	has, err := h.cover.HasCover(ctx, ownerID, episodeID)
+	if err != nil {
+		return "", err
+	}
+	if !has {
+		return "", nil
+	}
+	return "/api/episodes/" + episodeID + "/cover", nil
+}
+
+// serveCover answers GET /api/episodes/{id}/cover with the stored PNG to the
+// owner only. A foreign episode and an episode with no cover both answer
+// 404, so no probe tells a visitor what exists. The bytes travel private
+// with no-cache, so a shared cache never keeps them.
+func (h *Episodes) serveCover(w http.ResponseWriter, r *http.Request) {
+	owner, ok := ownerOf(w, r)
+	if !ok {
+		return
+	}
+	if h.store == nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the episode store is not wired", nil)
+		return
+	}
+	episodeID := r.PathValue("id")
+	if _, err := h.store.Get(r.Context(), owner, episodeID); errors.Is(err, episode.ErrNotFound) {
+		_ = wire.WriteError(w, http.StatusNotFound, CodeEpisodeNotFound, "no episode lives at this id", nil)
+		return
+	} else if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the episode could not be read", nil)
+		return
+	}
+	if h.cover == nil {
+		_ = wire.WriteError(w, http.StatusNotFound, CodeEpisodeNotFound, "no episode lives at this id", nil)
+		return
+	}
+	png, err := h.cover.CoverBytes(r.Context(), owner, episodeID)
+	if errors.Is(err, episode.ErrNotFound) {
+		_ = wire.WriteError(w, http.StatusNotFound, CodeEpisodeNotFound, "no episode lives at this id", nil)
+		return
+	}
+	if err != nil {
+		_ = wire.WriteError(w, http.StatusInternalServerError, CodeInternal, "the cover could not be read", nil)
+		return
+	}
+	if len(png) == 0 {
+		_ = wire.WriteError(w, http.StatusNotFound, CodeEpisodeNotFound, "no episode lives at this id", nil)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(png)
 }
 
 // sharePathOf returns /share/<token> while the episode is public, or

@@ -3031,7 +3031,7 @@ func TestPublicDetailReloadCarriesSharePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open episode service: %v", err)
 	}
-	wired := identitySvc.Middleware(episodeRoutes(fx.db, episodeSvc))
+	wired := identitySvc.Middleware(episodeRoutes(fx.db, episodeSvc, settings.Settings{MediaDir: fx.pipe.mediaDir}))
 	serve := func(handler http.Handler, cookie *http.Cookie, id string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "/api/episodes/"+id, nil)
 		if cookie != nil {
@@ -3598,6 +3598,27 @@ func TestBootAccountDeleteErasesOwnerEndToEnd(t *testing.T) {
 	const address = "gone@example.com"
 	const episode = "episode-delete-e2e"
 	cookie, sessionID := plantDeleteOwner(t, db, dir, owner, address, episode)
+	if _, err := db.Writer().ExecContext(ctx,
+		"UPDATE users SET display_name = ? WHERE id = ?", "Mara", owner); err != nil {
+		t.Fatalf("set display name: %v", err)
+	}
+	accountReq := httptest.NewRequest(http.MethodGet, "/api/account", nil)
+	accountReq.AddCookie(cookie)
+	accountRec := httptest.NewRecorder()
+	mux.ServeHTTP(accountRec, accountReq)
+	if accountRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/account status = %d, want 200: %s", accountRec.Code, accountRec.Body.String())
+	}
+	var account struct {
+		Email       string `json:"email"`
+		DisplayName string `json:"display_name"`
+	}
+	if err := json.Unmarshal(accountRec.Body.Bytes(), &account); err != nil {
+		t.Fatalf("decode account: %v", err)
+	}
+	if account.Email != address || account.DisplayName != "Mara" {
+		t.Fatalf("account = %+v, want the address with Mara", account)
+	}
 	code := requestDeleteCode(t, db, dir, sessionID, address)
 
 	payload, err := json.Marshal(map[string]string{"email": address, "code": code})
@@ -3647,6 +3668,84 @@ func TestBootAccountDeleteErasesOwnerEndToEnd(t *testing.T) {
 	}
 	if codes != 0 {
 		t.Fatalf("login_codes holds %d rows, want none", codes)
+	}
+}
+
+// TestBootServesOwnerCover boots the wired episode routes, writes one cover
+// file, and requires the owner to read PNG with a private no-cache header
+// while a stranger reads 404. An episode with no file reads 404 too, so a
+// probe learns nothing about what exists.
+func TestBootServesOwnerCover(t *testing.T) {
+	dir := t.TempDir()
+	loaded := bootSettings(t, dir)
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	mux := http.NewServeMux()
+	if _, err := wireAPI(ctx, mux, loaded, bootPlan{features: features(), advancePeriod: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	db := openBootDB(t, loaded)
+	const owner = "user-cover-e2e"
+	const address = "cover@example.com"
+	const episode = "episode-cover-e2e"
+	cookie, _ := plantDeleteOwner(t, db, dir, owner, address, episode)
+	coverDir := filepath.Join(loaded.MediaDir, "covers")
+	if err := os.MkdirAll(coverDir, 0o755); err != nil {
+		t.Fatalf("make cover dir: %v", err)
+	}
+	png := []byte{0x89, 0x50, 0x4e, 0x47, 0x01}
+	if err := os.WriteFile(filepath.Join(coverDir, episode+".png"), png, 0o600); err != nil {
+		t.Fatalf("write cover: %v", err)
+	}
+	get := func(cookie *http.Cookie, id string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/episodes/"+id+"/cover", nil)
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := get(cookie, episode)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("owner cover status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("cover type = %q, want image/png", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, no-cache" {
+		t.Fatalf("cover cache = %q, want private no-cache", got)
+	}
+	if !bytes.Equal(rec.Body.Bytes(), png) {
+		t.Fatalf("cover body = %q, want the stored bytes", rec.Body.String())
+	}
+	other, _ := plantDeleteOwner(t, db, dir, "user-cover-stranger", "stranger@example.com", "episode-cover-stranger")
+	if rec := get(other, episode); rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign cover status = %d, want 404", rec.Code)
+	}
+	if rec := get(cookie, "episode-cover-stranger"); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing cover status = %d, want 404", rec.Code)
+	}
+	listReq := httptest.NewRequest(http.MethodGet, "/api/episodes", nil)
+	listReq.AddCookie(cookie)
+	listRec := httptest.NewRecorder()
+	mux.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200: %s", listRec.Code, listRec.Body.String())
+	}
+	var list struct {
+		Episodes []struct {
+			ID        string `json:"id"`
+			CoverPath string `json:"cover_path"`
+		} `json:"episodes"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	for _, row := range list.Episodes {
+		if row.ID == episode && row.CoverPath != "/api/episodes/"+episode+"/cover" {
+			t.Fatalf("list cover path = %q, want the cover route", row.CoverPath)
+		}
 	}
 }
 
