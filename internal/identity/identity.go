@@ -34,9 +34,9 @@ const CookieName = "reprise_session"
 // KindGuest marks a user row created on a first visit.
 const KindGuest = "guest"
 
-// KindOwner marks a user row with a login. No login exists yet, so this
-// package only writes guest rows. The constant names the other value the
-// kind column already holds.
+// KindOwner marks a user row with a login. The sign-in code flow
+// attaches an email identity to the current user and flips its kind to
+// this value, so retention keeps the diary.
 const KindOwner = "owner"
 
 // sessionLifetime is how long the browser keeps the session cookie. A
@@ -61,12 +61,16 @@ var ErrInvalid = errors.New("identity: invalid config")
 var ErrNoSession = errors.New("identity: no session")
 
 // Config configures a Service. DB is the shared handle. SigningKey is the
-// resolved session signing secret. Now stamps created and seen times, and
-// nil means time.Now.
+// resolved session signing secret. LoginCodeKey signs the sign-in code
+// and address hashes, and empty disables the code routes. Mail sends the
+// code mail, and nil disables the code routes. Now stamps created and
+// seen times, and nil means time.Now.
 type Config struct {
-	DB         *sqlite.DB
-	SigningKey string
-	Now        func() time.Time
+	DB           *sqlite.DB
+	SigningKey   string
+	LoginCodeKey string
+	Mail         Sender
+	Now          func() time.Time
 }
 
 // User is one guest or owner row. Handlers compare its ID against the
@@ -82,9 +86,11 @@ type User struct {
 // with New, because the zero value has no database and no key. A Service
 // is safe for concurrent use.
 type Service struct {
-	db  *sqlite.DB
-	key []byte
-	now func() time.Time
+	db      *sqlite.DB
+	key     []byte
+	codeKey []byte
+	mail    Sender
+	now     func() time.Time
 }
 
 // New migrates the session rows and returns the Service. Open the diary
@@ -107,14 +113,34 @@ func New(ctx context.Context, cfg Config) (*Service, error) {
 	if err := sqlite.Migrate(ctx, cfg.DB, schemaNamespace, schema); err != nil {
 		return nil, fmt.Errorf("identity: open: %w", err)
 	}
-	return &Service{db: cfg.DB, key: []byte(cfg.SigningKey), now: now}, nil
+	return &Service{db: cfg.DB, key: []byte(cfg.SigningKey), codeKey: []byte(cfg.LoginCodeKey), mail: cfg.Mail, now: now}, nil
 }
 
 // Resolve returns the user behind the request cookie without minting. It
 // returns ErrNoSession when the cookie is absent, malformed, badly
 // signed, unknown or revoked. A valid session touches the last seen time.
 func (s *Service) Resolve(r *http.Request) (User, error) {
-	return s.resolve(r)
+	user, _, err := s.resolve(r)
+	return user, err
+}
+
+// SessionIDFromContext returns the session id the Middleware resolved
+// for this request. It returns false when no middleware ran. Handlers
+// that rotate or revoke the session read it here instead of parsing the
+// cookie again.
+func SessionIDFromContext(ctx context.Context) (string, bool) {
+	sessionID, ok := ctx.Value(sessionContextKey{}).(string)
+	if !ok || sessionID == "" {
+		return "", false
+	}
+	return sessionID, true
+}
+
+// SetSessionCookie writes the session cookie for one session id. The
+// sign-in verify calls it for a rotated session. It writes the same
+// cookie the middleware sets for a minted guest.
+func (s *Service) SetSessionCookie(w http.ResponseWriter, sessionID string) {
+	setSessionCookie(w, sessionID, s)
 }
 
 // Middleware ensures every request carries a guest user. A request with a
@@ -124,22 +150,24 @@ func (s *Service) Resolve(r *http.Request) (User, error) {
 // every ownership check. A database fault answers 500.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, err := s.resolve(r)
+		user, sessionID, err := s.resolve(r)
 		if err == nil {
-			next.ServeHTTP(w, r.WithContext(withUser(r.Context(), user)))
+			ctx := withUser(r.Context(), user)
+			next.ServeHTTP(w, r.WithContext(withSession(ctx, sessionID)))
 			return
 		}
 		if !errors.Is(err, ErrNoSession) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		user, sessionID, err := s.mint(r.Context())
+		user, sessionID, err = s.mint(r.Context())
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		setSessionCookie(w, sessionID, s)
-		next.ServeHTTP(w, r.WithContext(withUser(r.Context(), user)))
+		ctx := withUser(r.Context(), user)
+		next.ServeHTTP(w, r.WithContext(withSession(ctx, sessionID)))
 	})
 }
 
@@ -174,7 +202,7 @@ func (s *Service) AuthorizeMedia(r *http.Request, blob mediastore.Blob) bool {
 	if blob.Visibility == mediastore.Public {
 		return true
 	}
-	user, err := s.resolve(r)
+	user, _, err := s.resolve(r)
 	if err != nil {
 		return false
 	}
@@ -189,15 +217,15 @@ func UserFromContext(ctx context.Context) (User, bool) {
 }
 
 // resolve validates the request cookie against the rows. A valid session
-// touches the last seen time before it returns.
-func (s *Service) resolve(r *http.Request) (User, error) {
+// touches the last seen time before it returns, with its session id.
+func (s *Service) resolve(r *http.Request) (User, string, error) {
 	cookie, err := r.Cookie(CookieName)
 	if err != nil {
-		return User{}, ErrNoSession
+		return User{}, "", ErrNoSession
 	}
 	sessionID, ok := s.verify(cookie.Value)
 	if !ok {
-		return User{}, ErrNoSession
+		return User{}, "", ErrNoSession
 	}
 	var user User
 	var revoked int
@@ -206,21 +234,21 @@ func (s *Service) resolve(r *http.Request) (User, error) {
 		FROM guest_sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`, sessionID).Scan(
 		&user.ID, &user.Kind, &created, &seen, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
-		return User{}, ErrNoSession
+		return User{}, "", ErrNoSession
 	}
 	if err != nil {
-		return User{}, fmt.Errorf("identity: resolve session: %w", err)
+		return User{}, "", fmt.Errorf("identity: resolve session: %w", err)
 	}
 	if revoked != 0 {
-		return User{}, ErrNoSession
+		return User{}, "", ErrNoSession
 	}
 	user.CreatedAt = time.Unix(created, 0)
 	stamp := s.now().Unix()
 	if _, err := s.db.Writer().ExecContext(r.Context(), "UPDATE users SET last_seen_at = ? WHERE id = ?", stamp, user.ID); err != nil {
-		return User{}, fmt.Errorf("identity: touch last seen: %w", err)
+		return User{}, "", fmt.Errorf("identity: touch last seen: %w", err)
 	}
 	user.LastSeen = time.Unix(stamp, 0)
-	return user, nil
+	return user, sessionID, nil
 }
 
 // mint creates a guest user row and its session row in one transaction.
@@ -307,7 +335,16 @@ func setSessionCookie(w http.ResponseWriter, sessionID string, s *Service) {
 // packages from colliding with it.
 type contextKey struct{}
 
+// sessionContextKey carries the resolved session id. Its unexported type
+// keeps other packages from colliding with it.
+type sessionContextKey struct{}
+
 // withUser stores the resolved user in the request context.
 func withUser(ctx context.Context, user User) context.Context {
 	return context.WithValue(ctx, contextKey{}, user)
+}
+
+// withSession stores the resolved session id in the request context.
+func withSession(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, sessionContextKey{}, sessionID)
 }
