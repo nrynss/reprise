@@ -118,6 +118,47 @@ func TestKnownFileServedDirectly(t *testing.T) {
 	}
 }
 
+// TestAppCacheHeaders serves a small build and checks the cache headers.
+// The shell and the fallback ask the browser to revalidate, while the
+// versioned bundle stays cached for a year.
+func TestAppCacheHeaders(t *testing.T) {
+	dir := t.TempDir()
+	for _, file := range []string{"index.html", "fallback.html", "favicon.svg"} {
+		if err := os.WriteFile(filepath.Join(dir, file), []byte("shell"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	immutable := filepath.Join(dir, "_app", "immutable")
+	if err := os.MkdirAll(immutable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(immutable, "x.js"), []byte("export {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(appHandler(dir))
+	defer srv.Close()
+	get := func(path string) string {
+		t.Helper()
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		_, _ = io.ReadAll(resp.Body)
+		return resp.Header.Get("Cache-Control")
+	}
+
+	for _, path := range []string{"/", "/index.html", "/episodes/one", "/favicon.svg"} {
+		if got := get(path); got != "no-cache" {
+			t.Fatalf("%s Cache-Control = %q, want no-cache", path, got)
+		}
+	}
+	if got := get("/_app/immutable/x.js"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("immutable Cache-Control = %q, want the year-long header", got)
+	}
+}
+
 // stubHandler answers 200 through any gate, so a passed request is visible
 // as a 200 and a refused one is not.
 func stubHandler() http.Handler {
@@ -2202,6 +2243,47 @@ func TestHostWordBoundsComeFromTheStoredSpan(t *testing.T) {
 	for _, w := range replies[0].Words {
 		if !allowed[w.StartMs] || !allowed[w.EndMs] {
 			t.Fatalf("%s end %d is not a stored reply bound", w.Text, w.EndMs)
+		}
+	}
+}
+
+// TestInvertedInterruptKeepsZeroLengthReply decodes a timeline whose
+// second reply is cut 200ms before it starts. Both replies survive with
+// no error, and the cut one spans zero length.
+func TestInvertedInterruptKeepsZeroLengthReply(t *testing.T) {
+	const sessionStart int64 = 5_000_000
+	raw, err := json.Marshal(map[string]any{
+		"started_at_unix_ms": sessionStart,
+		"turns": []any{
+			map[string]any{
+				"agent_text":                "Alpha",
+				"agent_reply_started_at_ms": sessionStart + 1000,
+				"agent_reply_ended_at_ms":   sessionStart + 1600,
+			},
+			map[string]any{
+				"agent_text":                "Beta Gamma",
+				"agent_reply_started_at_ms": sessionStart + 4000,
+				"agent_reply_ended_at_ms":   sessionStart + 4800,
+				"interrupted_at_ms":         sessionStart + 3800,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode timeline: %v", err)
+	}
+	replies, err := repliesFromTimeline(raw)
+	if err != nil {
+		t.Fatalf("replies error = %v, want no error for the cut reply", err)
+	}
+	if len(replies) != 2 {
+		t.Fatalf("replies = %d, want both turns", len(replies))
+	}
+	if got := replies[0].Words[0].EndMs - replies[0].Words[0].StartMs; got != 600 {
+		t.Fatalf("first reply span = %d, want the stored 600", got)
+	}
+	for _, w := range replies[1].Words {
+		if w.StartMs != 0 || w.EndMs != 0 {
+			t.Fatalf("%s spans %d to %d, want zero length", w.Text, w.StartMs, w.EndMs)
 		}
 	}
 }

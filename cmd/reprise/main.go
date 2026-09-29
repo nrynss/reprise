@@ -298,16 +298,30 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // appHandler serves the built application with a single-page fallback.
 // The build emits the client shell as fallback.html, and unknown paths
-// return it so client-side routes survive a reload.
+// return it so client-side routes survive a reload. Versioned bundles
+// under the immutable directory carry a year-long cache header because
+// each name changes with its contents. Every other response asks the
+// browser to revalidate, so a fresh deploy reaches open browsers at
+// once instead of lingering behind heuristic caching.
 func appHandler(webDir string) http.Handler {
 	root := http.FileServer(http.Dir(webDir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		if strings.HasPrefix(path, "/_app/immutable/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			root.ServeHTTP(w, r)
+			return
+		}
+		fallback := false
 		if path != "/" && path != "/index.html" {
 			if _, err := os.Stat(filepath.Join(webDir, path)); errors.Is(err, fs.ErrNotExist) {
-				http.ServeFile(w, r, filepath.Join(webDir, "fallback.html"))
-				return
+				fallback = true
 			}
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		if fallback {
+			http.ServeFile(w, r, filepath.Join(webDir, "fallback.html"))
+			return
 		}
 		root.ServeHTTP(w, r)
 	})
@@ -2916,7 +2930,9 @@ func (j *jobs) readMediaFile(mediaID string) ([]byte, error) {
 
 // repliesFromTimeline turns one provider timeline into host replies.
 // Turns with no host text are skipped. A reply start is milliseconds
-// from the session start, which is the host stem clock.
+// from the session start, which is the host stem clock. A reply cut
+// short at its very start keeps a zero length span, so one odd turn
+// never fails the transcript.
 func repliesFromTimeline(raw []byte) ([]transcript.HostReply, error) {
 	var doc timelineFile
 	if err := json.Unmarshal(raw, &doc); err != nil {
@@ -2958,6 +2974,8 @@ func repliesFromTimeline(raw []byte) ([]transcript.HostReply, error) {
 // replyEnd returns the reply end on the session clock. An interrupt
 // stops the reply early when it lands before the planned end. A reply
 // with neither end uses its start, so the words sit on that instant.
+// An end before the start means the guest cut in as the reply began,
+// so the reply spans zero length and the transcript keeps the turn.
 func replyEnd(turn timelineTurn, sessionStart, start int64) (int64, error) {
 	endAbs := turn.AgentReplyEndedAtMs
 	if turn.InterruptedAtMs != nil && (endAbs == nil || *turn.InterruptedAtMs < *endAbs) {
@@ -2968,7 +2986,8 @@ func replyEnd(turn timelineTurn, sessionStart, start int64) (int64, error) {
 	}
 	end := *endAbs - sessionStart
 	if end < start {
-		return 0, fmt.Errorf("reprise: host replies: reply ends before it starts")
+		log.Printf("reprise transcript: reply ends before it starts, keeping zero length")
+		return start, nil
 	}
 	return end, nil
 }
