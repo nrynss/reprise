@@ -207,7 +207,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/account/, web/src/lib/components/AccountLink.svelte,
              web/src/lib/components/SeasonNav.svelte
-status:     not-started
+status:     in-progress:implement:t8.6-impl
 ```
 * `SeasonNav` gains a quiet "Sign in" link. It reads "Account" once signed in.
 * `/account`: an email field, then a 6-digit code field with a resend link that honours
