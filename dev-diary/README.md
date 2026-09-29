@@ -48,6 +48,7 @@ mid.
 | **P6** Ship | [PHASE-6-ship.md](PHASE-6-ship.md) | P4, P5 | none | submission |
 | **P7** Production issues | [PHASE-7-production-issues.md](PHASE-7-production-issues.md) | T6.1b | none | P6 close |
 | **P8** Accounts | [PHASE-8-accounts.md](PHASE-8-accounts.md) | P7 dogfood rounds | none | T7.4 |
+| **P9** Polish | [PHASE-9-polish.md](PHASE-9-polish.md) | T8.18 | none | final dogfood take |
 
 ```text
   P0 ──▶ P1 ──┬──▶ P2 live session ─────────┐
