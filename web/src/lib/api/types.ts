@@ -36,6 +36,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
 	{ method: 'POST', pattern: '/api/login/code' },
 	{ method: 'POST', pattern: '/api/login/verify' },
 	{ method: 'POST', pattern: '/api/login/signout' },
+	{ method: 'POST', pattern: '/api/account/delete' },
 	{ method: 'GET', pattern: '/media/{id}' }
 ];
 

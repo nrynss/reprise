@@ -73,9 +73,6 @@ export const SIGN_OUT_FAILED = 'Signing out did not work. Try again.';
 // DELETE_ACCOUNT names the deletion entry on the signed in screen.
 export const DELETE_ACCOUNT = 'Delete account';
 
-// DELETE_SOON says deletion arrives later. The entry stays inert, so no one follows a missing screen.
-export const DELETE_SOON = 'Account deletion arrives with the next update.';
-
 // CONFLICT_HEADING names the choice between two diaries.
 export const CONFLICT_HEADING = 'This device already holds takes';
 
