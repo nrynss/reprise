@@ -451,7 +451,7 @@ size:       XS · light
 owns:       internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts
-status:     in-progress:land:t8.16-impl@7958f5da648c9fe5f999db58b216fe6257630c13
+status:     done:373abd0
 ```
 T8.12 ships the status handler unmounted: the path 404s and the golden
 does not list it.
@@ -501,6 +501,12 @@ passes in a fresh worktree past the leakage step.
 
 ### What exists now
 
+T8.16 landed at 373abd0 after round 1 APPROVE with zero in-scope
+findings. The status route mounts beside sign-out with golden and
+mirror carrying it. One out of scope H stays open under T8.17: the
+gate leakage scan trips on the Google query parsing. Reviewed
+commit 7958f5d rebased clean. Race tests pass on the landed
+commit.
 T8.12 landed at 0260e01 after round 1 APPROVE with zero findings.
 The status handler answers the caller's own address or signed
 out, read-only, with mounting scoped into T8.16. Reviewed commit
