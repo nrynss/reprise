@@ -2576,7 +2576,7 @@ owns:       web/src/routes/episode/[id]/+page.svelte, web/src/lib/components/Sea
              web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts,
              web/src/lib/copy.test.ts
-status:     in-progress:land:t7.81-impl@c76afa9d95ec0256247dbcf85e7545e0602dd4f5
+status:     done:3f7b623
 ```
 **Defect 1.** On 2026-09-29 the owner saw "Threads" and "Edit" as bare links on the episode page.
 T7.77 styled only the Gallery and Threads pages and the back link. In the `<nav aria-label="Season">`
@@ -2614,6 +2614,30 @@ as a tab and Edit as a primary pill. The existing specs change to the new wordin
 **Done when:** The tests pass, and the gate passes in a fresh worktree. Restoring "Live episode from
 the wired detail." fails `copy.test.ts`.
 
+### T7.82: The erase and render notices speak plain words too
+```yaml
+requires:   T7.81
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.spec.ts,
+             web/src/lib/editor/draft.ts, web/src/lib/voice/processing-state.ts,
+             web/src/lib/copy.test.ts
+status:     not-started
+```
+T7.81 round 1 recorded two out of scope L notes. The shared `erase()` path in `threads.ts`
+returns live notices naming build vocabulary (`job` ids, `endpoint` accepted and refused lines,
+including one that says "fixture episode" for a live episode). `draft.ts` names render job ids
+in pass details, and `processing-state.ts` names the job stream on failure. None are named
+constants, so the T7.81 copy gate does not read them.
+
+* Rewrite them in plain words, following the T7.81 copy. Export them as named constants and
+  extend `copy.test.ts` through its existing word list.
+* Update `threads.spec.ts:262`, which pins the current erase refusal line, to the new wording.
+
+**Done when:** The extended copy gate fails when any covered erase or render notice is
+restored to its build vocabulary. The updated Playwright expectation passes in Chromium.
+The gate passes in a fresh worktree.
+
 ---
 
 ## Exit criteria
@@ -2630,6 +2654,13 @@ the wired detail." fails `copy.test.ts`.
 
 ### What exists now
 
+T7.81 landed at 3f7b623 after round 1 APPROVE with zero in-scope
+findings. The episode page renders pill tabs with a filled Edit
+pill, and the six live notices speak plain words behind a copy
+gate. Round 1 recorded two out of scope L notes: erase and render
+notices that still name endpoints and jobs, owned by a follow-up
+copy task. Reviewed commit c76afa9 rebased clean. Unit pins and
+svelte-check pass on the landed commit.
 T7.80 landed at 64eccd3 after round 1 APPROVE with zero findings.
 The episode service carries an owner-scoped share token reader, and
 the binary mounts the detail through it, so a reloaded public detail
