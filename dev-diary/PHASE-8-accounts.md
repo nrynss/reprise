@@ -179,8 +179,9 @@ The gate passes in a fresh worktree.
 requires:   T8.4
 fixture-ok: yes
 size:       M · frontier
-owns:       internal/identity/sendlimit.go, internal/identity/sendlimit_test.go
-status:     in-progress:implement:t8.5-impl
+owns:       internal/identity/sendlimit.go, internal/identity/sendlimit_test.go,
+             internal/identity/login.go, internal/identity/login_test.go
+status:     in-progress:review-r1:t8.5-rev-r1@64fa4a11db0f977ad6b1223c32d83b8d91224363
 ```
 Refuse before the send, never after it. Every limit answers `429` with `Retry-After`.
 
@@ -193,6 +194,11 @@ Refuse before the send, never after it. Every limit answers `429` with `Retry-Af
 
 **Done when:** A fake clock drives each limit to refusal and past its window. The `Sender` fake shows
 no send on a refused request. The gate passes in a fresh worktree.
+
+**Decision, 2026-09-29.** Owns widened to `internal/identity/login.go` and its test,
+the request path the checker protects. A checker no route calls refuses nothing,
+so this task wires the check into the code request (identical 429 body, `Retry-After`
+header) rather than leaving the call site to a later task.
 
 ### T8.6: Sign-in screens
 ```yaml
