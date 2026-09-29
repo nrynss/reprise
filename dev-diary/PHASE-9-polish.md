@@ -82,7 +82,7 @@ requires:   T8.18
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/app.css, web/src/routes/+layout.svelte, web/src/lib/components/
-status:     not-started
+status:     in-progress:land:t9.2-impl@b61190fcc99644c8b2554f15611886caa36610ae
 ```
 Extend T8.18's `app.css` with the layout decisions above.
 
