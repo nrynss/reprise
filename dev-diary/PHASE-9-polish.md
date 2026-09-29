@@ -82,7 +82,7 @@ requires:   T8.18
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/app.css, web/src/routes/+layout.svelte, web/src/lib/components/
-status:     in-progress:land:t9.2-impl@b61190fcc99644c8b2554f15611886caa36610ae
+status:     done:fcc4b2a
 ```
 Extend T8.18's `app.css` with the layout decisions above.
 
@@ -260,7 +260,13 @@ The gate passes in a fresh worktree three times in a row, because the gate grew.
 
 ### What exists now
 
-Nothing yet. The phase opened on 2026-09-29.
+T9.2 landed at fcc4b2a after round 1 APPROVE with zero in-scope
+findings. The responsive column, one-height buttons, equal-height
+cards, flat sections, tabs and the Demo badge live in app.css.
+Reviewed commit b61190f rebased clean. Unit and layout pins pass
+on the landed commit. One out of scope H stays open under T9.8:
+account.spec.ts pins the old 52rem shell, so the gate stays red
+until T9.8 updates that pin to the new measure.
 
 ### What surprised us
 
