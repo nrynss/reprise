@@ -309,7 +309,7 @@ requires:   none
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/privacy/+page.svelte, web/src/routes/account/google/+page.svelte
-status:     in-progress:remediate-r1:t9.11-rem-r1
+status:     in-progress:land:t9.11-rem-r1@a0704f50044b9534db05b5a800e588fe654c1ed0
 ```
 Two true copy positives the T9.9 guard caught in pages no Wave 2 task owns.
 
@@ -330,7 +330,7 @@ requires:   T9.4
 fixture-ok: yes
 size:       XS · light
 owns:       web/tests/shell.spec.ts
-status:     in-progress:land:t9.12-impl@893da8d0c836c21745bb85bfd173c54887c0dd6b
+status:     done:dee9bd5
 ```
 `shell.spec.ts:5` expects the pre-T9.4 gallery h1. T9.4 replaced that header by design.
 
@@ -344,7 +344,7 @@ requires:   T9.1
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/identity/migrations/
-status:     in-progress:land:t9.13-impl@34cdca3ce41f23d0a9dc940828e7431544d423d0
+status:     done:68e2ace
 ```
 `TestLoginMigrationsApplyOnEmptyDatabase` fails: the login migration set applies the users-table ALTER from `0003_display_name.sql` on a database with no diary tables (`no such table: users`). T9.1 proved the boot path, not the login set alone.
 
@@ -368,6 +368,14 @@ status:     in-progress:land:t9.13-impl@34cdca3ce41f23d0a9dc940828e7431544d423d0
 
 ### What exists now
 
+T9.12 landed at dee9bd5 after round 1 APPROVE with zero findings.
+The shell spec pins the landed gallery header. Reviewed commit
+893da8d rebased clean. Pin passes on the landed commit.
+T9.13 landed at 68e2ace after round 1 APPROVE with zero findings.
+The login migration set stages the users table before the display
+name ALTER, so empty databases apply cleanly and diary copies
+backfill. Reviewed commit 34cdca3 rebased clean. Race tests pass
+on the landed commit.
 T9.7 landed at 77a81be after round 1 APPROVE with zero findings.
 Threads renders flat cards with plain quote lists and the agreed
 header as its sub line, matching the gallery split. Reviewed commit
