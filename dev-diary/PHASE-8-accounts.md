@@ -485,6 +485,110 @@ stores) matches `params.get(` in `google.ts`, so the gate is red on
 empty on `main`, and the google unit tests still pass. The gate
 passes in a fresh worktree past the leakage step.
 
+### T8.18: One shared look for every page
+```yaml
+requires:   T8.6, T8.7
+fixture-ok: yes
+size:       M · mid
+owns:       web/src/app.css, web/src/routes/+layout.svelte, web/src/routes/account/,
+             web/src/lib/components/AccountLink.svelte
+status:     not-started
+```
+**Defect.** On 2026-09-29 the owner opened `/account`. It had no page width, no centring, and no
+button styles. It also showed a "Season one" eyebrow copied from the gallery, where it means
+something. No shared stylesheet exists. `web/src/routes/+layout.svelte` only renders its children.
+The colour tokens (`--paper`, `--raised`, `--ink`, `--muted`, `--accent`, `--on-accent`,
+`--line`) live in the gallery page's own `:root` block. Each page copies its own `main`, `button`
+and `nav` rules. The account page copied none of them, and its Bits UI `Button.Root` controls render
+bare. The "Sign in" link in `AccountLink.svelte` is an underlined text link beside two pill tabs.
+
+**Change.**
+1. Add `web/src/app.css` and import it once in `+layout.svelte`. It holds the colour tokens and the
+   page shell: `main` at `max-width: 52rem`, centred, with the gallery's padding and font. It also
+   holds the `.eyebrow` and `.sub` text styles, a `nav` row, form inputs with a visible focus
+   ring, and two button classes. `.button` is the primary filled pill, and `.button.secondary` is
+   the outlined pill. Bare `button` elements get the primary style, so a new page starts styled.
+2. On the account pages, drop "Season one". Use no eyebrow, or "Reprise". Give each Bits UI
+   `Button.Root` the shared class. The send and check buttons are primary, and resend, keep, switch
+   and sign out are secondary. Delete account is a secondary pill in the warning colour.
+3. `AccountLink` renders as the same pill as the season tabs. It is filled when the current page is
+   `/account`.
+4. Leave the other pages' own style blocks alone. They still match, and moving them is a later
+   clean-up.
+
+**Tests.** A spec opens `/account` in Chromium and Firefox. It checks that `main` is centred, with
+equal left and right margins at a 1280 px viewport. It checks that the send button's computed
+background is the accent colour and its border radius is 100px. It checks that no text reads "Season
+one". The existing account specs keep passing.
+
+**Done when:** The spec passes, and the gate passes in a fresh worktree. Removing the `app.css` import
+fails it.
+
+### T8.19: A display name for shared episodes
+```yaml
+requires:   T8.16, T8.17
+fixture-ok: yes
+size:       M · frontier
+owns:       internal/identity/migrations/0003_display_name.sql, internal/identity/profile.go,
+             internal/identity/profile_test.go, internal/privacy/share.go,
+             internal/privacy/share_test.go, internal/api/routes.go, internal/api/routes_test.go,
+             web/src/lib/api/types.ts, web/src/lib/api/testdata/routes.json,
+             cmd/reprise/main.go, cmd/reprise/main_test.go
+status:     not-started
+```
+The owner asked that a shared episode say who published it. No person has a name in Reprise. Only an
+email address exists, and a share page must never expose it.
+
+* Migration `0003_display_name.sql` adds `users.display_name TEXT NOT NULL DEFAULT ''`.
+* `PUT /api/account/name` takes `{"name": "..."}`, only for a signed-in user. A guest gets 401. It
+  trims the name, refuses anything over 60 characters or with control characters, and stores it. An
+  empty name clears it.
+* `GET /api/account` answers the name beside the signed-in address, so the account page can show it.
+* The share payload gains `author`, the owner's display name, or empty when unset. It never
+  carries the email, even when the name is empty.
+* Account deletion already removes the user row, so the name goes with it. A test asserts it.
+
+**Done when:** Tests cover the guest refusal, the length and character limits, and a share payload
+carrying the name. A share payload for a user with no name carries an empty `author`, and no payload
+ever contains an `@`. The gate passes in a fresh worktree.
+
+### T8.20: The shared page speaks to listeners and invites them in
+```yaml
+requires:   T8.18, T8.19
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/routes/share/, web/src/routes/account/+page.svelte, web/src/routes/account/account.ts,
+             web/src/routes/account/account.test.ts
+status:     not-started
+```
+**Defect.** On 2026-09-29 the owner read their public page for episode 10. It said "Shared from a
+personal podcast". Its footer read "Published by the author. Only the finished episode is public,
+and everything behind it stays private." That text explains our privacy model to a listener who
+never asked. It names no author, and it offers no way to make one's own. The page also hard-codes
+its own font and colours.
+
+**Change.**
+1. Use the shared look from `app.css`. Centre the cover, title and player.
+2. Under the title, show "by {author}" when `author` is set. Otherwise show nothing there.
+3. Replace the footer with one line and one link: "Made with Reprise, a podcast of your own life,
+   hosted by someone who remembers." The link reads "Start your own" and points to the site root.
+   Drop the privacy wording and the "Shared from a personal podcast" line.
+4. Add Open Graph and Twitter card tags, so a pasted link previews well: `og:title` (the episode
+   title), `og:description` (by the author, or "An episode made with Reprise"), `og:image` (the
+   absolute cover URL), `og:type` = `website`, and `twitter:card` = `summary_large_image`.
+   A crawler does not run the page's script, so the server must render these tags. If the static
+   adapter cannot, say so in the handoff, and name the route a server-side tag injection would need.
+5. The missing-link view keeps one plain sentence: "This episode is no longer shared." It also gets
+   the same "Start your own" link.
+6. On `/account`, a signed-in person sees a "Name on shared episodes" field that saves through
+   `PUT /api/account/name`.
+
+**Tests.** Share specs: an author shows "by {author}", and no author shows no "by" line. The
+footer links to `/` and never contains "private" or "public". Account spec: saving a name updates it,
+and a guest sees no name field.
+
+**Done when:** The tests pass in Chromium and Firefox, and the gate passes in a fresh worktree.
+
 ---
 
 ## Exit criteria
