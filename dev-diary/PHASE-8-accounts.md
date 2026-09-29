@@ -306,8 +306,9 @@ fixture-ok: yes
 size:       S · frontier
 owns:       internal/identity/signout.go, internal/identity/signout_test.go,
              internal/api/routes.go, internal/api/routes_test.go,
-             cmd/reprise/main.go, cmd/reprise/main_test.go, web/package.json
-status:     in-progress:implement:t8.11-impl
+             cmd/reprise/main.go, cmd/reprise/main_test.go, web/package.json,
+             web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts
+status:     in-progress:review-r1:t8.11-rev-r1@aabac5b3c0490538e30f2e9f2dd44f543039fd78
 ```
 T8.6 round 1 proved no sign-out route exists: the account page calls
 `POST /api/login/signout` against an unrouted path, so the session cookie
@@ -327,6 +328,11 @@ sentence is unmet.
 **Done when:** A test signs in, signs out, then shows the old cookie resolves
 as a stranger and the device holds a fresh guest. The account spec passes
 through the `test:e2e` chain. The gate passes in a fresh worktree.
+
+**Decision, 2026-09-29.** Owns widened to the route golden
+(`web/src/lib/api/testdata/routes.json`) and the hand mirror
+(`web/src/lib/api/types.ts`). Both list routes individually, so the
+golden test fails on the added entry until they carry it.
 
 ### T8.12: Session-status route
 ```yaml
