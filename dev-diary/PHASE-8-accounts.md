@@ -267,7 +267,7 @@ requires:   T8.4
 fixture-ok: yes
 size:       S · mid
 owns:       internal/limits/
-status:     in-progress:review-r1:t8.9-rev-r1@af5066e03ce57e39e6ea84d6787ca0c0e107053a
+status:     in-progress:land:t8.9-impl@af5066e03ce57e39e6ea84d6787ca0c0e107053a
 ```
 Replace `StubOwnerAuth` with a check that the request's user holds an identity listed in the
 `operators` setting. An `email:` entry works as soon as T8.4 lands, and a `google:` entry works once
