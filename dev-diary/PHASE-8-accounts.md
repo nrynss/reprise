@@ -451,7 +451,7 @@ size:       XS · light
 owns:       internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts
-status:     not-started
+status:     in-progress:implement:t8.16-impl
 ```
 T8.12 ships the status handler unmounted: the path 404s and the golden
 does not list it.
