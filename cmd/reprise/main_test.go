@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,7 @@ import (
 	"github.com/nrynss/reprise/internal/host"
 	"github.com/nrynss/reprise/internal/identity"
 	"github.com/nrynss/reprise/internal/limits"
+	"github.com/nrynss/reprise/internal/mail"
 	"github.com/nrynss/reprise/internal/memory"
 	"github.com/nrynss/reprise/internal/privacy"
 	"github.com/nrynss/reprise/internal/render"
@@ -3177,5 +3179,326 @@ func TestBootOperatorGateAnswers401403AndServesOperator(t *testing.T) {
 	}
 	if identities != 2 {
 		t.Fatalf("identities = %d, want the two planted rows", identities)
+	}
+}
+
+// readBootSecret reads one secret file the boot settings wrote under
+// dir. The boot and the test sign-in service share the file, so a code
+// the test requests verifies on the booted routes.
+func readBootSecret(t *testing.T, dir, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return string(raw)
+}
+
+// signBootCookie signs one session id with the boot settings key, so a
+// planted session resolves behind the guest middleware.
+func signBootCookie(t *testing.T, dir, sessionID string) *http.Cookie {
+	t.Helper()
+	mac := hmac.New(sha256.New, []byte(readBootSecret(t, dir, "signing.key")))
+	_, _ = mac.Write([]byte(sessionID))
+	return &http.Cookie{
+		Name:  identity.CookieName,
+		Value: sessionID + "." + hex.EncodeToString(mac.Sum(nil)),
+	}
+}
+
+// plantDeleteOwner leaves one signed-in owner with one ready episode
+// holding no provider rows, and returns the session cookie and id. The
+// episode erases locally, so the deletion completes with no provider
+// traffic.
+func plantDeleteOwner(t *testing.T, db *keelsqlite.DB, dir, owner, address, episodeID string) (*http.Cookie, string) {
+	t.Helper()
+	ctx := t.Context()
+	now := time.Now().Unix()
+	sessionID, err := keelid.New()
+	if err != nil {
+		t.Fatalf("mint session id: %v", err)
+	}
+	identityID, err := keelid.New()
+	if err != nil {
+		t.Fatalf("mint identity id: %v", err)
+	}
+	token, err := keelid.New()
+	if err != nil {
+		t.Fatalf("mint share token: %v", err)
+	}
+	writer := db.Writer()
+	if _, err := writer.ExecContext(ctx,
+		`INSERT INTO users (id, kind, created_at, last_seen_at) VALUES (?, ?, ?, ?)`,
+		owner, identity.KindOwner, now, now); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := writer.ExecContext(ctx,
+		`INSERT INTO identities (id, user_id, provider, subject, created_at) VALUES (?, ?, 'email', ?, ?)`,
+		identityID, owner, address, now); err != nil {
+		t.Fatalf("insert identity: %v", err)
+	}
+	if _, err := writer.ExecContext(ctx,
+		`INSERT INTO guest_sessions (id, user_id, created_at, revoked) VALUES (?, ?, ?, 0)`,
+		sessionID, owner, now); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if _, err := writer.ExecContext(ctx, `INSERT INTO episodes
+		(id, owner_id, number, title, state, visibility, share_token, seeded)
+		VALUES (?, ?, 1, 'A quiet take', ?, 'private', ?, 0)`,
+		episodeID, owner, string(episode.StateReady), token); err != nil {
+		t.Fatalf("insert episode: %v", err)
+	}
+	return signBootCookie(t, dir, sessionID), sessionID
+}
+
+// requestDeleteCode asks a real code for one planted session through a
+// test sign-in service on the boot database, and reads the code back
+// from the recorded mail. The boot keeps its own sender, so no test
+// mail ever leaves the process.
+func requestDeleteCode(t *testing.T, db *keelsqlite.DB, dir, sessionID, address string) string {
+	t.Helper()
+	fake := &mail.Fake{}
+	codes, err := identity.New(t.Context(), identity.Config{
+		DB:           db,
+		SigningKey:   readBootSecret(t, dir, "signing.key"),
+		LoginCodeKey: readBootSecret(t, dir, "login.key"),
+		Mail:         fake,
+	})
+	if err != nil {
+		t.Fatalf("open test sign-in: %v", err)
+	}
+	if err := codes.RequestLoginCode(t.Context(), sessionID, address); err != nil {
+		t.Fatalf("request code: %v", err)
+	}
+	sent := fake.Messages()
+	if len(sent) != 1 {
+		t.Fatalf("mail sends = %d, want one", len(sent))
+	}
+	code := regexp.MustCompile(`[0-9]{6}`).FindString(sent[0].Text)
+	if code == "" {
+		t.Fatalf("mail carries no code: %q", sent[0].Text)
+	}
+	return code
+}
+
+// waitAccountJobDone polls one job until its latest attempt lands. A
+// failed latest attempt fails the test with the recorded error, so a
+// stuck deletion fails loudly instead of hanging the suite.
+func waitAccountJobDone(t *testing.T, store job.Store, id string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		rec, err := store.Get(t.Context(), id)
+		if err != nil {
+			t.Fatalf("read job: %v", err)
+		}
+		switch rec.Status {
+		case job.StatusDone:
+			return
+		case job.StatusError, job.StatusCancelled, job.StatusInterrupted:
+			t.Fatalf("job %s ended %s: %v", id, rec.Status, rec.Err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s stayed %s", id, rec.Status)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// countOwnerRows counts the rows one table still holds for owner. The
+// users table keys on its id, and every other table keys on its owner.
+func countOwnerRows(t *testing.T, db *keelsqlite.DB, table, owner string) int {
+	t.Helper()
+	column := "owner_id"
+	switch table {
+	case "users":
+		column = "id"
+	case "identities", "guest_sessions":
+		column = "user_id"
+	}
+	var total int
+	if err := db.Reader().QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM "+table+" WHERE "+column+" = ?", owner).Scan(&total); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return total
+}
+
+// TestBootMountsAccountDeleteRoute checks the boot wires the account
+// deletion route behind the guest middleware. An empty body answers 400
+// with the deletion request code, which proves the table mounted the
+// deletion handler instead of a stub.
+func TestBootMountsAccountDeleteRoute(t *testing.T) {
+	dir := t.TempDir()
+	loaded := bootSettings(t, dir)
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	mux := http.NewServeMux()
+	if _, err := wireAPI(ctx, mux, loaded, bootPlan{features: features(), advancePeriod: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/account/delete", strings.NewReader(`{}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/account/delete status = %d, want 400", rec.Code)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode refusal: %v", err)
+	}
+	if body.Error.Code != privacy.CodeAccountInvalidRequest {
+		t.Fatalf("refusal code = %q, want %q", body.Error.Code, privacy.CodeAccountInvalidRequest)
+	}
+}
+
+// TestBootAccountDeleteErasesOwnerEndToEnd drives one account deletion
+// through the booted route. A planted owner with one episode requests a
+// real code and deletes through the route. The test finds no user,
+// identity, session, code, or episode row left once the deletion job
+// lands. The answer clears the session cookie, so the device starts a
+// fresh diary next.
+func TestBootAccountDeleteErasesOwnerEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	loaded := bootSettings(t, dir)
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	mux := http.NewServeMux()
+	if _, err := wireAPI(ctx, mux, loaded, bootPlan{features: features(), advancePeriod: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	db := openBootDB(t, loaded)
+	const owner = "user-delete-e2e"
+	const address = "gone@example.com"
+	const episode = "episode-delete-e2e"
+	cookie, sessionID := plantDeleteOwner(t, db, dir, owner, address, episode)
+	code := requestDeleteCode(t, db, dir, sessionID, address)
+
+	payload, err := json.Marshal(map[string]string{"email": address, "code": code})
+	if err != nil {
+		t.Fatalf("encode delete body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/account/delete", bytes.NewReader(payload))
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("POST /api/account/delete status = %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	var started struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &started); err != nil {
+		t.Fatalf("decode delete answer: %v", err)
+	}
+	if started.JobID == "" {
+		t.Fatalf("delete answer names no job: %s", rec.Body.String())
+	}
+	var cleared bool
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == identity.CookieName && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatalf("delete answer kept the session cookie")
+	}
+
+	store, err := jobsqlitestore.Open(ctx, jobsqlitestore.Config{DB: db})
+	if err != nil {
+		t.Fatalf("open job store: %v", err)
+	}
+	waitAccountJobDone(t, store, started.JobID)
+
+	for _, table := range []string{"users", "identities", "guest_sessions", "episodes"} {
+		if got := countOwnerRows(t, db, table, owner); got != 0 {
+			t.Fatalf("%s holds %d rows for the deleted owner, want none", table, got)
+		}
+	}
+	var codes int
+	if err := db.Reader().QueryRowContext(ctx, `SELECT COUNT(*) FROM login_codes`).Scan(&codes); err != nil {
+		t.Fatalf("count codes: %v", err)
+	}
+	if codes != 0 {
+		t.Fatalf("login_codes holds %d rows, want none", codes)
+	}
+}
+
+// TestBootResumesInterruptedAccountDelete plants a deletion a restart
+// left running, then boots again over the same database. The fresh
+// runner resumes the deletion from its snapshot and the test finds no
+// user, identity, session, or episode row left. Without the kind
+// registration the planted record would sit interrupted and every row
+// would survive, so the missing rows prove the restart path.
+func TestBootResumesInterruptedAccountDelete(t *testing.T) {
+	dir := t.TempDir()
+	loaded := bootSettings(t, dir)
+	first, stopFirst := context.WithCancel(t.Context())
+	if _, err := wireAPI(first, http.NewServeMux(), loaded, bootPlan{features: features(), advancePeriod: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("first boot: %v", err)
+	}
+	stopFirst()
+	db := openBootDB(t, loaded)
+	const owner = "user-delete-restart"
+	const address = "back@example.com"
+	const episode = "episode-delete-restart"
+	plantDeleteOwner(t, db, dir, owner, address, episode)
+
+	snap, err := json.Marshal(map[string]any{
+		"version": 1,
+		"user":    owner,
+		"episodes": []map[string]any{
+			{"episode": episode},
+		},
+	})
+	if err != nil {
+		t.Fatalf("encode snapshot: %v", err)
+	}
+	jobID, err := keelid.New()
+	if err != nil {
+		t.Fatalf("mint job id: %v", err)
+	}
+	store, err := jobsqlitestore.Open(t.Context(), jobsqlitestore.Config{DB: db})
+	if err != nil {
+		t.Fatalf("open job store: %v", err)
+	}
+	if err := store.Create(t.Context(), job.Record{
+		ID: jobID, Kind: privacy.AccountName, Status: job.StatusRunning,
+		Attempt: 1, RootID: jobID,
+		Progress:  job.Progress{Stage: "account", Detail: snap},
+		UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("plant running deletion: %v", err)
+	}
+
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	if _, err := wireAPI(ctx, http.NewServeMux(), loaded, bootPlan{features: features(), advancePeriod: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("second boot: %v", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if countOwnerRows(t, db, "users", owner) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the resumed deletion never removed the user")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for _, table := range []string{"identities", "guest_sessions", "episodes"} {
+		if got := countOwnerRows(t, db, table, owner); got != 0 {
+			t.Fatalf("%s holds %d rows for the deleted owner, want none", table, got)
+		}
+	}
+	rec, err := store.Get(t.Context(), jobID)
+	if err != nil {
+		t.Fatalf("read planted job: %v", err)
+	}
+	if rec.Status != job.StatusInterrupted {
+		t.Fatalf("planted job status = %q, want interrupted", rec.Status)
 	}
 }

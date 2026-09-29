@@ -50,7 +50,8 @@ type Route struct {
 // store takes the media route later, behind the ownership check. The admin
 // trio takes the limits handler, behind the owner proof. The login trio
 // takes the sign-in handler beside the sign-out route, behind the guest
-// middleware like the rest.
+// middleware like the rest. The account deletion route takes the privacy
+// service deletion handler, behind the guest middleware like the rest.
 var routeTable = []Route{
 	{Method: "POST", Pattern: "/api/sessions"},
 	{Method: "POST", Pattern: "/api/sessions/{id}/end"},
@@ -71,6 +72,7 @@ var routeTable = []Route{
 	{Method: "POST", Pattern: "/api/login/code"},
 	{Method: "POST", Pattern: "/api/login/verify"},
 	{Method: "POST", Pattern: "/api/login/signout"},
+	{Method: "POST", Pattern: "/api/account/delete"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
 
@@ -120,7 +122,8 @@ type GuestSessions interface {
 // episode list, detail, decisions, and mark done routes. SessionEnd
 // records the provider close the browser already sent. Threads serves the
 // cross episode index. Admin is the limits handler. Login serves the
-// sign-in code request and verify routes. Uploads is the chunked
+// sign-in code request, the verify, and the sign-out routes through its
+// mux. Account serves the account deletion route. Uploads is the chunked
 // upload handler, configured with UploadBasePath. Media is the blob store.
 // Events is the stream broker serving one job topic per request. The two
 // owner ceilings must agree whenever Sessions or Admin is present, because
@@ -146,6 +149,8 @@ type Dependencies struct {
 	// Login serves the sign-in code request, the verify, and the sign-out
 	// routes through its mux.
 	Login http.Handler
+	// Account serves the account deletion route.
+	Account http.Handler
 	// Uploads receives stem chunks.
 	Uploads http.Handler
 	// Media serves private blobs.
@@ -210,8 +215,9 @@ func Mount(mux *http.ServeMux, deps Dependencies) error {
 
 // handlerFor returns the implemented handler for one table entry, or nil
 // when the route stays on the stub. It matches on method and pattern
-// together, so a wired GET never serves its sibling DELETE. The admin
-// handler answers all three admin patterns through its own mux. The upload
+// together, so a wired GET never serves its sibling DELETE. The account
+// deletion route takes the privacy service handler the boot wires. The
+// admin handler answers all three admin patterns through its own mux. The upload
 // handler takes the subtree Mount registers under both the base path and
 // its slash form, mirroring the upload package mount.
 func (d Dependencies) handlerFor(route Route) http.Handler {
@@ -231,6 +237,8 @@ func (d Dependencies) handlerFor(route Route) http.Handler {
 		return d.Admin
 	case "POST /api/login/code", "POST /api/login/verify", "POST /api/login/signout":
 		return d.Login
+	case "POST /api/account/delete":
+		return d.Account
 	case " " + UploadBasePath + "/":
 		return d.Uploads
 	case "GET /media/{id}":

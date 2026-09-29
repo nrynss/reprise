@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nrynss/keel/erase"
 	"github.com/nrynss/keel/job"
 	"github.com/nrynss/keel/mediastore"
 	"github.com/nrynss/keel/sqlite"
@@ -32,6 +31,23 @@ type privacyServices struct {
 	episodes *privacy.Service
 	// sweeps expires idle guests through the episode erasure.
 	sweeps *retention.Service
+	// bound fires once the mount hook binds the runner. Recovery
+	// schedules a resumed deletion while the runner opens, ahead of the
+	// mount, so the registered resume waits on this gate and never reads
+	// an unbound runner.
+	bound chan struct{}
+	// boundOnce fires the gate exactly once across repeated mounts.
+	boundOnce sync.Once
+}
+
+// fireBound opens the resume gate after the runner binds. Repeated
+// mounts fire once, and a service with no gate fires nothing, so a
+// second mount never panics on a closed gate.
+func (s *privacyServices) fireBound() {
+	if s == nil || s.bound == nil {
+		return
+	}
+	s.boundOnce.Do(func() { close(s.bound) })
 }
 
 // heldPrivacyServices keeps the services the kinds hook built for the
@@ -70,8 +86,10 @@ func (requestOwner) Owns(ctx context.Context, ownerID string) bool {
 	return ok && ownerID != "" && user.ID == ownerID
 }
 
-// privacyKinds returns the job kinds the publish, erase and retention
-// work registers. The boot merges them before the runner opens. Bare
+// privacyKinds returns the job kinds the publish, erase, deletion and
+// retention work registers. The boot merges them before the runner opens.
+// The deletion resume waits on the bind gate, because recovery schedules
+// it while the runner opens, ahead of the mount hook that binds. Bare
 // wiring with no stores registers nothing, so hook tests call every
 // hook without a database.
 func privacyKinds(w kindWiring) (map[string]job.Kind, error) {
@@ -83,10 +101,42 @@ func privacyKinds(w kindWiring) (map[string]job.Kind, error) {
 		return nil, fmt.Errorf("reprise: privacy kinds: %w", err)
 	}
 	holdPrivacyServices(services)
-	return map[string]job.Kind{
-		erase.KindName:      services.episodes.Eraser().Kind(),
-		retention.SweepName: services.sweeps.Kind(),
-	}, nil
+	kinds := services.episodes.AccountKinds()
+	if base, ok := kinds[privacy.AccountName]; ok {
+		kinds[privacy.AccountName] = gateDeletionResume(base, services.bound)
+	}
+	kinds[retention.SweepName] = services.sweeps.Kind()
+	return kinds, nil
+}
+
+// gateDeletionResume holds a resumed deletion until the mount hook binds
+// the runner. The resume rebuilds its work at once, so a broken snapshot
+// still fails fast. The rebuilt work starts only past the gate, so a
+// resume that recovery scheduled early never reads an unbound runner. A
+// nil gate starts at once, and a done context ends the wait, so a boot
+// that registers without mounting never wedges the runner.
+func gateDeletionResume(kind job.Kind, bound <-chan struct{}) job.Kind {
+	resume := kind.Resume
+	if resume == nil {
+		return kind
+	}
+	kind.Resume = func(rec job.Record) (job.Func, error) {
+		fn, err := resume(rec)
+		if err != nil {
+			return nil, err
+		}
+		return func(ctx context.Context, progress func(job.Progress)) ([]byte, error) {
+			if bound != nil {
+				select {
+				case <-bound:
+				case <-ctx.Done():
+					return nil, fmt.Errorf("reprise: resume deletion %s: %w", rec.ID, ctx.Err())
+				}
+			}
+			return fn(ctx, progress)
+		}, nil
+	}
+	return kind
 }
 
 // mountPrivacy mounts the publish, revoke, erase and share routes, and
@@ -113,6 +163,7 @@ func mountPrivacy(ctx context.Context, w routeWiring) error {
 	if err := services.sweeps.BindRunner(w.Runner); err != nil {
 		return fmt.Errorf("reprise: mount privacy: %w", err)
 	}
+	services.fireBound()
 	inner := services.episodes.Handler()
 	owner, err := w.Gate.Protect(w.Outer, w.Guests(inner))
 	if err != nil {
@@ -176,7 +227,7 @@ func buildPrivacyServices(db *sqlite.DB, media *mediastore.Store, loaded setting
 	if err != nil {
 		return nil, fmt.Errorf("reprise: privacy: open retention service: %w", err)
 	}
-	return &privacyServices{episodes: episodes, sweeps: sweeps}, nil
+	return &privacyServices{episodes: episodes, sweeps: sweeps, bound: make(chan struct{})}, nil
 }
 
 // startRetentionSchedule sweeps expired guests once at boot and then

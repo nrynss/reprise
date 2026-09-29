@@ -117,11 +117,13 @@ test('switching signs in, and signing out starts over', async ({ page }) => {
 	await page.getByRole('button', { name: 'Switch to your account' }).click();
 	await expect(page.getByText(`Signed in as ${ADDRESS}.`)).toBeVisible();
 	await expect(seasonNav(page).getByRole('link', { name: 'Account' })).toBeVisible();
-	const deletion = page.getByRole('button', { name: 'Delete account' });
+	const deletion = page.getByRole('link', { name: 'Delete account' });
 	await expect(deletion).toBeVisible();
-	await expect(deletion).toBeDisabled();
-	await expect(page.getByText('Account deletion arrives with the next update.')).toBeVisible();
-	await expect(page.getByRole('link', { name: 'Delete account' })).toHaveCount(0);
+	await expect(deletion).toHaveAttribute('href', '/account/delete');
+	await expect(page.getByRole('button', { name: 'Delete account' })).toHaveCount(0);
+	await deletion.click();
+	await expect(page.getByRole('heading', { name: 'Delete your account' })).toBeVisible();
+	await page.goto('/account');
 	await page.getByRole('button', { name: 'Sign out' }).click();
 	await expect(page.getByText('Signed out on this device.')).toBeVisible();
 	await expect(seasonNav(page).getByRole('link', { name: 'Sign in' })).toBeVisible();

@@ -799,6 +799,15 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	loginAll := http.NewServeMux()
 	loginAll.Handle("/api/login/", identitySvc.LoginHandler())
 	loginAll.Handle("POST /api/login/signout", identitySvc.SignOutHandler())
+	// accountDelete serves the account deletion route. The privacy
+	// feature builds the deletion service in its kinds hook, so the boot
+	// reads it back from the holder and checks codes through the sign-in
+	// service. A boot without the privacy feature leaves the stub, the
+	// way every unwired route does.
+	var accountDelete http.Handler
+	if held := heldServices(); held != nil && held.episodes != nil {
+		accountDelete = held.episodes.AccountHandler(identitySvc)
+	}
 	if err := api.Mount(mux, api.Dependencies{
 		Gate:              spendGate,
 		Rule:              outer,
@@ -809,6 +818,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 		Threads:           threads,
 		Admin:             admin,
 		Login:             loginAll,
+		Account:           accountDelete,
 		Uploads:           uploads,
 		Media:             media,
 		Events:            events,

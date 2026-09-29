@@ -50,6 +50,7 @@ var expectedTable = []Route{
 	{Method: "POST", Pattern: "/api/login/code"},
 	{Method: "POST", Pattern: "/api/login/verify"},
 	{Method: "POST", Pattern: "/api/login/signout"},
+	{Method: "POST", Pattern: "/api/account/delete"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
 
@@ -227,6 +228,7 @@ func mountedDeps(t *testing.T, guestCalls, handlerCalls *int) Dependencies {
 		Threads:           recordingHandler{calls: handlerCalls},
 		Admin:             recordingHandler{calls: handlerCalls},
 		Login:             recordingHandler{calls: handlerCalls},
+		Account:           recordingHandler{calls: handlerCalls},
 		Uploads:           recordingHandler{calls: handlerCalls},
 		Media:             recordingHandler{calls: handlerCalls},
 		Events:            stream.New(stream.Config{}),
@@ -302,6 +304,7 @@ func TestMountServesHandlersThroughChain(t *testing.T) {
 		{http.MethodPost, "/api/login/code"},
 		{http.MethodPost, "/api/login/verify"},
 		{http.MethodPost, "/api/login/signout"},
+		{http.MethodPost, "/api/account/delete"},
 		{http.MethodPost, "/api/uploads"},
 		{http.MethodPut, "/api/uploads/e01/chunks/0"},
 		{http.MethodGet, "/media/blob1"},

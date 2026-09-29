@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { browser } from '$app/environment';
 	import { Button, Label } from 'bits-ui';
 	import { ApiError } from '@nrynss/chaaya/api';
@@ -13,7 +14,6 @@
 		CONFLICT_HEADING,
 		DEFAULT_RESEND_WAIT,
 		DELETE_ACCOUNT,
-		DELETE_SOON,
 		EMAIL_HELP,
 		EMAIL_LABEL,
 		ENTER_ADDRESS,
@@ -275,10 +275,9 @@
 			<p role="status">{signedInNotice(email)}</p>
 			<div class="choices">
 				<Button.Root type="button" disabled={busy} onclick={() => void quit()}>{SIGN_OUT}</Button.Root>
-				<!-- The deletion screen ships separately, so this entry waits here instead of stranding anyone. -->
+				<!-- The deletion screen owns its own steps, so this entry links there. -->
 				<div>
-					<Button.Root type="button" disabled>{DELETE_ACCOUNT}</Button.Root>
-					<p class="help">{DELETE_SOON}</p>
+					<a href={resolve('/account/delete')}>{DELETE_ACCOUNT}</a>
 				</div>
 			</div>
 		</section>
