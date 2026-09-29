@@ -110,6 +110,19 @@ func TestSendLimiterRefusesEleventhRequestFromOneClient(t *testing.T) {
 		t.Fatalf("mail fake holds %d messages, want 10 with none on refusal", len(fake.Messages()))
 	}
 
+	// A second consecutive refusal carries the same wait, so the first
+	// refusal spent no client token.
+	wait, ok = sendIfAllowed(t, svc, limiter, session, "client-11@example.com", "203.0.113.9:4000")
+	if ok {
+		t.Fatal("twelfth request from one client allowed, want refusal")
+	}
+	if wait != 6*time.Minute {
+		t.Fatalf("second client retry wait = %v, want exactly 6 minutes", wait)
+	}
+	if len(fake.Messages()) != 10 {
+		t.Fatalf("mail fake holds %d messages, want 10 with none on refusal", len(fake.Messages()))
+	}
+
 	clock.at = start.Add(61 * time.Minute)
 	if _, ok := sendIfAllowed(t, svc, limiter, session, "client-10@example.com", "203.0.113.9:4000"); !ok {
 		t.Fatal("request past the client refill refused, want allow")
@@ -137,12 +150,18 @@ func TestSendLimiterRefusesPastDailyGlobal(t *testing.T) {
 	if len(fake.Messages()) != 200 {
 		t.Fatalf("mail fake holds %d messages, want the 200 seeds", len(fake.Messages()))
 	}
-	wait, ok := sendIfAllowed(t, svc, limiter, session, "crowd-extra@example.com", "203.0.113.11:4000")
-	if ok {
-		t.Fatal("send past the daily global allowed, want refusal")
-	}
-	if wait != 24*time.Hour {
-		t.Fatalf("global retry wait = %v, want exactly 24h", wait)
+	// Twelve consecutive refusals from one client all carry the global
+	// wait, so refused requests spend no client budget. The old order
+	// flipped the eleventh refusal to the 6 minute client wait.
+	for i := 0; i < 12; i++ {
+		address := fmt.Sprintf("crowd-extra-%d@example.com", i)
+		wait, ok := sendIfAllowed(t, svc, limiter, session, address, "203.0.113.11:4000")
+		if ok {
+			t.Fatalf("global refusal %d allowed, want refusal", i+1)
+		}
+		if wait != 24*time.Hour {
+			t.Fatalf("global refusal %d retry wait = %v, want exactly 24h", i+1, wait)
+		}
 	}
 	if len(fake.Messages()) != 200 {
 		t.Fatalf("mail fake holds %d messages, want 200 with none on refusal", len(fake.Messages()))

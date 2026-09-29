@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nrynss/keel/gate"
@@ -58,8 +59,8 @@ var ErrSendLimited = errors.New("identity: code send limited")
 
 // SendLimiter guards code mails with three ceilings. It is safe for
 // concurrent use. Build one per process and consult it before every
-// send. Header emission stays with the wiring task. Round the returned
-// wait up to whole seconds, at least 1, and answer 429 for a refusal.
+// send. The route answers a refusal with 429 and the returned wait,
+// known and unknown addresses alike.
 type SendLimiter struct {
 	db    *sqlite.DB
 	now   func() time.Time
@@ -97,10 +98,12 @@ func NewSendLimiter(db *sqlite.DB, now func() time.Time) (*SendLimiter, error) {
 // Allow reports whether one code mail may go out to addressHash. It
 // returns ok true when the send may proceed. It returns ok false with
 // the wait until a retry may succeed when a ceiling refuses. A refusal
-// consumes no durable budget. A refused address, known or not, takes
-// the same shape, so the route answers both alike. A database fault or
-// a missing request returns an error and ok false, and the caller must
-// send nothing on any path but ok true.
+// consumes no durable budget. The durable windows run first and the
+// gate probe runs last, so a refused request spends no client token
+// either. A refused address, known or not, takes the same shape, so
+// the route answers both alike. A database fault or a missing request
+// returns an error and ok false, and the caller must send nothing on
+// any path but ok true.
 func (l *SendLimiter) Allow(ctx context.Context, addressHash string, r *http.Request) (time.Duration, bool, error) {
 	if addressHash == "" {
 		return 0, false, fmt.Errorf("%w: send limiter needs an address hash", ErrInvalid)
@@ -119,14 +122,14 @@ func (l *SendLimiter) Allow(ctx context.Context, addressHash string, r *http.Req
 	} else if limited {
 		return wait, false, nil
 	}
-	if wait, limited, err := l.overClient(r); err != nil {
+	if wait, limited, err := l.overWindow(ctx,
+		"SELECT COUNT(*), MIN(created_at) FROM login_codes WHERE created_at > ?",
+		sendGlobalBurst, sendGlobalWindow, now, cutoff(sendGlobalWindow)); err != nil {
 		return 0, false, err
 	} else if limited {
 		return wait, false, nil
 	}
-	if wait, limited, err := l.overWindow(ctx,
-		"SELECT COUNT(*), MIN(created_at) FROM login_codes WHERE created_at > ?",
-		sendGlobalBurst, sendGlobalWindow, now, cutoff(sendGlobalWindow)); err != nil {
+	if wait, limited, err := l.overClient(r); err != nil {
 		return 0, false, err
 	} else if limited {
 		return wait, false, nil
@@ -157,9 +160,10 @@ func (l *SendLimiter) overWindow(ctx context.Context, query string, burst int, w
 
 // overClient draws one token from the shared gate for r. The gate keys
 // the client exactly as the rest of the app does, so proxy trust stays
-// in one place. A refusal consumes nothing, so hammering on 429s
-// cannot spend the route budget. The wait comes from the refusal the
-// gate wrote, in whole seconds.
+// in one place. It runs only after both durable windows pass, so a
+// request the database refuses never reaches it. A refusal consumes
+// nothing, so hammering on 429s cannot spend the route budget. The wait
+// comes from the refusal the gate wrote, in whole seconds.
 func (l *SendLimiter) overClient(r *http.Request) (time.Duration, bool, error) {
 	rec := httptest.NewRecorder()
 	l.probe.ServeHTTP(rec, r)
@@ -175,4 +179,42 @@ func (l *SendLimiter) overClient(r *http.Request) (time.Duration, bool, error) {
 	default:
 		return 0, false, fmt.Errorf("%w: send gate answered %d", ErrSendLimited, rec.Code)
 	}
+}
+
+// sendLimiterByService holds one limiter per service. The code route
+// reads its service entry on every request, so the process guards sends
+// through one limiter with one set of gate buckets.
+var (
+	sendLimiterMu        sync.Mutex
+	sendLimiterByService = map[*Service]*SendLimiter{}
+)
+
+// SetSendLimiter binds one limiter to this service. The code route
+// consults it before every send. Tests bind a limiter on a fake clock.
+// A nil limiter clears the binding and restores the default.
+func (s *Service) SetSendLimiter(l *SendLimiter) {
+	sendLimiterMu.Lock()
+	defer sendLimiterMu.Unlock()
+	if l == nil {
+		delete(sendLimiterByService, s)
+		return
+	}
+	sendLimiterByService[s] = l
+}
+
+// sendLimiter returns the limiter bound to this service, or the shared
+// default built on its database with the wall clock. The boot binds
+// none and takes the default. Tests bind one on a fake clock.
+func (s *Service) sendLimiter() *SendLimiter {
+	sendLimiterMu.Lock()
+	defer sendLimiterMu.Unlock()
+	if l, ok := sendLimiterByService[s]; ok {
+		return l
+	}
+	l, err := NewSendLimiter(s.db, nil)
+	if err != nil {
+		return nil
+	}
+	sendLimiterByService[s] = l
+	return l
 }

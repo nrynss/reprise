@@ -80,6 +80,22 @@ func callLogin(t *testing.T, svc *identity.Service, cookie *http.Cookie, path, b
 	return rec
 }
 
+// callLoginFrom posts one body to a login route through the middleware
+// with a chosen client address, carrying the cookie when one is given.
+// Tests cap two addresses apart by giving each its own client, so the
+// hourly client ceiling never trips mid-test.
+func callLoginFrom(t *testing.T, svc *identity.Service, cookie *http.Cookie, path, body, remote string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.RemoteAddr = remote
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	svc.Middleware(svc.LoginHandler()).ServeHTTP(rec, req)
+	return rec
+}
+
 // requestCode asks for a code and fails the test on any answer but 202.
 func requestCode(t *testing.T, svc *identity.Service, cookie *http.Cookie, email string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -188,6 +204,77 @@ func TestLoginCodeAnswersSameBodyForKnownAndUnknown(t *testing.T) {
 	}
 	if subject != "owner-known@example.com" {
 		t.Fatalf("identity subject = %q, want the normalized address", subject)
+	}
+}
+
+// TestLoginCodeRouteRefusesCappedAddressWithRetryAfter drives one
+// address to its ceiling through the route, then shows the sixth request
+// refused before any send. A capped known address and a capped unknown
+// address answer the same status, body, and wait, so neither reveals who
+// registered.
+func TestLoginCodeRouteRefusesCappedAddressWithRetryAfter(t *testing.T) {
+	t.Parallel()
+	clock := &testClock{at: time.Unix(1758000000, 0)}
+	svc, db, fake := openLogin(t, clock)
+	limiter, err := identity.NewSendLimiter(db, clock.now)
+	if err != nil {
+		t.Fatalf("open send limiter: %v", err)
+	}
+	svc.SetSendLimiter(limiter)
+	post := func(cookie *http.Cookie, email, remote string) *httptest.ResponseRecorder {
+		return callLoginFrom(t, svc, cookie, "/api/login/code", `{"email":`+quote(email)+`}`, remote)
+	}
+
+	knownCookie, _ := loginGuest(t, svc)
+	if rec := post(knownCookie, "known-capped@example.com", "203.0.113.21:4000"); rec.Code != http.StatusAccepted {
+		t.Fatalf("known seed status = %d, want 202", rec.Code)
+	}
+	seed := callLogin(t, svc, knownCookie, "/api/login/verify",
+		`{"email":"known-capped@example.com","code":`+quote(latestCode(t, fake))+`}`)
+	if seed.Code != http.StatusOK {
+		t.Fatalf("known seed verify status = %d, want 200", seed.Code)
+	}
+	knownCookie = responseCookie(t, seed)
+	for i := 0; i < 4; i++ {
+		if rec := post(knownCookie, "known-capped@example.com", "203.0.113.21:4000"); rec.Code != http.StatusAccepted {
+			t.Fatalf("known send %d status = %d, want 202", i+2, rec.Code)
+		}
+	}
+	sent := len(fake.Messages())
+	knownRefused := post(knownCookie, "known-capped@example.com", "203.0.113.21:4000")
+	if knownRefused.Code != http.StatusTooManyRequests {
+		t.Fatalf("sixth known status = %d, want 429", knownRefused.Code)
+	}
+	if len(fake.Messages()) != sent {
+		t.Fatalf("mail fake holds %d messages, want %d with none on refusal", len(fake.Messages()), sent)
+	}
+
+	stranger, _ := loginGuest(t, svc)
+	for i := 0; i < 5; i++ {
+		if rec := post(stranger, "never-seen@example.com", "203.0.113.22:4000"); rec.Code != http.StatusAccepted {
+			t.Fatalf("unknown send %d status = %d, want 202", i+1, rec.Code)
+		}
+	}
+	sent = len(fake.Messages())
+	unknownRefused := post(stranger, "never-seen@example.com", "203.0.113.22:4000")
+	if unknownRefused.Code != http.StatusTooManyRequests {
+		t.Fatalf("sixth unknown status = %d, want 429", unknownRefused.Code)
+	}
+	if len(fake.Messages()) != sent {
+		t.Fatalf("mail fake holds %d messages, want %d with none on refusal", len(fake.Messages()), sent)
+	}
+
+	if knownRefused.Body.String() != unknownRefused.Body.String() {
+		t.Fatalf("known refusal %q differs from unknown refusal %q",
+			knownRefused.Body.String(), unknownRefused.Body.String())
+	}
+	if !strings.Contains(knownRefused.Body.String(), identity.CodeSendLimited) {
+		t.Fatalf("refusal body %q carries no send limited code", knownRefused.Body.String())
+	}
+	for name, rec := range map[string]*httptest.ResponseRecorder{"known": knownRefused, "unknown": unknownRefused} {
+		if got := rec.Header().Get("Retry-After"); got != "86400" {
+			t.Fatalf("%s Retry-After = %q, want 86400", name, got)
+		}
 	}
 }
 
@@ -640,9 +727,18 @@ func TestLoginVerifyConcurrentFirstAttachSignsInBoth(t *testing.T) {
 		email := fmt.Sprintf("roamer-%d@example.com", i)
 		cookieA, _ := loginGuest(t, svc)
 		cookieB, _ := loginGuest(t, svc)
-		requestCode(t, svc, cookieA, email)
+		// Each device keeps its own client address, so the hourly client
+		// ceiling the code route enforces never trips mid-test. The race
+		// under test is the verify, not the send.
+		if rec := callLoginFrom(t, svc, cookieA, "/api/login/code",
+			`{"email":`+quote(email)+`}`, "203.0.113.31:4000"); rec.Code != http.StatusAccepted {
+			t.Fatalf("round %d device A code status = %d, want 202: %s", i, rec.Code, rec.Body.String())
+		}
 		codeA := latestCode(t, fake)
-		requestCode(t, svc, cookieB, email)
+		if rec := callLoginFrom(t, svc, cookieB, "/api/login/code",
+			`{"email":`+quote(email)+`}`, "203.0.113.32:4000"); rec.Code != http.StatusAccepted {
+			t.Fatalf("round %d device B code status = %d, want 202: %s", i, rec.Code, rec.Body.String())
+		}
 		codeB := latestCode(t, fake)
 		cookies := []*http.Cookie{cookieA, cookieB}
 		bodies := []string{

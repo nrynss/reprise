@@ -35,6 +35,10 @@ const (
 	// CodeInvalidRequest answers a malformed body or a value the route
 	// cannot honour.
 	CodeInvalidRequest = "invalid_request"
+	// CodeSendLimited answers a code request the send ceilings refuse.
+	// Known and unknown addresses share it, so the answer never names an
+	// account.
+	CodeSendLimited = "send_limited"
 	// CodeInternal answers a dependency fault.
 	CodeInternal = "internal_error"
 )
@@ -433,9 +437,29 @@ func loginSession(w http.ResponseWriter, r *http.Request) (User, string, bool) {
 	return user, sessionID, true
 }
 
-// handleLoginCode answers the code route. It stores a fresh code for the
-// requesting session, mails it, and answers the same 202 body whether or
-// not the address holds an account.
+// loginRetryDetail carries the retry hint a 429 refusal reports. The
+// shared error writer reads retry_after_seconds into the Retry-After
+// header, rounding up with a floor of one second.
+type loginRetryDetail struct {
+	// RetryAfterSeconds is the wait until a retry may succeed.
+	RetryAfterSeconds float64 `json:"retry_after_seconds"`
+}
+
+// refuseLoginCode answers a refused code request with 429 and the wait
+// until a retry may succeed. Known and unknown addresses share this one
+// shape, so neither learns who registered. A zero wait answers a one
+// second hint, so a checker fault refuses without naming its half.
+func refuseLoginCode(w http.ResponseWriter, wait time.Duration) {
+	_ = wire.WriteError(w, http.StatusTooManyRequests, CodeSendLimited,
+		"too many codes were requested, retry after the wait",
+		loginRetryDetail{RetryAfterSeconds: wait.Seconds()})
+}
+
+// handleLoginCode answers the code route. It checks the send ceilings
+// before it stores or mails anything, and answers the same 202 body
+// whether or not the address holds an account. A refused address
+// answers 429 with a Retry-After, known and unknown alike. A checker
+// fault refuses too, and sends nothing.
 func (s *Service) handleLoginCode(w http.ResponseWriter, r *http.Request) {
 	_, sessionID, ok := loginSession(w, r)
 	if !ok {
@@ -443,6 +467,21 @@ func (s *Service) handleLoginCode(w http.ResponseWriter, r *http.Request) {
 	}
 	var body loginCodeRequestJSON
 	if !decodeLoginBody(w, r, &body) {
+		return
+	}
+	address := normalizeAddress(body.Email)
+	if address == "" {
+		_ = wire.WriteError(w, http.StatusBadRequest, CodeInvalidRequest, "this request names no address", nil)
+		return
+	}
+	limiter := s.sendLimiter()
+	if limiter == nil {
+		refuseLoginCode(w, 0)
+		return
+	}
+	wait, allow, err := limiter.Allow(r.Context(), s.hashValue(address), r)
+	if err != nil || !allow {
+		refuseLoginCode(w, wait)
 		return
 	}
 	if err := s.RequestLoginCode(r.Context(), sessionID, body.Email); err != nil {
