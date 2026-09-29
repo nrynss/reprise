@@ -4,6 +4,9 @@
 // That covers the erase outcome, the render pass details, and the
 // stopped progress line beside the load notices.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as files from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
 	LIVE_DRAFT_EMPTY_NOTICE,
 	LIVE_DRAFT_NOTICE,
@@ -442,5 +445,195 @@ describe('live copy', () => {
 
 	afterEach(() => {
 		vi.unstubAllGlobals();
+	});
+});
+
+// Words no screen line shows a guest. The match runs on whole words,
+// so a longer word that only holds one stays allowed.
+const SHOWN_BANNED_WORDS = [
+	'job',
+	'stream',
+	'endpoint',
+	'detail',
+	'backend',
+	'fixture',
+	'scripted',
+	'ledger',
+	'reservation',
+	'provider',
+	'stem',
+	'render',
+	'proposal',
+	'mint',
+	'artifact'
+];
+
+// Phrases no screen line shows, matched as written.
+const SHOWN_BANNED_PHRASES = ['session row', 'no backend', 'survives a reload'];
+
+// Longest sentence a person reads, in words.
+const MAX_SHOWN_WORDS = 20;
+
+// Export names that never reach a screen. Routes, codes, style text,
+// event names and fixture markers stay out of the shown set.
+const NON_SHOWN_EXPORT = /(^|_)(ID|PATH|PAGE|API|URL|TOKEN|KEY|CSS|EVENT|RATE|SECONDS)($|_)|FIXTURE|MISSING/;
+
+interface ShownLine {
+	name: string;
+	text: string;
+}
+
+function bannedShownHit(text: string): string | null {
+	const lower = text.toLowerCase();
+	for (const word of SHOWN_BANNED_WORDS) {
+		const found = lower.match(new RegExp(`\\b${word}s?\\b`));
+		if (found) return found[0];
+	}
+	for (const phrase of SHOWN_BANNED_PHRASES) {
+		if (lower.includes(phrase)) return phrase;
+	}
+	return null;
+}
+
+function longShownSentence(text: string): string | null {
+	for (const sentence of text.split(/(?<=[.!?…])\s+/)) {
+		const words = sentence.match(/[A-Za-z0-9'’]+/g) ?? [];
+		if (words.length > MAX_SHOWN_WORDS) return sentence.trim();
+	}
+	return null;
+}
+
+function readRouteSources(): Array<{ path: string; source: string }> {
+	const routesDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'routes');
+	const found: string[] = [];
+	const walk = (dir: string): void => {
+		// @ts-expect-error: the checked fs stub omits directory reads, the runtime provides them.
+		for (const entry of files.readdirSync(dir, { withFileTypes: true })) {
+			const full = join(dir, entry.name);
+			if (entry.isDirectory()) walk(full);
+			else if (entry.name.endsWith('.svelte')) found.push(full);
+		}
+	};
+	walk(routesDir);
+	return found.map((path) => ({ path, source: files.readFileSync(path, 'utf8') }));
+}
+
+// Shown strings are the text between tags plus the attributes a person
+// reads. Identifiers, comments, component props and test hooks stay out.
+function shownStrings(source: string): string[] {
+	const out: string[] = [];
+	let code = source.replace(/<script[\s\S]*?<\/script>/g, '');
+	code = code.replace(/<style[\s\S]*?<\/style>/g, '');
+	code = code.replace(/<!--[\s\S]*?-->/g, '');
+	for (const match of code.matchAll(/>([^<>{}]+)</g)) {
+		const text = (match[1] ?? '').trim().replace(/\s+/g, ' ');
+		if (text.length > 0) out.push(text);
+	}
+	// Literals inside template expressions mix state tokens with labels
+	// that render. A literal that reads like words counts as shown,
+	// while a lowercase token, a route or a key stays out.
+	for (const match of code.matchAll(/\{([^{}]*)\}/g)) {
+		const expr = match[1] ?? '';
+		for (const lit of expr.matchAll(/'([^']*)'|"([^"]*)"/g)) {
+			const text = (lit[1] ?? lit[2] ?? '').trim().replace(/\s+/g, ' ');
+			if (text.length < 2 || text.startsWith('/')) continue;
+			const first = text[0] ?? '';
+			const looksShown =
+				text.includes(' ') || text.includes('…') || first !== first.toLowerCase();
+			if (looksShown) out.push(text);
+		}
+	}
+	for (const match of code.matchAll(/<([a-zA-Z][^\s/>]*)([^>]*)>/g)) {
+		const tag = (match[1] ?? '').toLowerCase();
+		const attrs = match[2] ?? '';
+		if (tag === 'meta') {
+			if (!/name="description"|property="og:description"|name="twitter:description"/.test(attrs)) {
+				continue;
+			}
+			for (const content of attrs.matchAll(/content="([^"]*)"/g)) {
+				const text = (content[1] ?? '').trim().replace(/\s+/g, ' ');
+				if (text.length > 0 && !text.includes('{')) out.push(text);
+			}
+			continue;
+		}
+		for (const attr of attrs.matchAll(/(?:alt|placeholder|title)="([^"]*)"/g)) {
+			const text = (attr[1] ?? '').trim().replace(/\s+/g, ' ');
+			if (text.length > 0 && !text.includes('{')) out.push(text);
+		}
+	}
+	return out;
+}
+
+async function controllerLines(): Promise<ShownLine[]> {
+	const modules: Array<{ name: string; room: Record<string, unknown> }> = [
+		{ name: 'threads', room: (await import('../routes/threads/threads')) as Record<string, unknown> },
+		{ name: 'record-state', room: (await import('./voice/record-state')) as Record<string, unknown> },
+		{
+			name: 'processing-state',
+			room: (await import('./voice/processing-state')) as Record<string, unknown>
+		},
+		{ name: 'draft', room: (await import('./editor/draft')) as Record<string, unknown> },
+		{ name: 'account', room: (await import('../routes/account/account')) as Record<string, unknown> },
+		{
+			name: 'google',
+			room: (await import('../routes/account/google/google')) as Record<string, unknown>
+		},
+		{ name: 'limits', room: (await import('../routes/admin/limits')) as Record<string, unknown> },
+		{ name: 'welcome', room: (await import('../routes/welcome/welcome')) as Record<string, unknown> },
+		{
+			name: 'share',
+			room: (await import('../routes/share/[token]/share')) as Record<string, unknown>
+		}
+	];
+	const lines: ShownLine[] = [];
+	for (const room of modules) {
+		for (const [key, value] of Object.entries(room.room)) {
+			if (typeof value !== 'string') continue;
+			if (NON_SHOWN_EXPORT.test(key)) continue;
+			if (value.length === 0) continue;
+			lines.push({ name: `${room.name}.${key}`, text: value });
+		}
+	}
+	// The welcome page renders the teaser quotes, which live one level
+	// inside the exported teaser rather than beside it.
+	const welcome = modules[7]?.room as { TEASER?: { lineA?: unknown; lineB?: unknown } };
+	if (typeof welcome.TEASER?.lineA === 'string') {
+		lines.push({ name: 'welcome.TEASER.lineA', text: welcome.TEASER.lineA });
+	}
+	if (typeof welcome.TEASER?.lineB === 'string') {
+		lines.push({ name: 'welcome.TEASER.lineB', text: welcome.TEASER.lineB });
+	}
+	return lines;
+}
+
+describe('shown copy', () => {
+	it('shows no banned word in any route template or page controller line', async () => {
+		const violations: string[] = [];
+		for (const file of readRouteSources()) {
+			for (const text of shownStrings(file.source)) {
+				const hit = bannedShownHit(text);
+				if (hit) violations.push(`${file.path} shows "${text}" with banned "${hit}"`);
+			}
+		}
+		for (const line of await controllerLines()) {
+			const hit = bannedShownHit(line.text);
+			if (hit) violations.push(`${line.name} reads "${line.text}" with banned "${hit}"`);
+		}
+		expect(violations).toEqual([]);
+	});
+
+	it('keeps every shown sentence to twenty words or fewer', async () => {
+		const violations: string[] = [];
+		for (const file of readRouteSources()) {
+			for (const text of shownStrings(file.source)) {
+				const hit = longShownSentence(text);
+				if (hit) violations.push(`${file.path} shows a long sentence: "${hit}"`);
+			}
+		}
+		for (const line of await controllerLines()) {
+			const hit = longShownSentence(line.text);
+			if (hit) violations.push(`${line.name} holds a long sentence: "${hit}"`);
+		}
+		expect(violations).toEqual([]);
 	});
 });
