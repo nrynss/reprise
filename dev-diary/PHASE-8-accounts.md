@@ -60,7 +60,7 @@ requires:   none
 fixture-ok: yes
 size:       S · mid
 owns:       internal/mail/
-status:     not-started
+status:     in-progress:implement:t8.1-impl
 ```
 A Resend client over plain `net/http`. `internal/mail` is the only code that talks to Resend.
 
@@ -85,7 +85,7 @@ requires:   none
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/migrations/
-status:     not-started
+status:     in-progress:implement:t8.2-impl
 ```
 New migrations under the identity namespace. Keep `guest_sessions` as it is. The diary already has a
 `sessions` table for recording sessions, so a rename would collide.
@@ -110,7 +110,7 @@ requires:   none
 fixture-ok: yes
 size:       XS · light
 owns:       internal/settings/, config/, deploy/
-status:     not-started
+status:     in-progress:implement:t8.3-impl
 ```
 Every setting this phase needs, added once so later tasks share no path.
 

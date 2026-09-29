@@ -2418,7 +2418,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       internal/episode/query.go, internal/episode/service.go, internal/privacy/publish.go,
              internal/privacy/publish_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     not-started
+status:     in-progress:implement:t7.80-impl
 ```
 T7.76 round 1 recorded an out of scope H finding. The binary
 mounts the episode detail with a nil share lookup, so a public
@@ -2576,7 +2576,7 @@ owns:       web/src/routes/episode/[id]/+page.svelte, web/src/lib/components/Sea
              web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
              web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts,
              web/src/lib/copy.test.ts
-status:     not-started
+status:     in-progress:implement:t7.81-impl
 ```
 **Defect 1.** On 2026-09-29 the owner saw "Threads" and "Edit" as bare links on the episode page.
 T7.77 styled only the Gallery and Threads pages and the back link. In the `<nav aria-label="Season">`
