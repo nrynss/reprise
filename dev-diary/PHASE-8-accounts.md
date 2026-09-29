@@ -321,7 +321,7 @@ owns:       internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts,
              web/package.json
-status:     in-progress:implement:t8.15-impl
+status:     in-progress:review-r1:t8.15-rev-r1@511dc5616ae2025b306f1d98c02b008ea8fb9d1e
 ```
 T8.8 ships the Google handler unmounted: both API paths 404 and the
 google spec runs outside the e2e chain.
