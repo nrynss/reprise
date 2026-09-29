@@ -167,7 +167,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/episode/[id]/+page.svelte, web/src/routes/threads/threads.ts,
              web/src/routes/threads/threads.test.ts, web/src/routes/threads/threads.spec.ts
-status:     in-progress:land:t9.5-rem-r1@6c810a13693c637d0dc4273f734f5f87a0478b7e
+status:     done:0867944
 ```
 * The cover at the top, from `cover_path`. The eyebrow shows only "EP.12". The "Public" and
   "Private" line goes.
@@ -318,6 +318,13 @@ The gate passes in a fresh worktree three times in a row, because the gate grew.
 
 ### What exists now
 
+T9.5 landed at 0867944 after round 2 APPROVE with zero residue.
+The episode page shows the cover with a bare eyebrow, flat
+sections, a sentence-free release row, gallery-bound erase, and
+plain failure lines. Round 1 had 1 L finding on the unpinned cover
+branch; the remediation pinned it in the specs with no product
+change. Reviewed commits 1577ca5 and 6c810a1 rebased clean. Spec
+pins pass on the landed commit.
 T9.4 landed at 2146e03 after round 2 APPROVE with zero residue.
 The gallery rides the shared card grid with covers and plain
 progress lines. Round 1 had 1 H stale-pin finding on the threads
