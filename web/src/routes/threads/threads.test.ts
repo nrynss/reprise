@@ -26,6 +26,10 @@ import {
 	formatEpisodeNumber,
 	GalleryController,
 	installMockJob,
+	LIVE_EPISODE_FAILED_NOTICE,
+	LIVE_EPISODE_NOTICE,
+	LIVE_SEASON_FAILED_NOTICE,
+	LIVE_SEASON_NOTICE,
 	listSeason,
 	listThreads,
 	parseEpisodeDetail,
@@ -1015,6 +1019,141 @@ describe('share link release', () => {
 			unmount(app);
 			document.body.innerHTML = '';
 			Reflect.deleteProperty(window.navigator, 'clipboard');
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('live notices', () => {
+	it('names the lost season and the lost episode in plain words', () => {
+		expect(LIVE_SEASON_FAILED_NOTICE).toBe('Your episodes did not load. Retry.');
+		expect(LIVE_EPISODE_FAILED_NOTICE).toBe('This episode did not load. Retry.');
+		expect(LIVE_SEASON_NOTICE).toBe('Live season, newest first.');
+	});
+
+	it('shows no notice on a loaded episode without a quoted moment', async () => {
+		stubMomentEpisode('ready');
+		try {
+			const snap = await mountMomentEpisode('');
+			expect(snap.notice).toBe(LIVE_EPISODE_NOTICE);
+			expect(snap.notice).toBe('');
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('names the lost episode on a refused live detail', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => new Response('{"error":"slow"}', { status: 500 }))
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('e1', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.failed).toBe(true);
+			});
+			expect(snaps.at(-1)?.notice).toBe(LIVE_EPISODE_FAILED_NOTICE);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('names the lost season on a refused live list', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => new Response('{"error":"slow"}', { status: 500 }))
+		);
+		let controller: GalleryController | null = null;
+		try {
+			const snaps: GallerySnapshot[] = [];
+			controller = new GalleryController((snap) => {
+				snaps.push(structuredClone(snap));
+			});
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.failed).toBe(true);
+			});
+			expect(snaps.at(-1)?.notice).toBe(LIVE_SEASON_FAILED_NOTICE);
+		} finally {
+			controller?.destroy();
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('episode season nav', () => {
+	it('renders plain season tabs with Edit as a primary pill on a live draft', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'e9', number: 3, title: 'Heard', state: 'draft', visibility: 'private' },
+					proposals: [],
+					words: [{ text: 'One', start: 0, end: 1.2 }],
+					audio_url: '',
+					render_audio_url: ''
+				});
+			})
+		);
+		const app = mount(EpisodePage, { target: document.body });
+		try {
+			await vi.waitFor(() => {
+				expect(document.querySelector('nav[aria-label="Season"] a.primary')?.textContent).toBe(
+					'Edit'
+				);
+			});
+			const nav = document.querySelector('nav[aria-label="Season"]');
+			const gallery = nav?.querySelector('a.tab[href="/"]');
+			const threads = nav?.querySelector('a.tab[href="/threads"]');
+			expect(gallery?.textContent).toBe('Gallery');
+			expect(threads?.textContent).toBe('Threads');
+			expect(gallery?.classList.contains('active')).toBe(false);
+			expect(threads?.classList.contains('active')).toBe(false);
+			expect(gallery?.getAttribute('aria-current')).toBeNull();
+			expect(threads?.getAttribute('aria-current')).toBeNull();
+			const edit = nav?.querySelector('a.primary');
+			expect(edit?.getAttribute('href')).toBe('/episode/e9/edit');
+		} finally {
+			unmount(app);
+			document.body.innerHTML = '';
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('renders plain fixture tabs with no filled tab on a scripted episode', async () => {
+		const { page } = await import('$app/state');
+		const heldParams = page.params;
+		const heldUrl = page.url;
+		page.params = { id: 'ep-4' };
+		page.url = new URL('http://localhost/episode/ep-4?fixture=1') as unknown as typeof page.url;
+		const app = mount(EpisodePage, { target: document.body });
+		try {
+			await vi.waitFor(() => {
+				expect(document.querySelector('nav[aria-label="Season"] a.tab')?.textContent).toBe(
+					'Gallery'
+				);
+			});
+			const nav = document.querySelector('nav[aria-label="Season"]');
+			const tabs = Array.from(nav?.querySelectorAll('a.tab') ?? []);
+			expect(tabs.map((tab) => tab.textContent)).toEqual(['Gallery', 'Threads']);
+			for (const tab of tabs) {
+				expect(tab.classList.contains('active')).toBe(false);
+				expect(tab.getAttribute('aria-current')).toBeNull();
+			}
+			expect(nav?.querySelector('a[href="/threads?fixture=1"]')?.textContent).toBe('Threads');
+			expect(nav?.querySelector('a.primary')).toBeNull();
+		} finally {
+			unmount(app);
+			document.body.innerHTML = '';
+			page.params = heldParams;
+			page.url = heldUrl;
 			vi.unstubAllGlobals();
 		}
 	});

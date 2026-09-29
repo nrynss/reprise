@@ -71,6 +71,10 @@ function retryAfterMs(response: Response): number {
 	return Math.min(MAX_RETRY_AFTER_MS, Math.floor(seconds * 1000));
 }
 
+// The line a watched pass shows while its stream is still catching up.
+// It names the take, never the machinery behind it.
+export const TRANSCRIBING_DETAIL = 'Transcribing your take.';
+
 let pendingHandoff: ProcessingHandoff | null = null;
 
 // depositProcessingHandoff holds one in-flight upload for the next screen.
@@ -325,7 +329,7 @@ export class ProcessingController {
 		// Replace a waiting or failed step. A failed step would otherwise ignore
 		// every frame until the job ends.
 		if (current.state === 'waiting' || current.state === 'failed') {
-			const next = { ...current, state: 'running' as const, detail: 'Following the job.' };
+			const next = { ...current, state: 'running' as const, detail: TRANSCRIBING_DETAIL };
 			if (kind === 'transcript') this.snapshot.transcription = next;
 			else this.snapshot.editorial = next;
 			this.snapshot.draft = draftStep(

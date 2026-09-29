@@ -2,7 +2,14 @@
 // writes the decision row, the waveform regions follow the cuts, and the
 // cold open preview parks the playhead where the open starts.
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { DraftController, formatTime, queryValue, type DraftSnapshot } from './draft';
+import {
+	DraftController,
+	formatTime,
+	LIVE_DRAFT_EMPTY_NOTICE,
+	LIVE_DRAFT_NOTICE,
+	queryValue,
+	type DraftSnapshot
+} from './draft';
 import { encodeWavBytes } from './fixture';
 
 beforeAll(() => {
@@ -699,6 +706,44 @@ describe('draft controller', () => {
 			warn.mockRestore();
 			vi.unstubAllGlobals();
 		}
+	});
+	it('shows no notice on a stored draft and a plain line on an empty one', async () => {
+		async function noticeFor(words: unknown[]): Promise<string> {
+			vi.stubGlobal(
+				'fetch',
+				vi.fn().mockResolvedValue(
+					Response.json({
+						episode: {
+							id: 'live-1',
+							number: 2,
+							title: 'Live take',
+							state: 'draft',
+							visibility: 'private'
+						},
+						proposals: [],
+						words,
+						audio_url: '',
+						render_audio_url: ''
+					})
+				)
+			);
+			try {
+				const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
+				controller.mount('');
+				await vi.waitFor(() => {
+					expect(controller.snapshot.ready).toBe(true);
+				});
+				const notice = controller.snapshot.notice;
+				controller.destroy();
+				return notice;
+			} finally {
+				vi.unstubAllGlobals();
+			}
+		}
+		expect(LIVE_DRAFT_NOTICE).toBe('');
+		expect(LIVE_DRAFT_EMPTY_NOTICE).toBe('No transcript yet.');
+		expect(await noticeFor([{ text: 'Hello', start: 0, end: 0.4 }])).toBe(LIVE_DRAFT_NOTICE);
+		expect(await noticeFor([])).toBe(LIVE_DRAFT_EMPTY_NOTICE);
 	});
 });
 

@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import GalleryLink from '$lib/components/GalleryLink.svelte';
+	import SeasonNav from '$lib/components/SeasonNav.svelte';
 	import { pageTitle } from '$lib/shell';
 	import {
 		canPublish,
@@ -59,14 +60,12 @@
 		<nav aria-label="Season">
 			{#if snap.live}
 				{@const editHref = draftEditHref(snap)}
-				<GalleryLink />
-				<a href={resolve('/threads')}>Threads</a>
+				<SeasonNav current="none" />
 				{#if editHref}
-					<a href={resolve(editHref)}>Edit</a>
+					<a class="primary" href={resolve(editHref)}>Edit</a>
 				{/if}
 			{:else}
-				<a href={resolve('/?fixture=1')}>Gallery</a>
-				<a href={resolve('/threads?fixture=1')}>Threads</a>
+				<SeasonNav current="none" fixture />
 			{/if}
 		</nav>
 
@@ -289,6 +288,14 @@
 		display: flex;
 		gap: 1rem;
 		margin: 1rem 0 2rem;
+	}
+	nav a.primary {
+		background: var(--accent);
+		color: var(--on-accent);
+		border-radius: 100px;
+		padding: 0.55rem 1.1rem;
+		font-weight: 600;
+		text-decoration: none;
 	}
 	nav a {
 		color: var(--accent);

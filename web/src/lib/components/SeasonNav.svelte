@@ -3,8 +3,10 @@
 
 	// The season tabs shared by the gallery and the threads pages. The
 	// current tab fills with the accent, the other stays a plain pill.
-	// The fixture flag keeps the scripted season behind its query string.
-	// The props carry current ("gallery" or "threads") and fixture.
+	// The episode page passes none, so both tabs stay plain beside the
+	// filled Edit pill it renders itself. The fixture flag keeps the
+	// scripted season behind its query string.
+	// The props carry current (gallery, threads, or none) and fixture.
 	let { current, fixture = false } = $props();
 </script>
 

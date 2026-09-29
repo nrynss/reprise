@@ -13,6 +13,7 @@ import {
 	readingFromJob,
 	resumedUploadDetail,
 	stoppedDetail,
+	TRANSCRIBING_DETAIL,
 	uploadDetail,
 	uploadPercent,
 	type ProcessingSnapshot,
@@ -110,6 +111,31 @@ async function waitUntil(read: () => boolean): Promise<void> {
 		await new Promise((resolve) => setTimeout(resolve, 10));
 	}
 }
+
+describe('watching detail', () => {
+	it('names the take while a watched pass runs', () => {
+		expect(TRANSCRIBING_DETAIL).toBe('Transcribing your take.');
+		let controller: ProcessingController | null = null;
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () => new Response('{"error":"slow"}', { status: 500 }))
+		);
+		try {
+			let latest = '';
+			controller = new ProcessingController(
+				new URLSearchParams('episode=ep-1&transcript=tj-1&uploads=done&userBytes=10&hostBytes=20'),
+				(snap) => {
+					latest = snap.transcription.detail;
+				}
+			);
+			controller.mount();
+			expect(latest).toBe(TRANSCRIBING_DETAIL);
+		} finally {
+			controller?.destroy();
+			vi.unstubAllGlobals();
+		}
+	});
+});
 
 describe('retry after a failed draft move', () => {
 	let controller: ProcessingController | null = null;

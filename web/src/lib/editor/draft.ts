@@ -88,6 +88,12 @@ export interface DraftOptions {
 	onChange: (snap: DraftSnapshot) => void;
 }
 
+// Live draft notices in plain words. A stored draft shows no notice at
+// all, because the editor already shows its words. An empty draft says
+// the transcript has not landed yet.
+export const LIVE_DRAFT_NOTICE = '';
+export const LIVE_DRAFT_EMPTY_NOTICE = 'No transcript yet.';
+
 export function emptyDraft(episodeId: string): DraftSnapshot {
 	return {
 		ready: false,
@@ -522,7 +528,7 @@ export class DraftController {
 				callback: isReverted(callback)
 			},
 			decisions,
-			notice: words.length > 0 ? 'Draft loaded.' : 'Draft loaded. No words stored yet.'
+			notice: words.length > 0 ? LIVE_DRAFT_NOTICE : LIVE_DRAFT_EMPTY_NOTICE
 		});
 	}
 

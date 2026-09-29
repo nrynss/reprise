@@ -1006,6 +1006,12 @@ export interface GallerySnapshot {
 	gateResult: string;
 }
 
+// Live gallery notices in plain words. The failure line names what the
+// guest lost and offers the retry, with no build vocabulary behind it.
+// Fixture lines keep their scripted wording for offline runs.
+export const LIVE_SEASON_FAILED_NOTICE = 'Your episodes did not load. Retry.';
+export const LIVE_SEASON_NOTICE = 'Live season, newest first.';
+
 export function emptyGallery(): GallerySnapshot {
 	return {
 		ready: false,
@@ -1129,7 +1135,7 @@ export class GalleryController {
 							...this.snap,
 							ready: true,
 							failed: true,
-							notice: 'The season endpoint refused, so no rows render. Retry the load.'
+							notice: LIVE_SEASON_FAILED_NOTICE
 						};
 						this.emit();
 					}
@@ -1152,7 +1158,7 @@ export class GalleryController {
 			...this.snap,
 			rows: listed.map((episode) => liveRow(episode, '')),
 			ready: true,
-			notice: 'Live season, newest first.'
+			notice: LIVE_SEASON_NOTICE
 		};
 		this.emit();
 		await this.followUnfinished(listed);
@@ -1537,8 +1543,14 @@ export function emptyScreen(id: string): EpisodeScreen {
 	};
 }
 
+// Live episode notices in plain words. A loaded episode shows no notice
+// at all, because the page already shows the episode. The failure line
+// names what the guest lost and offers the retry.
+export const LIVE_EPISODE_NOTICE = '';
+export const LIVE_EPISODE_FAILED_NOTICE = 'This episode did not load. Retry.';
+
 // The episode behind its view. The fixture flag keeps the scripted
-// episode with generated audio. Otherwise the view reads the wired
+// episode with generated audio. Otherwise the view reads the stored
 // detail: proposals with their word ranges and decisions, the latest
 // pass outcome, and quoted moments from the thread index. A render
 // address loads the player. A moment word parks on its covering
@@ -1882,7 +1894,7 @@ export class EpisodeController {
 				failed: !missing,
 				notice: missing
 					? 'No episode lives at this id.'
-					: 'The episode endpoint refused, so nothing renders. Retry the load.'
+					: LIVE_EPISODE_FAILED_NOTICE
 			};
 			this.emit();
 			this.expose(null);
@@ -1910,7 +1922,7 @@ export class EpisodeController {
 				: (detail.proposals.find((proposal) => proposal.startWord <= momentWord && momentWord <= proposal.endWord)?.id ?? null);
 		const notice =
 			momentWord === null
-				? 'Live episode from the wired detail.'
+				? LIVE_EPISODE_NOTICE
 				: momentQuote === null
 					? `Quoted moment at word ${momentWord}. No stored quote names it.`
 					: `Quoted moment at word ${momentWord}. “${momentQuote}”`;
