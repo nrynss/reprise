@@ -27,6 +27,7 @@ import (
 	"github.com/nrynss/keel/erase"
 	"github.com/nrynss/keel/job"
 	"github.com/nrynss/keel/mediastore"
+	"github.com/nrynss/keel/sqlite"
 	"github.com/nrynss/reprise/internal/identity"
 )
 
@@ -57,6 +58,10 @@ var (
 	// ErrIncomplete reports a deletion job that ended with an episode
 	// still owed. The message names the episode it could not finish.
 	ErrIncomplete = errors.New("privacy: account deletion incomplete")
+	// ErrTakeSaving reports a deletion asked while a take still settles.
+	// The money must land first, so the caller tries again in a minute.
+	// Handlers answer 409.
+	ErrTakeSaving = errors.New("privacy: account deletion waits on a settling take")
 )
 
 // CodeVerifier checks one fresh sign in code. The sign in service
@@ -69,11 +74,12 @@ type CodeVerifier interface {
 
 // DeleteAccount starts the deletion of userID and returns the job id at
 // once. The caller follows the job to done. It first gates ownership,
-// then proves the address belongs to this user, then consumes one fresh
-// code through the sign in verification. A refusal deletes nothing. The
-// job erases every episode through the erasure fan-out, then removes the
-// stray media, the code rows, the session rows, the identity rows and
-// the user row.
+// then proves the address belongs to this user, then refuses while a take
+// still settles, then consumes one fresh code through the sign in
+// verification. A refusal deletes nothing, and a settle refusal never
+// burns the code. The job erases every episode through the erasure
+// fan-out, clears the settle books, then removes the stray media, the
+// code rows, the session rows, the identity rows and the user row.
 func (s *Service) DeleteAccount(ctx context.Context, verifier CodeVerifier, sessionID, userID, email, code string) (string, error) {
 	r := s.runnerOf()
 	if r == nil {
@@ -86,6 +92,9 @@ func (s *Service) DeleteAccount(ctx context.Context, verifier CodeVerifier, sess
 		return "", fmt.Errorf("privacy: delete account for %s: %w", userID, ErrNotOwner)
 	}
 	if err := s.ownsAddress(ctx, userID, email); err != nil {
+		return "", err
+	}
+	if err := s.accountSettled(ctx, userID); err != nil {
 		return "", err
 	}
 	outcome, err := verifier.VerifyLoginCode(ctx, sessionID, userID, email, code, "")
@@ -229,6 +238,9 @@ func (s *Service) resumeAccount(rec job.Record) (job.Func, error) {
 // mid-attempt cannot move the running work.
 func (s *Service) runAccount(ctx context.Context, runner *job.Runner, progress func(job.Progress), snap accountSnapshot) ([]byte, error) {
 	s.publishAccount(progress, snap)
+	if err := s.accountSettled(ctx, snap.User); err != nil {
+		return nil, err
+	}
 	for i := range snap.Episodes {
 		if snap.Episodes[i].Done {
 			continue
@@ -241,6 +253,9 @@ func (s *Service) runAccount(ctx context.Context, runner *job.Runner, progress f
 			return nil, err
 		}
 		s.publishAccount(progress, snap)
+	}
+	if err := s.deleteAccountSettle(ctx, snap.User); err != nil {
+		return nil, err
 	}
 	if err := s.deleteAccountStrays(ctx, snap.User); err != nil {
 		return nil, err
@@ -481,6 +496,84 @@ func (s *Service) deleteAccountRows(ctx context.Context, user string) error {
 	return nil
 }
 
+// accountSettled reports whether every live take of user settled its
+// money. It reads the settle linkage of diary sessions that still exist.
+// A link whose session row is already gone names an erased episode, so
+// its leftover rows delete with the account instead of blocking it. A
+// live link with no settled claim blocks with ErrTakeSaving. A database
+// the settle path never touched holds no links, so it reads as settled.
+func (s *Service) accountSettled(ctx context.Context, user string) error {
+	if !accountTableExists(ctx, s.db, "session_settle") {
+		return nil
+	}
+	var live int
+	err := s.db.Reader().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM session_settle l
+		 JOIN sessions s ON s.id = l.session_id WHERE l.owner_id = ?`, user).Scan(&live)
+	if err != nil {
+		return fmt.Errorf("privacy: delete account for %s: list unsettled takes: %w", user, err)
+	}
+	if live == 0 {
+		return nil
+	}
+	if !accountTableExists(ctx, s.db, "reconcile_state") {
+		return fmt.Errorf("privacy: delete account for %s: %w", user, ErrTakeSaving)
+	}
+	var open int
+	err = s.db.Reader().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM session_settle l
+		 JOIN sessions s ON s.id = l.session_id
+		 LEFT JOIN reconcile_state r ON r.session_id = l.session_id
+		 WHERE l.owner_id = ? AND (r.settled IS NULL OR r.settled = 0)`, user).Scan(&open)
+	if err != nil {
+		return fmt.Errorf("privacy: delete account for %s: list unsettled takes: %w", user, err)
+	}
+	if open > 0 {
+		return fmt.Errorf("privacy: delete account for %s: %w", user, ErrTakeSaving)
+	}
+	return nil
+}
+
+// deleteAccountSettle removes the settle books of user once every take
+// settled. The linkage goes last, because it scopes the first two
+// deletes. The spend ledger stays as it is, so the global total never
+// moves. Owner ceilings and lease rows stay where the shared library
+// keeps them, because no library call drops them.
+func (s *Service) deleteAccountSettle(ctx context.Context, user string) error {
+	if !accountTableExists(ctx, s.db, "session_settle") {
+		return nil
+	}
+	if accountTableExists(ctx, s.db, "reconcile_state") {
+		if _, err := s.db.Writer().ExecContext(ctx,
+			`DELETE FROM reconcile_state WHERE session_id IN
+			 (SELECT session_id FROM session_settle WHERE owner_id = ?)`, user); err != nil {
+			return fmt.Errorf("privacy: delete account for %s: delete settle claims: %w", user, err)
+		}
+	}
+	if accountTableExists(ctx, s.db, "sweep_state") {
+		if _, err := s.db.Writer().ExecContext(ctx,
+			`DELETE FROM sweep_state WHERE session_id IN
+			 (SELECT session_id FROM session_settle WHERE owner_id = ?)`, user); err != nil {
+			return fmt.Errorf("privacy: delete account for %s: delete sweep rows: %w", user, err)
+		}
+	}
+	if _, err := s.db.Writer().ExecContext(ctx,
+		`DELETE FROM session_settle WHERE owner_id = ?`, user); err != nil {
+		return fmt.Errorf("privacy: delete account for %s: delete settle links: %w", user, err)
+	}
+	return nil
+}
+
+// accountTableExists reports whether name holds a table in this database.
+// Settle tables arrive with their own packages, so deletion skips one
+// that never ran instead of failing the whole account.
+func accountTableExists(ctx context.Context, db *sqlite.DB, name string) bool {
+	var found string
+	err := db.Reader().QueryRowContext(ctx,
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", name).Scan(&found)
+	return err == nil && found == name
+}
+
 // publishAccount records one deletion ledger snapshot through the job
 // progress channel, so the runner streams it and leaves it durable in
 // the record.
@@ -516,6 +609,9 @@ const (
 	// CodeAccountInvalidRequest answers a malformed body or a value the
 	// route cannot honour.
 	CodeAccountInvalidRequest = "invalid_request"
+	// CodeAccountTakeSaving answers a deletion asked while a take still
+	// settles. The caller tries again in a minute, after the money lands.
+	CodeAccountTakeSaving = "take_saving"
 )
 
 // PatternAccountDelete removes the caller's account through a deletion
@@ -580,6 +676,8 @@ func (s *Service) serveAccountDelete(w http.ResponseWriter, r *http.Request, ver
 		switch {
 		case errors.Is(err, ErrReauth):
 			writeRefusal(w, http.StatusUnauthorized, CodeAccountInvalidCode, "this code is expired, used, or never requested on this device")
+		case errors.Is(err, ErrTakeSaving):
+			writeRefusal(w, http.StatusConflict, CodeAccountTakeSaving, "Your last take is still being saved. Try again in a minute.")
 		case errors.Is(err, ErrNotOwner):
 			writeRefusal(w, http.StatusNotFound, CodeNotFound, "that account opens nothing")
 		default:

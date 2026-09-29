@@ -15,9 +15,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/nrynss/keel/cost"
+	costsqlitestore "github.com/nrynss/keel/cost/sqlitestore"
 	"github.com/nrynss/keel/id"
 	"github.com/nrynss/keel/job"
+	"github.com/nrynss/keel/lease"
+	leasesqlitestore "github.com/nrynss/keel/lease/sqlitestore"
 	"github.com/nrynss/keel/stream"
 	"github.com/nrynss/reprise/internal/identity"
 	"github.com/nrynss/reprise/internal/mail"
@@ -200,6 +205,393 @@ func seedSecondEpisode(t *testing.T, fx *fixture, owner string, number int64) *e
 	fx.exec(t, `INSERT INTO reconcile_state (session_id, recording_media_id, updated_at)
 		VALUES (?, ?, 1)`, "sess-second-"+owner, seed.stereo)
 	return seed
+}
+
+// ensureSettleTables creates the settle bookkeeping tables with the
+// broker schema when the fixture never opened the broker, and adds the
+// settle flag the diary seeder schema misses. Production always carries
+// all three tables with every column.
+func ensureSettleTables(t *testing.T, fx *fixture) {
+	t.Helper()
+	ctx := t.Context()
+	for _, schema := range []string{
+		`CREATE TABLE IF NOT EXISTS session_settle (
+			session_id TEXT PRIMARY KEY,
+			owner_id TEXT NOT NULL,
+			episode_id TEXT NOT NULL,
+			lease_id TEXT NOT NULL,
+			reservation TEXT NOT NULL,
+			token_cap INTEGER NOT NULL,
+			minted_at INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS sweep_state (
+			session_id TEXT PRIMARY KEY,
+			provider_status TEXT NOT NULL DEFAULT '',
+			connected_seconds INTEGER NOT NULL DEFAULT 0,
+			server_ended INTEGER NOT NULL DEFAULT 0,
+			detail TEXT NOT NULL DEFAULT '',
+			updated_at INTEGER NOT NULL DEFAULT 0
+		)`,
+	} {
+		if _, err := fx.db.Writer().ExecContext(ctx, schema); err != nil {
+			t.Fatalf("create settle table: %v", err)
+		}
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx,
+		`ALTER TABLE reconcile_state ADD COLUMN settled INTEGER NOT NULL DEFAULT 0`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		t.Fatalf("add settle flag: %v", err)
+	}
+}
+
+// seedSettleLink writes one settle linkage for a diary session. A settled
+// link carries a settled claim and a sweep row, the way a reconciled take
+// leaves them. An unsettled link carries neither, the way a live take
+// holds them. The seeder may already hold a claim row, so settled links
+// upsert their flag instead of inserting twice.
+func seedSettleLink(t *testing.T, fx *fixture, sessionID, ownerID, episodeID string, settled bool) {
+	t.Helper()
+	ctx := t.Context()
+	raw, err := json.Marshal(costsqlitestore.Reservation{ID: "res-" + sessionID, Amount: 100000})
+	if err != nil {
+		t.Fatalf("encode reservation: %v", err)
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx,
+		`INSERT INTO session_settle (session_id, owner_id, episode_id, lease_id, reservation, token_cap, minted_at)
+		 VALUES (?, ?, ?, ?, ?, 1800, 1)`,
+		sessionID, ownerID, episodeID, "lease-"+sessionID, string(raw)); err != nil {
+		t.Fatalf("seed settle link %s: %v", sessionID, err)
+	}
+	if !settled {
+		return
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx,
+		`INSERT INTO reconcile_state (session_id, recording_media_id, settled, updated_at)
+		 VALUES (?, '', 1, 1)
+		 ON CONFLICT(session_id) DO UPDATE SET settled = 1`, sessionID); err != nil {
+		t.Fatalf("seed settle claim %s: %v", sessionID, err)
+	}
+	if _, err := fx.db.Writer().ExecContext(ctx,
+		`INSERT OR IGNORE INTO sweep_state (session_id, provider_status, connected_seconds, server_ended, detail, updated_at)
+		 VALUES (?, 'closed', 60, 0, 'settled', 1)`, sessionID); err != nil {
+		t.Fatalf("seed sweep row %s: %v", sessionID, err)
+	}
+}
+
+// countSettleOwner counts the settle links one owner still holds.
+func countSettleOwner(t *testing.T, fx *fixture, owner string) int {
+	t.Helper()
+	var total int
+	if err := fx.db.Reader().QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM session_settle WHERE owner_id = ?", owner).Scan(&total); err != nil {
+		t.Fatalf("count settle links: %v", err)
+	}
+	return total
+}
+
+// countStateSessions counts the claim or sweep rows naming any session id.
+func countStateSessions(t *testing.T, fx *fixture, table string, sessions []string) int {
+	t.Helper()
+	if len(sessions) == 0 {
+		return 0
+	}
+	marks := strings.Repeat("?,", len(sessions)-1) + "?"
+	args := make([]any, len(sessions))
+	for i, session := range sessions {
+		args[i] = session
+	}
+	var total int
+	if err := fx.db.Reader().QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM "+table+" WHERE session_id IN ("+marks+")", args...).Scan(&total); err != nil {
+		t.Fatalf("count %s rows: %v", table, err)
+	}
+	return total
+}
+
+// requestAccountCode asks one fresh code on sessA1 and returns the digits
+// the fake mail carried.
+func requestAccountCode(t *testing.T, idsvc *identity.Service, fake *mail.Fake, session string) string {
+	t.Helper()
+	if err := idsvc.RequestLoginCode(t.Context(), session, accountAddress); err != nil {
+		t.Fatalf("request code: %v", err)
+	}
+	return accountCodeFromMail(t, fake)
+}
+
+// TestDeleteAccountClearsSettleBooks pins the bookkeeping half. A user
+// with two settled takes is deleted, and afterwards no settle link, no
+// claim row and no sweep row names her or her episodes, while the second
+// owner keeps every row of his own settled take.
+func TestDeleteAccountClearsSettleBooks(t *testing.T) {
+	fx, idsvc, fake, sessA1, _ := openAccountCase(t)
+	second := seedSecondEpisode(t, fx, "owner-a", 2)
+	first := fx.seeds["owner-a"]
+	ensureSettleTables(t, fx)
+	seedSettleLink(t, fx, "sess-owner-a", "owner-a", first.episode, true)
+	seedSettleLink(t, fx, "sess-second-owner-a", "owner-a", second.episode, true)
+	seedSettleLink(t, fx, "sess-owner-b", "owner-b", fx.seeds["owner-b"].episode, true)
+
+	fx.as("owner-a")
+	code := requestAccountCode(t, idsvc, fake, sessA1)
+	jobID, err := fx.svc.DeleteAccount(t.Context(), idsvc, sessA1, "owner-a", "  Owner-A@Example.com  ", code)
+	if err != nil {
+		t.Fatalf("delete account: %v", err)
+	}
+	fx.waitJobDone(t, jobID)
+
+	if got := countSettleOwner(t, fx, "owner-a"); got != 0 {
+		t.Fatalf("session_settle holds %d owner-a links, want none", got)
+	}
+	gone := []string{"sess-owner-a", "sess-second-owner-a"}
+	if got := countStateSessions(t, fx, "reconcile_state", gone); got != 0 {
+		t.Fatalf("reconcile_state holds %d owner-a rows, want none", got)
+	}
+	if got := countStateSessions(t, fx, "sweep_state", gone); got != 0 {
+		t.Fatalf("sweep_state holds %d owner-a rows, want none", got)
+	}
+	var episodes int
+	if err := fx.db.Reader().QueryRowContext(t.Context(),
+		"SELECT COUNT(*) FROM session_settle WHERE episode_id IN (?, ?)", first.episode, second.episode).Scan(&episodes); err != nil {
+		t.Fatalf("count episode links: %v", err)
+	}
+	if episodes != 0 {
+		t.Fatalf("session_settle holds %d rows naming erased episodes, want none", episodes)
+	}
+	if got := fx.count(t, "users", "owner-a"); got != 0 {
+		t.Fatalf("users holds %d owner-a rows, want none", got)
+	}
+
+	if got := countSettleOwner(t, fx, "owner-b"); got != 1 {
+		t.Fatalf("session_settle holds %d owner-b links, want 1", got)
+	}
+	if got := countStateSessions(t, fx, "reconcile_state", []string{"sess-owner-b"}); got != 1 {
+		t.Fatalf("reconcile_state holds %d owner-b rows, want 1", got)
+	}
+	if got := countStateSessions(t, fx, "sweep_state", []string{"sess-owner-b"}); got != 1 {
+		t.Fatalf("sweep_state holds %d owner-b rows, want 1", got)
+	}
+}
+
+// TestDeleteAccountWaitsOnUnsettledTake pins the money gate. A live take
+// with no settled claim refuses the deletion and keeps every row. Once
+// the claim settles, a fresh code deletes the account and clears its
+// books, so the gate is load-bearing and never burns the first code.
+func TestDeleteAccountWaitsOnUnsettledTake(t *testing.T) {
+	fx, idsvc, fake, sessA1, _ := openAccountCase(t)
+	ensureSettleTables(t, fx)
+	seedSettleLink(t, fx, "sess-owner-a", "owner-a", fx.seeds["owner-a"].episode, false)
+
+	fx.as("owner-a")
+	code := requestAccountCode(t, idsvc, fake, sessA1)
+	if _, err := fx.svc.DeleteAccount(t.Context(), idsvc, sessA1, "owner-a", accountAddress, code); !errors.Is(err, privacy.ErrTakeSaving) {
+		t.Fatalf("unsettled delete err %v, want the settling take refusal", err)
+	}
+	if got := fx.count(t, "episodes", "owner-a"); got != 1 {
+		t.Fatalf("episodes holds %d owner-a rows after a refused delete, want 1", got)
+	}
+	if got := countSettleOwner(t, fx, "owner-a"); got != 1 {
+		t.Fatalf("session_settle holds %d owner-a links after a refused delete, want 1", got)
+	}
+
+	fx.exec(t, `INSERT INTO reconcile_state (session_id, recording_media_id, settled, updated_at)
+		VALUES ('sess-owner-a', '', 1, 1)
+		ON CONFLICT(session_id) DO UPDATE SET settled = 1`)
+	next := requestAccountCode(t, idsvc, fake, sessA1)
+	jobID, err := fx.svc.DeleteAccount(t.Context(), idsvc, sessA1, "owner-a", accountAddress, next)
+	if err != nil {
+		t.Fatalf("settled delete: %v", err)
+	}
+	fx.waitJobDone(t, jobID)
+	if got := countSettleOwner(t, fx, "owner-a"); got != 0 {
+		t.Fatalf("session_settle holds %d owner-a links after a settled delete, want none", got)
+	}
+	if got := fx.count(t, "users", "owner-a"); got != 0 {
+		t.Fatalf("users holds %d owner-a rows after a settled delete, want none", got)
+	}
+}
+
+// TestAccountHandlerWaitsOnUnsettledTake pins the endpoint half of the
+// gate. An unsettled take answers 409 with the plain message and the
+// stable code. Once the claim settles, the same body starts the deletion
+// job, so the message is the block and never the end of it.
+func TestAccountHandlerWaitsOnUnsettledTake(t *testing.T) {
+	fx := openFixture(t)
+	runner, err := job.Open(t.Context(), job.Config{
+		Broker: stream.New(stream.Config{}),
+		Store:  fx.jobStore,
+		Kinds:  fx.svc.AccountKinds(),
+	})
+	if err != nil {
+		t.Fatalf("open account runner: %v", err)
+	}
+	if err := fx.svc.BindRunner(runner); err != nil {
+		t.Fatalf("bind account runner: %v", err)
+	}
+	fx.runner = runner
+	idsvc, err := identity.New(t.Context(), identity.Config{
+		DB:         fx.db,
+		SigningKey: "test-session-signing-key-with-length",
+	})
+	if err != nil {
+		t.Fatalf("open identity service: %v", err)
+	}
+	user, _, cookie := mintHandlerGuest(t, idsvc)
+	mailID, err := id.New()
+	if err != nil {
+		t.Fatalf("mint identity id: %v", err)
+	}
+	fx.exec(t, `INSERT INTO identities (id, user_id, provider, subject, created_at) VALUES (?, ?, 'email', ?, 1)`,
+		mailID, user.ID, "guest@example.com")
+	episodeID := "ep-" + user.ID
+	sessionID := "sess-" + user.ID
+	token, err := id.New()
+	if err != nil {
+		t.Fatalf("mint share token: %v", err)
+	}
+	fx.exec(t, `INSERT INTO episodes
+		(id, owner_id, number, title, state, visibility, share_token, seeded)
+		VALUES (?, ?, 1, 'Live take', 'recording', 'private', ?, 0)`, episodeID, user.ID, token)
+	fx.exec(t, `INSERT INTO sessions
+		(id, owner_id, episode_id, provider_session_id, token_cap, connected_seconds)
+		VALUES (?, ?, ?, '', 1800, 0)`, sessionID, user.ID, episodeID)
+	ensureSettleTables(t, fx)
+	seedSettleLink(t, fx, sessionID, user.ID, episodeID, false)
+
+	stub := &stubVerifier{outcome: identity.LoginOutcome{UserID: user.ID, SessionID: "next-session"}}
+	handler := idsvc.Middleware(fx.svc.AccountHandler(stub))
+	fx.as(user.ID)
+	rec := postAccountDelete(t, handler, cookie, `{"email":"guest@example.com","code":"123456"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("unsettled delete status %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "take_saving") {
+		t.Fatalf("unsettled delete answer %q, want the stable code", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Your last take is still being saved. Try again in a minute.") {
+		t.Fatalf("unsettled delete answer %q, want the plain message", rec.Body.String())
+	}
+	if got := fx.count(t, "episodes", user.ID); got != 1 {
+		t.Fatalf("episodes holds %d rows after a refused delete, want 1", got)
+	}
+
+	fx.exec(t, `INSERT INTO reconcile_state (session_id, recording_media_id, settled, updated_at)
+		VALUES (?, '', 1, 1)`, sessionID)
+	rec = postAccountDelete(t, handler, cookie, `{"email":"guest@example.com","code":"123456"}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("settled delete status %d, want 202: %s", rec.Code, rec.Body.String())
+	}
+	var answered struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &answered); err != nil || answered.JobID == "" {
+		t.Fatalf("settled delete answer %q, want a job id", rec.Body.String())
+	}
+	fx.waitJobDone(t, answered.JobID)
+	if got := fx.count(t, "users", user.ID); got != 0 {
+		t.Fatalf("users holds %d rows after a settled delete, want none", got)
+	}
+}
+
+// passMeter runs lease bookkeeping without holding budget. The gap test
+// books spend straight through the keyed budget, so the seam must not
+// hold the same estimate again.
+type passMeter struct{}
+
+// Call runs the work and returns its usage without reserving or booking.
+func (passMeter) Call(ctx context.Context, _ cost.Price, _, _ string, work cost.Work) (cost.Usage, error) {
+	usage, err := work(ctx)
+	if err != nil {
+		return cost.Usage{}, err
+	}
+	return usage, nil
+}
+
+// TestDeleteAccountKeelRowsStayAsNamedGap pins the library boundary.
+// Owner ceilings and lease rows belong to the shared library, which
+// ships no call to drop them, so deletion must not touch them. The test
+// books real spend and a real closed lease through the library, deletes
+// the account, and requires the global spend, the owner ceiling and the
+// lease to read back unchanged through the same calls. When the library
+// ships a removal call, this test is the place that starts expecting the
+// rows gone.
+func TestDeleteAccountKeelRowsStayAsNamedGap(t *testing.T) {
+	fx, idsvc, fake, sessA1, _ := openAccountCase(t)
+	ctx := t.Context()
+	costs, err := costsqlitestore.Open(ctx, costsqlitestore.Config{DB: fx.db, Limit: 1000000000})
+	if err != nil {
+		t.Fatalf("open cost store: %v", err)
+	}
+	budgets := costsqlitestore.NewKeyedBudget(costs)
+	if err := budgets.SetLimit(ctx, "owner-a", 500000000); err != nil {
+		t.Fatalf("set owner ceiling: %v", err)
+	}
+	reservation, err := budgets.Reserve(ctx, "owner-a", 100000)
+	if err != nil {
+		t.Fatalf("reserve owner spend: %v", err)
+	}
+	if err := budgets.Settle(ctx, "owner-a", reservation, 60000); err != nil {
+		t.Fatalf("settle owner spend: %v", err)
+	}
+	leaseStore, err := leasesqlitestore.Open(ctx, leasesqlitestore.Config{DB: fx.db})
+	if err != nil {
+		t.Fatalf("open lease store: %v", err)
+	}
+	quota, err := lease.NewQuota(10)
+	if err != nil {
+		t.Fatalf("new quota: %v", err)
+	}
+	manager, err := lease.New(lease.Config{
+		Quota: quota,
+		Meter: passMeter{},
+		Store: leaseStore,
+		Cap:   time.Minute,
+		Kind:  "session",
+	})
+	if err != nil {
+		t.Fatalf("new lease manager: %v", err)
+	}
+	opened, err := manager.Open(ctx, "owner-a", 100000, "")
+	if err != nil {
+		t.Fatalf("open lease: %v", err)
+	}
+	closed, err := manager.Close(ctx, opened.ID, 60000)
+	if err != nil {
+		t.Fatalf("close lease: %v", err)
+	}
+	if _, err := manager.Reconcile(ctx, closed.ID, 60000); err != nil {
+		t.Fatalf("reconcile lease: %v", err)
+	}
+	spentBefore, err := costs.Spent(ctx)
+	if err != nil {
+		t.Fatalf("read global spend: %v", err)
+	}
+	remainBefore, err := budgets.Remaining(ctx, "owner-a")
+	if err != nil {
+		t.Fatalf("read owner headroom: %v", err)
+	}
+	ensureSettleTables(t, fx)
+	seedSettleLink(t, fx, "sess-owner-a", "owner-a", fx.seeds["owner-a"].episode, true)
+
+	fx.as("owner-a")
+	code := requestAccountCode(t, idsvc, fake, sessA1)
+	jobID, err := fx.svc.DeleteAccount(ctx, idsvc, sessA1, "owner-a", accountAddress, code)
+	if err != nil {
+		t.Fatalf("delete account: %v", err)
+	}
+	fx.waitJobDone(t, jobID)
+
+	if spentAfter, err := costs.Spent(ctx); err != nil || spentAfter != spentBefore {
+		t.Fatalf("global spend %d err %v, want unchanged %d", spentAfter, err, spentBefore)
+	}
+	if remainAfter, err := budgets.Remaining(ctx, "owner-a"); err != nil || remainAfter != remainBefore {
+		t.Fatalf("owner headroom %d err %v, want unchanged %d", remainAfter, err, remainBefore)
+	}
+	if _, err := manager.Inspect(ctx, opened.ID); err != nil {
+		t.Fatalf("lease %s unreadable after deletion: %v, want the named gap kept", opened.ID, err)
+	}
+	if got := fx.count(t, "users", "owner-a"); got != 0 {
+		t.Fatalf("users holds %d owner-a rows, want none", got)
+	}
 }
 
 // accountCodeFromMail pulls the six digit code from the most recent fake
