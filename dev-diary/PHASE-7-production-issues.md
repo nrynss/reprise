@@ -2623,7 +2623,7 @@ owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.sp
              web/src/routes/threads/threads.test.ts, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts,
              web/src/lib/voice/processing-state.ts, web/src/lib/copy.test.ts
-status:     in-progress:remediate-r1:t7.82-rem-r1
+status:     in-progress:review-r2:t7.82-rev-r2@61936d5899da67abd06c469de5e43e333d3eaa47
 ```
 T7.81 round 1 recorded two out of scope L notes. The shared `erase()` path in `threads.ts`
 returns live notices naming build vocabulary (`job` ids, `endpoint` accepted and refused lines,
