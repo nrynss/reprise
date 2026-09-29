@@ -207,7 +207,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/account/, web/src/lib/components/AccountLink.svelte,
              web/src/lib/components/SeasonNav.svelte
-status:     in-progress:review-r1:t8.6-rev-r1@26bd49ad690c8d73f1bef696be50233f2a9b179c
+status:     in-progress:remediate-r1:t8.6-rem-r1
 ```
 * `SeasonNav` gains a quiet "Sign in" link. It reads "Account" once signed in.
 * `/account`: an email field, then a 6-digit code field with a resend link that honours
@@ -298,6 +298,60 @@ The one task that needs a person and production.
 * Delete a throwaway account, and confirm by query that nothing remains.
 
 **Done when:** Every step above is recorded with commands and output in `accounts-live.md`.
+
+### T8.11: Sign-out route
+```yaml
+requires:   T8.4
+fixture-ok: yes
+size:       S · frontier
+owns:       internal/identity/signout.go, internal/identity/signout_test.go,
+             internal/api/routes.go, internal/api/routes_test.go,
+             cmd/reprise/main.go, cmd/reprise/main_test.go, web/package.json
+status:     not-started
+```
+T8.6 round 1 proved no sign-out route exists: the account page calls
+`POST /api/login/signout` against an unrouted path, so the session cookie
+stays valid and the task's "revokes the session and starts a fresh guest"
+sentence is unmet.
+
+* `POST /api/login/signout` under the identity middleware. It revokes the
+  current `guest_sessions` row, creates a fresh guest user with a fresh
+  session following the T1.4 guest conventions, and sets the cookie.
+  It answers the same 200 body for guests and signed-in users alike.
+* Wire it in the route table, `cmd/reprise/main.go`, and the browser mirror
+  only if the mirror lists routes individually (read it first).
+* Append `playwright test -c src/routes/account/account.playwright.config.ts`
+  to the `test:e2e` chain in `web/package.json`, so the T8.6 account spec
+  runs in CI and the gate.
+
+**Done when:** A test signs in, signs out, then shows the old cookie resolves
+as a stranger and the device holds a fresh guest. The account spec passes
+through the `test:e2e` chain. The gate passes in a fresh worktree.
+
+### T8.12: Session-status route
+```yaml
+requires:   T8.4, T8.11
+fixture-ok: yes
+size:       S · frontier
+owns:       internal/identity/status.go, internal/identity/status_test.go
+status:     not-started
+```
+T8.6 round 1 proved the account page trusts `localStorage` alone: a seeded
+store renders a signed-in screen with zero API calls, desynced from the
+session cookie.
+
+* `GET /api/login/status` under the identity middleware. It answers whether
+  the session's user holds an email identity and, when so, its address.
+  Guests answer signed out. It never reveals anything but the caller's own
+  address.
+* The account page adopts it as the source of truth in a later task. This
+  task ships the route only, with its wiring in the route table and boot
+  through the existing identity service seams (read them first and widen
+  owns by decision if the seam forces it).
+
+**Done when:** Tests cover a guest, a signed-in user, and a signed-in user
+whose session was revoked elsewhere (answers signed out). The gate passes
+in a fresh worktree.
 
 ---
 
