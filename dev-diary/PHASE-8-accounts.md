@@ -60,7 +60,7 @@ requires:   none
 fixture-ok: yes
 size:       S · mid
 owns:       internal/mail/
-status:     in-progress:review-r1:t8.1-rev-r1@e443c20769097fe5d3b03f9652df83e1149f27ac
+status:     in-progress:land:t8.1-impl@e443c20769097fe5d3b03f9652df83e1149f27ac
 ```
 A Resend client over plain `net/http`. `internal/mail` is the only code that talks to Resend.
 
