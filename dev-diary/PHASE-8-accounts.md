@@ -229,7 +229,7 @@ fixture-ok: yes
 size:       M · frontier
 owns:       internal/privacy/account.go, internal/privacy/account_test.go,
              web/src/routes/account/delete/
-status:     in-progress:land:t8.7-impl@bcb16c9e8feeb930d576809b3ead4f8c9170e43a
+status:     done:008110d
 ```
 * Deleting needs a fresh code, typed within the last 10 minutes, as re-authentication.
 * It erases every episode through the existing erase fan-out. It then deletes the identity rows,
@@ -426,6 +426,14 @@ in a fresh worktree.
 
 ### What exists now
 
+T8.7 landed at 008110d after round 1 APPROVE with zero in-scope
+findings. The deletion core is pinned: fresh-code re-auth through
+the sign-in verifier, full fan-out erasure, identity, code,
+session, and user row removal, no stored address, resumable job.
+Done holds at unit level only: the route, the kind registration,
+and the account page link land in T8.14, so no account deletes
+end to end yet. Reviewed commit bcb16c9 rebased clean. Race
+tests pass on the landed commit.
 T8.11 landed at c1659b4 after round 2 APPROVE with zero residue.
 Sign-out revokes the session and mints a fresh guest behind one
 shared body, with the golden and mirror carrying the route and the
