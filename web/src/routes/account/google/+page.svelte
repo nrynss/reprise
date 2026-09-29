@@ -17,7 +17,7 @@
 	<title>{pageTitle('Sign in with Google')}</title>
 	<meta
 		name="description"
-		content="Sign in with Google. The provider confirms it is you, and the diary stays."
+		content="Google confirms it is you. The diary on this device stays until you switch."
 	/>
 </svelte:head>
 
