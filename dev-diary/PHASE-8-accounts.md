@@ -229,7 +229,7 @@ fixture-ok: yes
 size:       M · frontier
 owns:       internal/privacy/account.go, internal/privacy/account_test.go,
              web/src/routes/account/delete/
-status:     not-started
+status:     in-progress:implement:t8.7-impl
 ```
 * Deleting needs a fresh code, typed within the last 10 minutes, as re-authentication.
 * It erases every episode through the existing erase fan-out. It then deletes the identity rows,
@@ -251,7 +251,7 @@ fixture-ok: yes
 size:       L · frontier
 owns:       internal/identity/google.go, internal/identity/google_test.go,
              web/src/routes/account/google/
-status:     not-started
+status:     in-progress:implement:t8.8-impl
 ```
 The authorization code flow in `future-auth-plan.md`: state, nonce and PKCE. The callback validates
 issuer, audience, expiry, nonce, signature and `sub`. The identity key is `google:<sub>`, never the
@@ -267,7 +267,7 @@ requires:   T8.4
 fixture-ok: yes
 size:       S · mid
 owns:       internal/limits/
-status:     not-started
+status:     in-progress:implement:t8.9-impl
 ```
 Replace `StubOwnerAuth` with a check that the request's user holds an identity listed in the
 `operators` setting. An `email:` entry works as soon as T8.4 lands, and a `google:` entry works once
