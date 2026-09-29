@@ -424,7 +424,7 @@ requires:   T8.4, T8.11, T8.13, T8.14, T8.15
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/identity/status.go, internal/identity/status_test.go
-status:     in-progress:implement:t8.12-impl
+status:     in-progress:review-r1:t8.12-rev-r1@bffd61cb7d9eeec9fd82e24714d0927b29dc7790
 ```
 T8.6 round 1 proved the account page trusts `localStorage` alone: a seeded
 store renders a signed-in screen with zero API calls, desynced from the
@@ -442,6 +442,27 @@ session cookie.
 **Done when:** Tests cover a guest, a signed-in user, and a signed-in user
 whose session was revoked elsewhere (answers signed out). The gate passes
 in a fresh worktree.
+
+### T8.16: Status-route wiring
+```yaml
+requires:   T8.12
+fixture-ok: yes
+size:       XS · light
+owns:       internal/api/routes.go, internal/api/routes_test.go,
+             cmd/reprise/main.go, cmd/reprise/main_test.go,
+             web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts
+status:     not-started
+```
+T8.12 ships the status handler unmounted: the path 404s and the golden
+does not list it.
+
+* Mount `GET /api/login/status` in the route table (beside the signout
+  entry) and the boot (beside the login mount), through the existing
+  identity service. Update the golden and the browser mirror.
+
+**Done when:** A booted binary answers the status for a guest and a
+signed-in user. The golden and mirror tests pass. The gate passes in a
+fresh worktree.
 
 ---
 
