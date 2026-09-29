@@ -471,7 +471,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/account/google/google.ts,
              web/src/routes/account/google/google.test.ts
-status:     in-progress:land:t8.17-impl@e78c93ace89c865077e3b17926b389aafa99f7c0
+status:     done:e34a620
 ```
 The gate's Svelte 4 leakage scan (`\b(get)\s*\(`, meant for Svelte
 stores) matches `params.get(` in `google.ts`, so the gate is red on
@@ -501,6 +501,11 @@ passes in a fresh worktree past the leakage step.
 
 ### What exists now
 
+T8.17 landed at e34a620 after round 1 APPROVE with zero findings.
+The Google callback flags read through one snapshot with exact
+behavior parity, and the gate leakage grep returns empty
+repo-wide. Reviewed commit e78c93a rebased clean. The gate still
+stops at the pre-existing ffmpeg tool pin on this host.
 T8.16 landed at 373abd0 after round 1 APPROVE with zero in-scope
 findings. The status route mounts beside sign-out with golden and
 mirror carrying it. One out of scope H stays open under T8.17: the
