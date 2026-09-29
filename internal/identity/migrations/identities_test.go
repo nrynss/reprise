@@ -143,6 +143,35 @@ func TestLoginMigrationsApplyOnDiaryCopy(t *testing.T) {
 	}
 }
 
+// TestLoginDisplayNameBackfillsDiaryRows checks the display column lands on
+// a diary copy that already holds user rows, and every old row reads empty.
+func TestLoginDisplayNameBackfillsDiaryRows(t *testing.T) {
+	t.Parallel()
+	db := openDatabase(t)
+	if _, err := store.Open(t.Context(), db); err != nil {
+		t.Fatalf("open diary store: %v", err)
+	}
+	seedUser(t, db, "user-old")
+	applyLogin(t, db)
+	applyLogin(t, db)
+	var col string
+	if err := db.Reader().QueryRowContext(t.Context(),
+		"SELECT name FROM pragma_table_info('users') WHERE name = 'display_name'").Scan(&col); err != nil {
+		t.Fatalf("read users columns: %v", err)
+	}
+	if col != "display_name" {
+		t.Fatalf("users column = %q, want display_name", col)
+	}
+	var name string
+	if err := db.Reader().QueryRowContext(t.Context(),
+		"SELECT display_name FROM users WHERE id = 'user-old'").Scan(&name); err != nil {
+		t.Fatalf("read backfilled display name: %v", err)
+	}
+	if name != "" {
+		t.Fatalf("backfilled display name = %q, want empty", name)
+	}
+}
+
 // TestIdentityProviderSubjectStaysUnique checks a duplicate provider
 // subject pair fails, the same subject under the other provider succeeds,
 // and one user may hold both an email and a second provider identity.
