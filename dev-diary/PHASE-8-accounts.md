@@ -85,7 +85,7 @@ requires:   none
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/migrations/
-status:     in-progress:remediate-r1:t8.2-rem-r1
+status:     in-progress:review-r2:t8.2-rev-r2@39c385f4fb7daa4ed557e0bd439639d533ed7eed
 ```
 New migrations under the identity namespace. Keep `guest_sessions` as it is. The diary already has a
 `sessions` table for recording sessions, so a rename would collide.
