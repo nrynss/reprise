@@ -180,7 +180,7 @@ requires:   T8.4
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/sendlimit.go, internal/identity/sendlimit_test.go
-status:     not-started
+status:     in-progress:implement:t8.5-impl
 ```
 Refuse before the send, never after it. Every limit answers `429` with `Retry-After`.
 
