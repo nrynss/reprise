@@ -191,7 +191,8 @@ test('mock take stores both stems with markers in the user stem', async ({ page 
 	expect(checked).toBeGreaterThan(0);
 });
 
-test('memory stays flat from a one minute take to a twenty minute take', async ({ page }) => {
+test('memory stays flat from a one minute take to a twenty minute take', async ({ page, browserName }) => {
+	test.fixme(browserName === 'firefox', 'performance.memory is Chromium-only, so the heap probe returns null on Firefox');
 	test.setTimeout(180_000);
 	await startMockTake(page);
 	const rate: number = await page.evaluate(

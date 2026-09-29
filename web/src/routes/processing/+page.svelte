@@ -21,7 +21,7 @@
 			null
 	);
 
-	const steps = $derived([snap.upload, snap.transcription, snap.editorial, snap.draft]);
+	const steps = $derived.by(() => [snap.upload, snap.transcription, snap.editorial, snap.draft]);
 
 	// The overall line mirrors the first unfinished row, so a glance at
 	// the top says where the take stands without opening any row.
