@@ -63,6 +63,8 @@ func bootSettings(t *testing.T, dir string) settings.Settings {
 		return path
 	}
 	assembly := write("assembly.key", []byte("boot-probe-assembly-key"))
+	resend := write("resend.key", []byte("boot-probe-resend-key"))
+	logincode := write("login.key", []byte("boot-probe-login-code-key"))
 	signing := write("signing.key", []byte("boot-probe-signing-key"))
 	vertex := write("vertex.json", account)
 	doc := `transcription_model = "universal-3.5-pro"
@@ -78,10 +80,19 @@ media_dir = "` + filepath.Join(dir, "media") + `"
 vertex_project = "boot-probe"
 vertex_location = "us-central1"
 public_origin = "http://localhost:8080"
+mail_from = "Reprise <boot-probe@example.com>"
 
 [secrets.assemblyai_api_key]
 source = "file"
 path = "` + assembly + `"
+
+[secrets.resend_api_key]
+source = "file"
+path = "` + resend + `"
+
+[secrets.login_code_key]
+source = "file"
+path = "` + logincode + `"
 
 [secrets.gemini_credential]
 source = "file"
