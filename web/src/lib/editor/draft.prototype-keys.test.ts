@@ -41,7 +41,7 @@ describe('unbacked live cut ids', () => {
 			controller.mount('');
 			await vi.waitFor(() => expect(controller.snapshot.ready).toBe(true));
 			controller.revertCut(cutId);
-			expect(controller.snapshot.notice).toBe(`No stored proposal backs cut ${cutId}. Nothing changed.`);
+			expect(controller.snapshot.notice).toBe('Nothing to revert. That cut already stands.');
 			expect(posted).toEqual([]);
 			controller.destroy();
 		});

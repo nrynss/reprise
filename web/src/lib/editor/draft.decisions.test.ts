@@ -96,7 +96,7 @@ describe('live draft decisions', () => {
 		expect(controller.snapshot.appliedCount).toBe(0);
 		await vi.waitFor(() => expect(controller.snapshot.appliedCount).toBe(1));
 		expect(controller.snapshot.decisions).toEqual([]);
-		expect(controller.snapshot.notice).toContain('did not store that revert');
+		expect(controller.snapshot.notice).toContain("Couldn't keep that change. Try again.");
 		expect(controller.snapshot.cutCards.map((card) => card.proposalId)).toEqual(['cut-a']);
 		controller.destroy();
 	});
@@ -108,7 +108,7 @@ describe('live draft decisions', () => {
 		expect(controller.snapshot.coldOpenReverted).toBe(true);
 		await vi.waitFor(() => expect(controller.snapshot.coldOpenReverted).toBe(false));
 		expect(controller.snapshot.decisions).toEqual([]);
-		expect(controller.snapshot.notice).toContain('did not store that revert');
+		expect(controller.snapshot.notice).toContain("Couldn't keep that change. Try again.");
 		controller.destroy();
 	});
 

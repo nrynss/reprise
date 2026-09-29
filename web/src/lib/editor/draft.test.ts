@@ -6,6 +6,7 @@ import {
 	DraftController,
 	formatTime,
 	LIVE_DRAFT_EMPTY_NOTICE,
+	LIVE_DRAFT_FAILED_NOTICE,
 	LIVE_DRAFT_NOTICE,
 	LIVE_RENDER_RUNNING_DETAIL,
 	queryValue,
@@ -159,7 +160,7 @@ describe('draft controller', () => {
 		await vi.waitFor(() => {
 			expect(controller.snapshot.renderStage).toBe('running');
 		});
-		expect(controller.snapshot.renderDetail).toContain('Render running');
+		expect(controller.snapshot.renderDetail).toContain(LIVE_RENDER_RUNNING_DETAIL);
 	});
 
 	it('follows a started render instead of calling it refused', async () => {
@@ -226,14 +227,14 @@ describe('draft controller', () => {
 			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
 			controller.mount('');
 			await vi.waitFor(() => {
-				expect(controller.snapshot.notice).toContain('This episode did not load');
+				expect(controller.snapshot.notice).toContain(LIVE_DRAFT_FAILED_NOTICE);
 			});
 			const snap = controller.snapshot;
 			expect(snap.ready).toBe(false);
 			expect(snap.words).toEqual([]);
 			expect(snap.title).toBe('');
 			expect(snap.appliedCount).toBe(0);
-			expect(snap.notice).toContain('500');
+			expect(snap.loadError).toContain('500');
 			expect(snap.loadError).not.toBeNull();
 			controller.destroy();
 		} finally {
@@ -265,7 +266,7 @@ describe('draft controller', () => {
 			const controller = new DraftController({ episodeId: 'live-1', onChange: () => {} });
 			controller.mount('');
 			await vi.waitFor(() => {
-				expect(controller.snapshot.notice).toContain('This episode did not load');
+				expect(controller.snapshot.notice).toContain(LIVE_DRAFT_FAILED_NOTICE);
 			});
 			expect(controller.snapshot.ready).toBe(false);
 			controller.retry();
@@ -772,7 +773,7 @@ describe('draft first press', () => {
 			await controller.togglePlay();
 			expect(play).toHaveBeenCalledTimes(2);
 			expect(controller.snapshot.playing).toBe(false);
-			expect(controller.snapshot.notice).toContain('refused');
+			expect(controller.snapshot.notice).toContain("Couldn't play. Try again.");
 		} finally {
 			controller.destroy();
 		}
