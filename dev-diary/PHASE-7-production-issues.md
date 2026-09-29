@@ -2622,7 +2622,7 @@ size:       XS · light
 owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.spec.ts,
              web/src/lib/editor/draft.ts, web/src/lib/voice/processing-state.ts,
              web/src/lib/copy.test.ts
-status:     not-started
+status:     in-progress:implement:t7.82-impl
 ```
 T7.81 round 1 recorded two out of scope L notes. The shared `erase()` path in `threads.ts`
 returns live notices naming build vocabulary (`job` ids, `endpoint` accepted and refused lines,
