@@ -2,31 +2,34 @@
 	import { pageTitle } from '$lib/shell';
 	import {
 		AdminRefusal,
+		ADMIN_LIMITS_HEADING,
+		ADMIN_LONGEST_SESSION_LABEL,
+		ADMIN_PAUSE_FINISHES,
+		ADMIN_SESSIONS_PER_GUEST_LABEL,
+		ADMIN_TOTAL_SPEND_HEADING,
 		emptyAdminSnapshot,
 		fetchSnapshot,
-		formatCents,
 		formatMinutes,
-		formatSpend,
-		guestSpendNotice,
+		globalSpendLine,
 		OPERATOR_REQUIRED,
 		OWNER_REQUIRED,
 		pausedLabel,
-		setPaused
+		setPaused,
+		spendingCeilingLine
 	} from './limits';
 
 	let phase = $state('loading');
 	let snapshot = $state(emptyAdminSnapshot);
 	let failure = $state('');
 	let denial = $state<'signin' | 'forbidden' | ''>('');
-	let ownerQuery = $state('');
 	let flipping = $state(false);
 
-	async function load(owner = '') {
+	async function load() {
 		phase = 'loading';
 		failure = '';
 		denial = '';
 		try {
-			snapshot = await fetchSnapshot(fetch, owner || undefined);
+			snapshot = await fetchSnapshot(fetch);
 			phase = 'ready';
 		} catch (error) {
 			if (error instanceof AdminRefusal && error.code === OPERATOR_REQUIRED) {
@@ -65,7 +68,6 @@
 	$effect(() => {
 		void load();
 	});
-
 </script>
 
 <svelte:head>
@@ -76,7 +78,7 @@
 	<h1>Admin</h1>
 
 	{#if phase === 'loading'}
-		<p role="status">Reading the caps and today&apos;s spend…</p>
+		<p role="status">Reading the limits and the spend…</p>
 	{/if}
 
 	{#if phase === 'denied'}
@@ -84,16 +86,16 @@
 			<section aria-label="Operator access">
 				<h2>Operator access needed</h2>
 				<p>
-					This page flips the session switch and reads today&apos;s spend. This
-					address is signed in, but it is not on the operator list.
+					This page flips the session switch and reads the spend. This address
+					is signed in, but it is not on the operator list.
 				</p>
 			</section>
 		{:else}
 			<section aria-label="Operator sign-in">
 				<h2>Sign in needed</h2>
 				<p>
-					This page flips the session switch and reads today&apos;s spend. Sign
-					in with an operator address to open it.
+					This page flips the session switch and reads the spend. Sign in
+					with an operator address to open it.
 				</p>
 			</section>
 		{/if}
@@ -101,7 +103,7 @@
 
 	{#if phase === 'failed'}
 		<p role="alert">The admin page failed: {failure}</p>
-		<button onclick={() => void load(ownerQuery || undefined)}>Retry</button>
+		<button onclick={() => void load()}>Retry</button>
 	{/if}
 
 	{#if phase === 'ready'}
@@ -114,47 +116,24 @@
 					Guests under the cap start sessions as usual.
 				{/if}
 			</p>
+			<p>{ADMIN_PAUSE_FINISHES}</p>
 			<button disabled={flipping} onclick={() => void flip()}>
 				{flipping ? 'Flipping…' : snapshot.sessions_paused ? 'Resume sessions' : 'Pause sessions'}
 			</button>
 		</section>
 
-		<section aria-label="Today's spend">
-			<h2>Today&apos;s spend</h2>
-			<p>
-				Spent {formatSpend(snapshot.global.spent_nd)} of {formatSpend(
-					snapshot.global.ceiling_nd
-				)} today. The ledger carries no history, so this page shows today only.
-			</p>
+		<section aria-label={ADMIN_TOTAL_SPEND_HEADING}>
+			<h2>{ADMIN_TOTAL_SPEND_HEADING}</h2>
+			<p>{globalSpendLine(snapshot)}</p>
 		</section>
 
-		<section aria-label="Guest caps">
-			<h2>Guest caps</h2>
+		<section aria-label={ADMIN_LIMITS_HEADING}>
+			<h2>{ADMIN_LIMITS_HEADING}</h2>
 			<ul>
-				<li>Sessions per guest: {snapshot.caps.guest_max_sessions}</li>
-				<li>Session length: {formatMinutes(snapshot.caps.session_max_seconds)}</li>
-				<li>Daily ceiling: {formatCents(snapshot.caps.daily_spend_cents)}</li>
+				<li>{ADMIN_SESSIONS_PER_GUEST_LABEL}: {snapshot.caps.guest_max_sessions}</li>
+				<li>{ADMIN_LONGEST_SESSION_LABEL}: {formatMinutes(snapshot.caps.session_max_seconds)}</li>
+				<li>{spendingCeilingLine(snapshot.caps)}</li>
 			</ul>
-		</section>
-
-		<section aria-label="Guest lookup">
-			<h2>Guest lookup</h2>
-			<form
-				onsubmit={(event) => {
-					event.preventDefault();
-					void load(ownerQuery || undefined);
-				}}
-			>
-				<label>
-					Owner id
-					<input bind:value={ownerQuery} name="owner" autocomplete="off" />
-				</label>
-				<button type="submit">Look up</button>
-			</form>
-			{#if guestSpendNotice(snapshot, ownerQuery)}
-				<p role="status">{guestSpendNotice(snapshot, ownerQuery)}</p>
-			{/if}
-			<p>Past the cap, a guest sees the guest limit reached notice.</p>
 		</section>
 	{/if}
 </main>

@@ -3,10 +3,19 @@
 import { describe, expect, it } from 'vitest';
 import {
 	AdminRefusal,
+	ADMIN_LIMITS_HEADING,
+	ADMIN_LONGEST_SESSION_LABEL,
+	ADMIN_PAUSE_FINISHES,
+	ADMIN_SESSIONS_PER_GUEST_LABEL,
+	ADMIN_SPENDING_CEILING_LABEL,
+	ADMIN_SPEND_IN_TOTAL,
+	ADMIN_SPEND_NO_RESET,
+	ADMIN_TOTAL_SPEND_HEADING,
 	fetchSnapshot,
 	formatCents,
 	formatMinutes,
 	formatSpend,
+	globalSpendLine,
 	guestSpendNotice,
 	GUEST_QUOTA_REACHED,
 	isOperatorRequired,
@@ -17,7 +26,8 @@ import {
 	parseSnapshot,
 	pausedLabel,
 	SESSIONS_PAUSED,
-	setPaused
+	setPaused,
+	spendingCeilingLine
 } from './limits';
 
 const SNAPSHOT = JSON.stringify({
@@ -112,7 +122,7 @@ describe('formatting', () => {
 		expect(formatSpend(0)).toBe('$0.00');
 	});
 
-	it('renders the daily ceiling from cents', () => {
+	it('renders the spending ceiling from cents', () => {
 		expect(formatCents(2000)).toBe('$20.00');
 	});
 
@@ -145,5 +155,77 @@ describe('refusals', () => {
 		const fetchFn = async () => new Response(SNAPSHOT, { status: 200 });
 		const parsed = await fetchSnapshot(fetchFn, undefined);
 		expect(parsed.caps.guest_max_sessions).toBe(10);
+	});
+});
+
+describe('wording', () => {
+	function sampleSpend(): string {
+		const parsed = parseSnapshot(
+			JSON.stringify({
+				sessions_paused: false,
+				caps: { guest_max_sessions: 10, session_max_seconds: 1800, daily_spend_cents: 100000 },
+				global: { ceiling_nd: 1000000000000, remaining_nd: 966760000000, spent_nd: 33240000000 }
+			})
+		);
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) return '';
+		return globalSpendLine(parsed.value);
+	}
+
+	it('states the running total with no daily reset', () => {
+		const line = sampleSpend();
+		expect(line).toBe('$33.24 spent in total. Spending does not reset each day yet.');
+		expect(line).toContain(ADMIN_SPEND_IN_TOTAL);
+		expect(line).toContain(ADMIN_SPEND_NO_RESET);
+		expect(line.toLowerCase()).not.toContain('today');
+	});
+
+	it('labels the cap as a lifetime ceiling', () => {
+		const parsed = parseSnapshot(SNAPSHOT);
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) return;
+		const line = spendingCeilingLine(parsed.value.caps);
+		expect(line).toBe('Spending ceiling: $20.00');
+		expect(line).toContain(ADMIN_SPENDING_CEILING_LABEL);
+		expect(line.toLowerCase()).not.toContain('today');
+		expect(line).not.toContain('Daily');
+	});
+
+	it('names the limits rows in plain words', () => {
+		expect(ADMIN_LIMITS_HEADING).toBe('Limits');
+		expect(ADMIN_SESSIONS_PER_GUEST_LABEL).toBe('Sessions per guest');
+		expect(ADMIN_LONGEST_SESSION_LABEL).toBe('Longest session');
+		expect(ADMIN_TOTAL_SPEND_HEADING).toBe('Total spend');
+	});
+
+	it('states what pausing leaves running', () => {
+		expect(ADMIN_PAUSE_FINISHES).toBe(
+			'Pausing stops new takes. A take already running finishes.'
+		);
+	});
+
+	it('carries no lookup and no cap notice', () => {
+		const parsed = parseSnapshot(SNAPSHOT);
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) return;
+		const copy = [
+			ADMIN_LIMITS_HEADING,
+			ADMIN_SESSIONS_PER_GUEST_LABEL,
+			ADMIN_LONGEST_SESSION_LABEL,
+			ADMIN_SPENDING_CEILING_LABEL,
+			ADMIN_SPEND_IN_TOTAL,
+			ADMIN_SPEND_NO_RESET,
+			ADMIN_PAUSE_FINISHES,
+			ADMIN_TOTAL_SPEND_HEADING,
+			globalSpendLine(parsed.value),
+			spendingCeilingLine(parsed.value.caps),
+			pausedLabel(parsed.value),
+			pausedLabel({ ...parsed.value, sessions_paused: true })
+		].join('\n');
+		expect(copy).toContain('spent in total');
+		expect(copy).toContain('Recording open');
+		expect(copy.toLowerCase()).not.toContain('today');
+		expect(copy).not.toContain('Owner id');
+		expect(copy).not.toContain('guest limit reached notice');
 	});
 });

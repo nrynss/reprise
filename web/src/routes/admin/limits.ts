@@ -137,6 +137,47 @@ export function pausedLabel(snapshot: AdminSnapshot): string {
 	return snapshot.sessions_paused ? 'Recording paused' : 'Recording open';
 }
 
+// ADMIN_LIMITS_HEADING names the caps section. The section lists what one
+// guest may use, so the heading names limits and never names guests alone.
+export const ADMIN_LIMITS_HEADING = 'Limits';
+
+// ADMIN_SESSIONS_PER_GUEST_LABEL names the per-guest session count row.
+export const ADMIN_SESSIONS_PER_GUEST_LABEL = 'Sessions per guest';
+
+// ADMIN_LONGEST_SESSION_LABEL names the session length cap row.
+export const ADMIN_LONGEST_SESSION_LABEL = 'Longest session';
+
+// ADMIN_SPENDING_CEILING_LABEL names the lifetime spend cap row.
+export const ADMIN_SPENDING_CEILING_LABEL = 'Spending ceiling';
+
+// ADMIN_SPEND_IN_TOTAL is the phrase the spend line carries. Budgets never
+// reset, so the line states a running total and never names a day.
+export const ADMIN_SPEND_IN_TOTAL = 'spent in total';
+
+// ADMIN_SPEND_NO_RESET states that spend never resets each day. It follows
+// the total on the page, so the operator never reads a daily figure.
+export const ADMIN_SPEND_NO_RESET = 'Spending does not reset each day yet.';
+
+// ADMIN_PAUSE_FINISHES states what pausing leaves running. New takes refuse
+// while a take already running finishes on its own.
+export const ADMIN_PAUSE_FINISHES = 'Pausing stops new takes. A take already running finishes.';
+
+// ADMIN_TOTAL_SPEND_HEADING names the spend section. The figure behind it
+// is a running total, so the heading never names a day.
+export const ADMIN_TOTAL_SPEND_HEADING = 'Total spend';
+
+// globalSpendLine renders the lifetime spend sentence the page shows. It
+// names the running total first and the missing daily reset second.
+export function globalSpendLine(snapshot: AdminSnapshot): string {
+	return `${formatSpend(snapshot.global.spent_nd)} ${ADMIN_SPEND_IN_TOTAL}. ${ADMIN_SPEND_NO_RESET}`;
+}
+
+// spendingCeilingLine renders the lifetime ceiling row the page shows. The
+// cap never resets, so the label names spending and never names a day.
+export function spendingCeilingLine(caps: AdminCaps): string {
+	return `${ADMIN_SPENDING_CEILING_LABEL}: ${formatCents(caps.daily_spend_cents)}`;
+}
+
 // guestSpendNotice renders the per-owner lookup line, or nothing when no
 // owner figure was asked for.
 export function guestSpendNotice(snapshot: AdminSnapshot, query: string): string {
