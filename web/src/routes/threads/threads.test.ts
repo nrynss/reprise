@@ -26,6 +26,8 @@ import {
 	formatEpisodeNumber,
 	GalleryController,
 	installMockJob,
+	LIVE_CARD_STALLED_NOTICE,
+	LIVE_CARD_WAITING_NOTICE,
 	LIVE_EPISODE_FAILED_NOTICE,
 	LIVE_EPISODE_NOTICE,
 	LIVE_ERASE_STARTED_NOTICE,
@@ -1222,6 +1224,63 @@ describe('episode first press', () => {
 			expect(play).toHaveBeenCalledTimes(2);
 			expect(snaps.at(-1)?.playing).toBe(false);
 			expect(snaps.at(-1)?.notice).toContain('refused');
+		} finally {
+			controller.destroy();
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('gallery card progress lines', () => {
+	it('waits on the episode before its first progress reading lands', () => {
+		const controller = new GalleryController(() => {});
+		try {
+			const card = controller.cardFor('job-unseen');
+			expect(card.detail).toBe(LIVE_CARD_WAITING_NOTICE);
+			expect(card.percent).toBe(0);
+			expect(card.running).toBe(true);
+		} finally {
+			controller.destroy();
+		}
+	});
+
+	it('keeps the last mark when the progress feed drops', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = seasonStubUrl(input);
+				if (url.endsWith('/api/episodes')) {
+					return Response.json({
+						episodes: [{ id: 'e1', number: 1, title: 'Take', state: 'rendering', visibility: 'private' }]
+					});
+				}
+				if (url.endsWith('/api/episodes/e1')) {
+					return Response.json(seasonDetail('e1', 'rendering'));
+				}
+				if (url.endsWith('/events')) return new Response('', { status: 500 });
+				const job = url.match(/\/api\/jobs\/([^/]+)$/);
+				if (job?.[1]) return Response.json({ jobId: job[1], status: 'running' });
+				return new Response('', { status: 404 });
+			})
+		);
+		const snaps: GallerySnapshot[] = [];
+		const controller = new GalleryController((snap) => {
+			snaps.push(structuredClone(snap));
+		});
+		try {
+			controller.mount('');
+			await vi.waitFor(
+				() => {
+					expect(snaps.at(-1)?.rows[0]?.jobId).toBe('job-r-e1');
+				},
+				{ timeout: 5000 }
+			);
+			await vi.waitFor(
+				() => {
+					expect(controller.cardFor('job-r-e1').detail).toBe(LIVE_CARD_STALLED_NOTICE);
+				},
+				{ timeout: 8000 }
+			);
 		} finally {
 			controller.destroy();
 			vi.unstubAllGlobals();

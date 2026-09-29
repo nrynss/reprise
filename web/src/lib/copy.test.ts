@@ -17,6 +17,8 @@ import {
 	EpisodeController,
 	emptyScreen,
 	GalleryController,
+	LIVE_CARD_STALLED_NOTICE,
+	LIVE_CARD_WAITING_NOTICE,
 	LIVE_EPISODE_FAILED_NOTICE,
 	LIVE_EPISODE_NOTICE,
 	LIVE_ERASE_FAILED_NOTICE,
@@ -43,6 +45,8 @@ function liveNotices(): Array<{ name: string; text: string }> {
 		{ name: 'render running', text: LIVE_RENDER_RUNNING_DETAIL },
 		{ name: 'render done ready', text: LIVE_RENDER_DONE_READY_DETAIL },
 		{ name: 'render done', text: LIVE_RENDER_DONE_DETAIL },
+		{ name: 'card waiting', text: LIVE_CARD_WAITING_NOTICE },
+		{ name: 'card stalled', text: LIVE_CARD_STALLED_NOTICE },
 		{ name: 'progress stopped', text: PROGRESS_STOPPED_DETAIL }
 	];
 }

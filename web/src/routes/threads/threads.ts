@@ -1043,6 +1043,12 @@ export function initialGallery(search = ''): GallerySnapshot {
 	};
 }
 
+// Live gallery card lines in plain words. The idle line shows before the
+// first progress reading lands. The stalled line shows when the progress
+// feed drops, and the card keeps the last mark it showed.
+export const LIVE_CARD_WAITING_NOTICE = 'Waiting for the episode to be ready.';
+export const LIVE_CARD_STALLED_NOTICE = 'Progress stopped updating. The mark above is kept.';
+
 // The gallery behind the season screen. The fixture flag keeps the
 // scripted season for offline runs. Otherwise the screen lists the
 // owner episodes newest first and follows every unfinished row through
@@ -1096,7 +1102,7 @@ export class GalleryController {
 	cardFor(jobId: string): GalleryCardProgress {
 		const held = this.snap.progress[jobId];
 		if (held) return held;
-		return { jobId, percent: 0, detail: 'Waiting for the job.', running: true, status: 'running' };
+		return { jobId, percent: 0, detail: LIVE_CARD_WAITING_NOTICE, running: true, status: 'running' };
 	}
 
 	private mountFixture(search: string): void {
@@ -1378,7 +1384,7 @@ export class GalleryController {
 						: !running
 							? 'The pass stopped before it finished.'
 							: entry.stream.connection === 'failed'
-								? 'The job stream failed. The mark above is kept.'
+								? LIVE_CARD_STALLED_NOTICE
 								: `Working · ${stage}${percent}% · progress survives a reload`;
 			const prior = next[entry.jobId];
 			if (!prior || prior.percent !== percent || prior.detail !== detail || prior.status !== status) {
