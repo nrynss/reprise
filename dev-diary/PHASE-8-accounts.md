@@ -311,7 +311,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       internal/identity/identity.go, cmd/reprise/main.go, cmd/reprise/main_test.go,
              web/src/routes/admin/
-status:     in-progress:review-r1:t8.13-rev-r1@f56ee9b16b4e58315aa44e86217b928613484471
+status:     in-progress:land:t8.13-impl@f56ee9b16b4e58315aa44e86217b928613484471
 ```
 T8.9 ships the `OperatorAuth` seam against a stubbed source, and production
 still wires `StubOwnerAuth`, so every admin endpoint keeps answering
