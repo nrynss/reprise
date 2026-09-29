@@ -119,7 +119,9 @@ func mintLoginCode() (string, error) {
 // account holds it, so the caller never learns who registered. A new
 // request retires earlier unused codes for the same address and session.
 // A mail failure removes the stored code and reports the failure, so no
-// dead code lingers.
+// dead code lingers. The stored row never holds the plain address. The
+// send reads the normalized address from the request, and verify
+// re-derives its hash the same way, so storage keeps hashes only.
 func (s *Service) RequestLoginCode(ctx context.Context, sessionID, email string) error {
 	address := normalizeAddress(email)
 	if address == "" {
@@ -155,7 +157,7 @@ func (s *Service) RequestLoginCode(ctx context.Context, sessionID, email string)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO login_codes
 		(id, address_hash, address, code_hash, requesting_session, expires_at, attempts, used_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)`,
-		codeID, s.hashValue(address), address, s.hashValue(code),
+		codeID, s.hashValue(address), "", s.hashValue(code),
 		sessionID, now+int64(loginCodeExpiry.Seconds()), now); err != nil {
 		return fmt.Errorf("identity: store code: %w", err)
 	}
@@ -183,8 +185,8 @@ type loginCodeRow struct {
 	expires  int64
 }
 
-// closeCode retires one code row and clears its plain address. The
-// address lives only while its code can still send or verify.
+// closeCode retires one code row and clears its address field as belt.
+// Storage keeps hashes only, so the clear guards rows older than that rule.
 func (s *Service) closeCode(ctx context.Context, codeID string) error {
 	if _, err := s.db.Writer().ExecContext(ctx,
 		"UPDATE login_codes SET used_at = ?, address = '' WHERE id = ?",
@@ -312,9 +314,28 @@ func (s *Service) VerifyLoginCode(ctx context.Context, sessionID, userID, email,
 		if _, err := tx.ExecContext(ctx, `INSERT INTO identities
 			(id, user_id, provider, subject, created_at) VALUES (?, ?, ?, ?, ?)`,
 			identityID, userID, emailProvider, address, now); err != nil {
-			return LoginOutcome{}, fmt.Errorf("identity: resolve login: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx,
+			// Another device attached this address first, so the
+			// insert above collided on the provider subject pair.
+			// Join that holder instead of failing, and honour the
+			// diary conflict exactly as a later verify would.
+			var fresh string
+			if rerr := tx.QueryRowContext(ctx,
+				"SELECT user_id FROM identities WHERE provider = ? AND subject = ?",
+				emailProvider, address).Scan(&fresh); rerr != nil {
+				return LoginOutcome{}, fmt.Errorf("identity: resolve login: %w", err)
+			}
+			if fresh != userID {
+				if cerr := tx.QueryRowContext(ctx,
+					"SELECT COUNT(*) FROM episodes WHERE owner_id = ?", userID).Scan(&episodes); cerr != nil {
+					return LoginOutcome{}, fmt.Errorf("identity: resolve login: %w", cerr)
+				}
+				if episodes > 0 && choice != loginChoiceSwitch {
+					return LoginOutcome{}, ErrDiaryConflict
+				}
+				target = fresh
+				switched = true
+			}
+		} else if _, err := tx.ExecContext(ctx,
 			"UPDATE users SET kind = ? WHERE id = ?", KindOwner, userID); err != nil {
 			return LoginOutcome{}, fmt.Errorf("identity: resolve login: %w", err)
 		}

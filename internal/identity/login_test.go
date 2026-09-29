@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -561,6 +562,51 @@ func TestLoginVerifyRefusesExpiredCode(t *testing.T) {
 	}
 }
 
+// TestLoginCodeKeepsNoPlainAddressWithoutVerify checks a code nobody
+// verifies leaves no plain address behind, even past its expiry. The
+// stored row keeps only hashes, so an abandoned request never leaks the
+// address to a database copy.
+func TestLoginCodeKeepsNoPlainAddressWithoutVerify(t *testing.T) {
+	t.Parallel()
+	start := time.Unix(1758000000, 0)
+	clock := &testClock{at: start}
+	svc, db, _ := openLogin(t, clock)
+	cookie, _ := loginGuest(t, svc)
+	requestCode(t, svc, cookie, "ghost@example.com")
+	read := func() (string, string, string, int64) {
+		t.Helper()
+		var address, addressHash, codeHash string
+		var used int64
+		if err := db.Reader().QueryRowContext(t.Context(),
+			"SELECT address, address_hash, code_hash, used_at FROM login_codes WHERE requesting_session = ?",
+			sessionID(t, cookie.Value)).Scan(&address, &addressHash, &codeHash, &used); err != nil {
+			t.Fatalf("read code row: %v", err)
+		}
+		return address, addressHash, codeHash, used
+	}
+	address, addressHash, codeHash, used := read()
+	if address != "" {
+		t.Fatalf("live code stores plain address %q, want hashes only", address)
+	}
+	if addressHash != hmacHex("ghost@example.com") {
+		t.Fatal("stored address hash matches no HMAC of the address with the login key")
+	}
+	if codeHash == "" {
+		t.Fatal("stored code hash is empty, want the HMAC of the mailed code")
+	}
+	if used != 0 {
+		t.Fatal("fresh code is already closed")
+	}
+	clock.at = start.Add(11 * time.Minute)
+	address, _, _, used = read()
+	if address != "" {
+		t.Fatalf("expired unretried code stores plain address %q, want hashes only", address)
+	}
+	if used != 0 {
+		t.Fatal("expired unretried code closed itself with no verify attempt")
+	}
+}
+
 // TestLoginVerifyWorksOnce checks a consumed code never verifies again.
 func TestLoginVerifyWorksOnce(t *testing.T) {
 	t.Parallel()
@@ -579,5 +625,58 @@ func TestLoginVerifyWorksOnce(t *testing.T) {
 		`{"email":"single@example.com","code":`+quote(code)+`}`)
 	if second.Code != http.StatusUnauthorized {
 		t.Fatalf("reused code status = %d, want 401", second.Code)
+	}
+}
+
+// TestLoginVerifyConcurrentFirstAttachSignsInBoth checks two devices
+// signing in one fresh address at once both land without a server fault.
+// The loser joins the identity the winner attached instead of failing.
+func TestLoginVerifyConcurrentFirstAttachSignsInBoth(t *testing.T) {
+	t.Parallel()
+	clock := &testClock{at: time.Unix(1758000000, 0)}
+	svc, db, fake := openLogin(t, clock)
+	const rounds = 10
+	for i := 0; i < rounds; i++ {
+		email := fmt.Sprintf("roamer-%d@example.com", i)
+		cookieA, _ := loginGuest(t, svc)
+		cookieB, _ := loginGuest(t, svc)
+		requestCode(t, svc, cookieA, email)
+		codeA := latestCode(t, fake)
+		requestCode(t, svc, cookieB, email)
+		codeB := latestCode(t, fake)
+		cookies := []*http.Cookie{cookieA, cookieB}
+		bodies := []string{
+			`{"email":` + quote(email) + `,"code":` + quote(codeA) + `}`,
+			`{"email":` + quote(email) + `,"code":` + quote(codeB) + `}`,
+		}
+		recs := make([]*httptest.ResponseRecorder, 2)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for g := 0; g < 2; g++ {
+			wg.Add(1)
+			go func(g int) {
+				defer wg.Done()
+				<-start
+				recs[g] = callLogin(t, svc, cookies[g], "/api/login/verify", bodies[g])
+			}(g)
+		}
+		close(start)
+		wg.Wait()
+		for g := 0; g < 2; g++ {
+			if recs[g] == nil {
+				t.Fatalf("round %d device %d recorded no response", i, g)
+			}
+			if recs[g].Code != http.StatusOK {
+				t.Fatalf("round %d device %d status = %d, want 200: %s", i, g, recs[g].Code, recs[g].Body.String())
+			}
+		}
+		first := sessionUser(t, db, sessionID(t, responseCookie(t, recs[0]).Value))
+		second := sessionUser(t, db, sessionID(t, responseCookie(t, recs[1]).Value))
+		if first != second {
+			t.Fatalf("round %d devices landed on %q and %q, want one account", i, first, second)
+		}
+	}
+	if rowCount(t, db, "identities") != rounds {
+		t.Fatalf("identities holds %d rows, want one per round", rowCount(t, db, "identities"))
 	}
 }
