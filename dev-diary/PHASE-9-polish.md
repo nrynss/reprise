@@ -113,7 +113,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
              web/src/lib/voice/record-state.ts, web/src/lib/voice/processing-state.ts
-status:     in-progress:land:t9.3-rem-r1@91a8102
+status:     done:66d644f
 ```
 * Record uses the shared shell. It rendered as a white, unstyled page on 2026-09-29. Start is the
   one large primary button, centred, and the live view keeps the clock and End in reach on a phone.
@@ -275,6 +275,14 @@ The gate passes in a fresh worktree three times in a row, because the gate grew.
 
 ### What exists now
 
+T9.3 landed at 66d644f after round 2 APPROVE with zero residue.
+Record and processing ride the shared shell with a centred Start,
+phone-reachable clock and End, four status-word rows, and plain
+notices behind named constants. Round 1 had 3 H stale-pin findings
+on specs pinning the old rendering; owns widened to those two spec
+files by decision and the remediation updated the asserts with no
+product change. Reviewed commits c99a918 and 91a8102 rebased clean.
+Record mock pins pass on the landed commit.
 T9.6 landed at 78ec2ca after round 2 APPROVE with zero residue.
 The editor rides the wide column with a flat proposal list, shared
 buttons, and plain-words notices. Round 1 had 11 H stale-pin
