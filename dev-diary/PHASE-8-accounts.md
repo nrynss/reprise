@@ -60,7 +60,7 @@ requires:   none
 fixture-ok: yes
 size:       S · mid
 owns:       internal/mail/
-status:     in-progress:implement:t8.1-impl
+status:     in-progress:review-r1:t8.1-rev-r1@e443c20769097fe5d3b03f9652df83e1149f27ac
 ```
 A Resend client over plain `net/http`. `internal/mail` is the only code that talks to Resend.
 
@@ -85,7 +85,7 @@ requires:   none
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/migrations/
-status:     in-progress:implement:t8.2-impl
+status:     in-progress:review-r1:t8.2-rev-r1@d0e0e7267887f272e78f8e2edaeece5c76a5b773
 ```
 New migrations under the identity namespace. Keep `guest_sessions` as it is. The diary already has a
 `sessions` table for recording sessions, so a rename would collide.
