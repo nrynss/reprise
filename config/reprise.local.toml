@@ -16,7 +16,7 @@ vertex_location = "global"
 public_origin = "http://localhost:8080"
 # The sending address for sign-in mail. Resend needs the domain verified
 # with its SPF and DKIM records before any mail is delivered.
-mail_from = "Reprise <reprise@mail.nryn.dev>"
+mail_from = "Reprise <reprise@send.nryn.dev>"
 # Replies go here when set. Empty means replies to sign-in mail go nowhere.
 mail_reply_to = ""
 # The OAuth client for Google sign-in. It stays empty until Google sign-in
