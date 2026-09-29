@@ -202,33 +202,33 @@ test('reverting a cut writes its decision row', async ({ page }) => {
 
 	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('2 cuts applied');
 	const decisions = page.getByRole('region', { name: 'Decisions' });
-	await expect(decisions.getByText('Reverted: False start at the top of the answer. (prop-cut-1)')).toBeVisible();
+	await expect(decisions.getByText('Reverted. False start at the top of the answer.')).toBeVisible();
 });
 
 test('reverting each non-cut proposal persists its decision row', async ({ page }) => {
 	await page.goto(DRAFT);
 	await expect(page.getByRole('heading', { name: 'The only place nobody needs anything' })).toBeVisible();
 
-	await page.getByRole('button', { name: 'Revert cold open proposal' }).click();
-	await expect(page.getByText('Cold open reverted. The episode starts at the top.')).toBeVisible();
+	await page.getByRole('button', { name: 'Revert cold open' }).click();
+	await expect(
+		page.getByRole('region', { name: 'Cold open' }).getByText('Cold open reverted. The episode starts at the top.')
+	).toBeVisible();
 
-	await page.getByRole('button', { name: 'Revert title proposal' }).click();
+	await page.getByRole('button', { name: 'Revert title' }).click();
 	await expect(page.getByRole('heading', { name: 'Episode draft-1' })).toBeVisible();
 
-	await page.getByRole('button', { name: 'Revert show notes proposal' }).click();
+	await page.getByRole('button', { name: 'Revert show notes' }).click();
 	await expect(page.getByText('Show notes reverted. Nothing stands in their place.')).toBeVisible();
 
-	const callback = page.getByRole('button', { name: 'Revert callback proposal' });
+	const callback = page.getByRole('button', { name: 'Revert callback' });
 	await callback.focus();
 	await expect(callback).toBeFocused();
 	await page.keyboard.press('Enter');
 	await expect(page.getByText('Callback reverted and cleared from the next opening.')).toBeVisible();
 
 	const decisions = page.getByRole('region', { name: 'Decisions' });
-	await expect(decisions.getByText('(prop-cold-open)')).toBeVisible();
-	await expect(decisions.getByText('(prop-title)')).toBeVisible();
-	await expect(decisions.getByText('(prop-notes)')).toBeVisible();
-	await expect(decisions.getByText('(prop-callback)')).toBeVisible();
+	await expect(decisions.getByText('Reverted.', { exact: false }).first()).toBeVisible();
+	await expect(decisions.getByText('The only place nobody needs anything')).toBeVisible();
 });
 
 test('a keyboard-only run completes the edit and marks done', async ({ page }) => {
@@ -252,7 +252,7 @@ test('a keyboard-only run completes the edit and marks done', async ({ page }) =
 	await expect(confirm).toBeVisible();
 	await confirm.focus();
 	await page.keyboard.press('Enter');
-	await expect(page.getByText('Render running: fixture render.')).toBeVisible();
+	await expect(page.getByText('Finishing your episode.')).toBeVisible();
 });
 
 test('clicking a word seeks the readout', async ({ page }) => {
@@ -365,9 +365,9 @@ test('the shown length follows the audio, and the position never passes it', asy
 
 test('a draft with no callback and no cold open shows neither block', async ({ page }) => {
 	await serveLiveDraft(page);
-	await expect(page.getByRole('region', { name: 'Proposed cold open' })).toHaveCount(0);
-	await expect(page.getByRole('region', { name: 'Planted for next time' })).toHaveCount(0);
-	await expect(page.getByRole('button', { name: 'Revert callback proposal' })).toHaveCount(0);
+	await expect(page.getByRole('region', { name: 'Cold open' })).toHaveCount(0);
+	await expect(page.getByRole('region', { name: 'Next time' })).toHaveCount(0);
+	await expect(page.getByRole('button', { name: 'Revert callback' })).toHaveCount(0);
 	await expect(page.getByRole('button', { name: 'Preview the cold open' })).toHaveCount(0);
 });
 
@@ -410,7 +410,7 @@ test('a refused live draft shows Retry and no scripted title', async ({ page }) 
 		}
 	);
 	await page.goto('/episode/live-500/edit');
-	await expect(page.getByText('This episode did not load')).toBeVisible();
+	await expect(page.getByText("Couldn't load this draft")).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
 	await expect(
 		page.getByRole('heading', { name: 'The only place nobody needs anything' })
@@ -479,8 +479,33 @@ test('mark done follows its render to done with no refusal', async ({ page }) =>
 	await page.getByRole('button', { name: 'Mark episode done' }).click();
 	await page.getByRole('button', { name: 'Confirm mark done' }).click();
 
-	await expect(page.getByText(/The render is done/)).toBeVisible({ timeout: 15_000 });
+	await expect(page.getByText(/gallery/)).toBeVisible({ timeout: 15_000 });
 	await expect(page.getByText('refused')).toHaveCount(0);
 	await expect(page.getByText('could not be followed')).toHaveCount(0);
-	await expect(page.getByText('The render is done. Open the gallery to hear the finished episode.')).toBeVisible();
+	await expect(page.getByText('Your episode is ready in the gallery.')).toBeVisible();
+});
+
+test('the editor rides the shared column with flat sections', async ({ page }) => {
+	await page.goto(DRAFT);
+	await expect(page.getByRole('status', { name: 'Applied cuts' })).toHaveText('3 cuts applied');
+	const main = page.locator('main.wide');
+	await expect(main).toBeVisible();
+	const transcriptAlign = await page
+		.locator('p.transcript')
+		.evaluate((el) => getComputedStyle(el).textAlign);
+	expect(transcriptAlign).toBe('left');
+	const transcriptWidth = await page
+		.locator('p.transcript')
+		.evaluate((el) => getComputedStyle(el).maxWidth);
+	expect(transcriptWidth).not.toBe('none');
+	const sections = page.locator('section.section');
+	expect(await sections.count()).toBeGreaterThan(3);
+	const heights = await page.locator('.actions .button').evaluateAll((controls) =>
+		controls.map((entry) => (entry as HTMLElement).getBoundingClientRect().height)
+	);
+	expect(heights.length).toBeGreaterThan(0);
+	for (const height of heights) {
+		expect(height).toBeGreaterThanOrEqual(43.5);
+	}
+	await expect(page.getByText('Demo')).toBeVisible();
 });

@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { activeWordAt } from '@nrynss/chaaya/transcript';
+	import DemoBadge from '$lib/components/DemoBadge.svelte';
 	import GalleryLink from '$lib/components/GalleryLink.svelte';
 	import { pageTitle } from '$lib/shell';
 	import { DraftController, emptyDraft, formatTime, queryValue, runEditorGates } from '$lib/editor/draft';
@@ -116,26 +117,39 @@
 	<title>{pageTitle(snap.title || 'Editor')}</title>
 </svelte:head>
 
-<main>
+<main class="wide">
 	<GalleryLink />
 	<p class="eyebrow">{snap.episodeLabel}</p>
 	<h1>{snap.title || 'Editor'}</h1>
+	{#if snap.demo}<DemoBadge />{/if}
 	<p role="status" aria-label="Applied cuts">{snap.appliedCount} cuts applied</p>
 	<p role="status">{snap.notice}</p>
 
 	{#if !snap.ready && snap.loadError}
-		<button onclick={() => controller?.retry()}>Retry</button>
+		<div class="actions">
+			<button class="button secondary" onclick={() => controller?.retry()}>Retry</button>
+		</div>
 	{/if}
 
 	{#if snap.ready}
-		<section aria-label="Draft playback">
+		<section class="section" aria-label="Draft playback">
 			<h2>Playback</h2>
-			<button
-				aria-label={controller?.player.playing ? 'Pause draft' : 'Play draft'}
-				onclick={() => void controller?.togglePlay()}
-			>
-				{controller?.player.playing ? 'Pause draft' : 'Play draft'}
-			</button>
+			<div class="actions">
+				<button
+					class="button"
+					aria-label={controller?.player.playing ? 'Pause draft' : 'Play draft'}
+					onclick={() => void controller?.togglePlay()}
+				>
+					{controller?.player.playing ? 'Pause draft' : 'Play draft'}
+				</button>
+				<button
+					class="button secondary"
+					onclick={() => controller?.seekTo(position - 15)}
+					aria-label="Back fifteen seconds"
+				>
+					Back 15
+				</button>
+			</div>
 			<canvas
 				bind:this={wave}
 				class:dragging
@@ -171,9 +185,6 @@
 					dragging = false;
 				}}
 			></canvas>
-			<button onclick={() => controller?.seekTo(position - 15)} aria-label="Back fifteen seconds">
-				Back 15
-			</button>
 			<input
 				type="range"
 				min={0}
@@ -186,9 +197,9 @@
 			<p role="status" aria-label="Playback position">{formatTime(position)} of {formatTime(snap.duration)}</p>
 		</section>
 
-		<section aria-label="Transcript. Click a word to seek. Strikethrough marks a proposed cut.">
+		<section class="section" aria-label="Transcript. Select a word to seek.">
 			<h2>Transcript</h2>
-			<p class="words">
+			<p class="transcript words">
 				{#each snap.words as word, index (index)}
 					{@const cutId = snap.cutOf[index]}
 					{@const reason = cutId
@@ -196,7 +207,7 @@
 						: ''}
 					{#if cutId}
 						<s><button
-							aria-label={`${word.text}, proposed cut: ${reason}. Activate to seek.`}
+							aria-label={`${word.text}, cut: ${reason}. Activate to seek.`}
 							aria-current={liveWord === index ? 'true' : undefined}
 							class:live={liveWord === index}
 							onclick={() => controller?.seekToWord(index)}
@@ -216,10 +227,10 @@
 			</p>
 		</section>
 
-		<aside aria-label="Proposals">
+		<div aria-label="Suggestions">
 			{#if snap.hasColdOpen}
-				<section aria-label="Proposed cold open">
-					<h2>Proposed cold open</h2>
+				<section class="section" aria-label="Cold open">
+					<h2>Cold open</h2>
 					{#if snap.coldOpenReverted}
 						<p><s>{snap.coldOpen.quote}</s></p>
 						<p>{snap.coldOpen.reason}</p>
@@ -227,70 +238,83 @@
 					{:else}
 						<blockquote>{snap.coldOpen.quote}</blockquote>
 						<p>{snap.coldOpen.reason}</p>
-						<button
-							aria-label="Preview the cold open"
-							onclick={() => void controller?.previewColdOpen()}
-						>
-							Preview the cold open
-						</button>
-						<button
-							aria-label="Revert cold open proposal"
-							onclick={() => controller?.revertColdOpen()}
-						>
-							Revert the cold open
-						</button>
+						<div class="actions">
+							<button
+								class="button secondary"
+								aria-label="Preview the cold open"
+								onclick={() => void controller?.previewColdOpen()}
+							>
+								Preview the cold open
+							</button>
+							<button
+								class="button quiet"
+								aria-label="Revert cold open"
+								onclick={() => controller?.revertColdOpen()}
+							>
+								Revert the cold open
+							</button>
+						</div>
 					{/if}
 				</section>
 			{/if}
 
-			<section aria-label="Proposed title">
-				<h2>Proposed title</h2>
+			<section class="section" aria-label="Title">
+				<h2>Title</h2>
 				{#if snap.titleReverted}
 					<p><s>{snap.proposedTitle}</s></p>
 					<p>Title reverted. The heading shows the plain episode number.</p>
 				{:else}
 					<p>{snap.proposedTitle}</p>
-					<button
-						aria-label="Revert title proposal"
-						onclick={() => controller?.revertTitle()}
-					>
-						Revert the title
-					</button>
+					<div class="actions">
+						<button
+							class="button quiet"
+							aria-label="Revert title"
+							onclick={() => controller?.revertTitle()}
+						>
+							Revert the title
+						</button>
+					</div>
 				{/if}
 			</section>
 
-			<section aria-label="Proposed show notes">
-				<h2>Proposed show notes</h2>
+			<section class="section" aria-label="Show notes">
+				<h2>Show notes</h2>
 				{#if snap.notesReverted}
 					<p><s>{snap.proposedNotes}</s></p>
 					<p>Show notes reverted. Nothing stands in their place.</p>
 				{:else}
 					<p>{snap.notes}</p>
-					<button
-						aria-label="Revert show notes proposal"
-						onclick={() => controller?.revertNotes()}
-					>
-						Revert the show notes
-					</button>
+					<div class="actions">
+						<button
+							class="button quiet"
+							aria-label="Revert show notes"
+							onclick={() => controller?.revertNotes()}
+						>
+							Revert the show notes
+						</button>
+					</div>
 				{/if}
 			</section>
 
-			<section aria-label="Proposed cuts, applied by default">
-				<h2>Proposed cuts</h2>
+			<section class="section" aria-label="Cuts">
+				<h2>Cuts</h2>
 				{#if snap.cutCards.length === 0}
-					<p>Every proposed cut is reverted.</p>
+					<p>Every cut is reverted.</p>
 				{:else}
 					<ol>
 						{#each snap.cutCards as card (card.id)}
 							<li>
 								<p>{card.reason}</p>
 								<p>{card.quote}</p>
-								<button
-									aria-label={`Revert cut: ${card.reason}`}
-									onclick={() => controller?.revertCut(card.id)}
-								>
-									Revert this cut
-								</button>
+								<div class="actions">
+									<button
+										class="button quiet"
+										aria-label={`Revert cut: ${card.reason}`}
+										onclick={() => controller?.revertCut(card.id)}
+									>
+										Revert this cut
+									</button>
+								</div>
 							</li>
 						{/each}
 					</ol>
@@ -298,52 +322,63 @@
 			</section>
 
 			{#if snap.callback || snap.callbackQuote || snap.callbackReverted}
-				<section aria-label="Planted for next time">
-					<h2>Planted for next time</h2>
+				<section class="section" aria-label="Next time">
+					<h2>Next time</h2>
 					{#if snap.callbackReverted}
 						<p><s>{snap.proposedCallback}</s></p>
 						<p>Callback reverted and cleared from the next opening.</p>
 					{:else}
 						<p>{snap.callback}</p>
 						<p>{snap.callbackQuote}</p>
-						<button
-							aria-label="Revert callback proposal"
-							onclick={() => controller?.revertCallback()}
-						>
-							Revert the callback
-						</button>
+						<div class="actions">
+							<button
+								class="button quiet"
+								aria-label="Revert callback"
+								onclick={() => controller?.revertCallback()}
+							>
+								Revert the callback
+							</button>
+						</div>
 					{/if}
 				</section>
 			{/if}
 
-			<section aria-label="Decisions">
+			<section class="section" aria-label="Decisions">
 				<h2>Decisions</h2>
 				{#if snap.decisions.length === 0}
-					<p>No decisions yet. Reverting a proposal writes its row here.</p>
+					<p>No changes yet.</p>
 				{:else}
 					<ol>
 						{#each snap.decisions as row (row.id)}
-							<li>Reverted: {row.reason} ({row.proposalId})</li>
+							<li>Reverted. {row.reason}</li>
 						{/each}
 					</ol>
 				{/if}
 			</section>
-		</aside>
+		</div>
 
-		<section aria-label="Finish the draft">
+		<section class="section" aria-label="Finish the draft">
 			<h2>Mark done</h2>
-			<p>Marking done renders the episode and runs analysis once. Every cut stays revertible until then.</p>
+			<p>Finishing makes the episode ready. Every cut can still be reverted.</p>
 			{#if snap.renderStage === 'idle'}
-				<button aria-label="Mark episode done" onclick={() => controller?.markDone()}>
-					Mark episode done
-				</button>
+				<div class="actions">
+					<button class="button" aria-label="Mark episode done" onclick={() => controller?.markDone()}>
+						Mark episode done
+					</button>
+				</div>
 			{:else if snap.renderStage === 'confirm'}
-				<button aria-label="Confirm mark done" onclick={() => controller?.markDone()}>
-					Confirm mark done
-				</button>
-				<button aria-label="Cancel mark done" onclick={() => controller?.cancelMarkDone()}>
-					Cancel
-				</button>
+				<div class="actions">
+					<button class="button" aria-label="Confirm mark done" onclick={() => controller?.markDone()}>
+						Confirm mark done
+					</button>
+					<button
+						class="button secondary"
+						aria-label="Cancel mark done"
+						onclick={() => controller?.cancelMarkDone()}
+					>
+						Cancel
+					</button>
+				</div>
 			{:else}
 				<p role="status">{snap.renderDetail}</p>
 			{/if}
@@ -356,59 +391,21 @@
 </main>
 
 <style>
-	:root {
-		color-scheme: dark;
-		--paper: #191410;
-		--raised: #241d15;
-		--ink: #f4edde;
-		--muted: #d9cfbb;
-		--accent: #e8a33d;
-		--on-accent: #201809;
-		--line: #5a4f41;
-	}
-	main {
-		max-width: 60rem;
-		margin: 0 auto;
-		padding: 3rem 1.5rem 5rem;
-		font-family: system-ui, sans-serif;
-		background: var(--paper);
-		color: var(--ink);
-	}
-	.eyebrow {
-		font-size: 0.75rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-		color: var(--muted);
-	}
-	section {
-		background: var(--raised);
-		border: 1px solid var(--line);
-		border-radius: 0.75rem;
-		padding: 1.25rem;
-		margin-top: 1.25rem;
-	}
-	button {
+	/* Word buttons stay inline text, never the shared pill. The pill
+	belongs to player and suggestion actions alone. */
+	.words button {
 		font: inherit;
-		color: var(--on-accent);
-		background: var(--accent);
-		border: none;
-		border-radius: 0.5rem;
-		padding: 0.6rem 1rem;
-		margin: 0.15rem;
-		cursor: pointer;
-	}
-	button:focus-visible {
-		outline: 3px solid var(--ink);
-		outline-offset: 2px;
-	}
-	p button {
 		background: transparent;
+		border: none;
 		color: var(--ink);
 		padding: 0.1rem 0.2rem;
 		margin: 0 0.3rem 0 0;
 		border-radius: 0.25rem;
+		min-height: 0;
+		display: inline;
+		cursor: pointer;
 	}
-	p s button {
+	.words s button {
 		text-decoration: line-through;
 		color: var(--muted);
 	}
@@ -440,10 +437,6 @@
 	blockquote {
 		border-left: 2px solid var(--accent);
 		padding-left: 1rem;
-		color: var(--ink);
-	}
-	p,
-	li {
 		color: var(--ink);
 	}
 </style>

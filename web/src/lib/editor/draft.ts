@@ -50,6 +50,7 @@ export interface CutCard {
 
 export interface DraftSnapshot {
 	ready: boolean;
+	demo: boolean;
 	notice: string;
 	loadError: string | null;
 	episodeLabel: string;
@@ -90,21 +91,34 @@ export interface DraftOptions {
 
 // Live draft notices in plain words. A stored draft shows no notice at
 // all, because the editor already shows its words. An empty draft says
-// the transcript has not landed yet.
+// the transcript has not landed yet. A draft that never loads names the
+// retry, never the answer behind it.
 export const LIVE_DRAFT_NOTICE = '';
 export const LIVE_DRAFT_EMPTY_NOTICE = 'No transcript yet.';
+export const LIVE_DRAFT_FAILED_NOTICE = "Couldn't load this draft. Try again.";
 
-// Live render pass details in plain words. The screen shows the pass
-// state and where to look next, never the reference behind it.
-export const LIVE_RENDER_RUNNING_DETAIL = 'The render is running. Open the gallery to see its state.';
-export const LIVE_RENDER_DONE_READY_DETAIL =
-	'The render is done. Open the gallery to hear the finished episode.';
-export const LIVE_RENDER_DONE_DETAIL = 'The render is done. Open the gallery to see its state.';
+// Live finish pass lines in plain words. The screen shows the pass state
+// and where to look next, never the mechanics behind it.
+export const LIVE_RENDER_RUNNING_DETAIL = 'Finishing your episode.';
+export const LIVE_RENDER_DONE_READY_DETAIL = 'Your episode is ready in the gallery.';
+export const LIVE_RENDER_DONE_DETAIL = 'Done. Find it in the gallery.';
+
+// Mark done steps in plain words. Confirm names the once-only finish.
+// Starting and waiting are status words. A refusal names the retry. A
+// pass the screen cannot follow, or one that stops early, points at the
+// gallery instead of the mechanics.
+export const MARK_DONE_CONFIRM_DETAIL = 'Finishing makes the episode ready. Confirm to start.';
+export const MARK_DONE_STARTING_DETAIL = 'Starting…';
+export const MARK_DONE_QUEUED_DETAIL = 'Waiting to start.';
+export const MARK_DONE_REFUSED_DETAIL = "Couldn't finish this episode. Try again.";
+export const MARK_DONE_UNFOLLOWED_DETAIL = 'Finishing. Find it in the gallery.';
+export const MARK_DONE_STOPPED_DETAIL = 'Stopped before it finished. Find it in the gallery.';
 
 export function emptyDraft(episodeId: string): DraftSnapshot {
 	return {
 		ready: false,
-		notice: 'Loading the draft.',
+		demo: false,
+		notice: 'Loading…',
 		loadError: null,
 		episodeLabel: `Episode ${episodeId}`,
 		title: '',
@@ -350,7 +364,7 @@ export class DraftController {
 		if (wantsBackend) {
 			void this.loadFromBackend();
 		} else {
-			this.loadFromFixture('Scripted draft. No backend needed.');
+			this.loadFromFixture('');
 		}
 	}
 
@@ -381,7 +395,7 @@ export class DraftController {
 	// Retry the backend read after a refusal. The screen offers this
 	// control, so a refused episode never reads as owned content.
 	retry(): void {
-		this.snap = { ...this.snap, loadError: null, notice: 'Loading the draft.' };
+		this.snap = { ...this.snap, loadError: null, notice: 'Loading…' };
 		this.emit();
 		void this.loadFromBackend();
 	}
@@ -393,7 +407,7 @@ export class DraftController {
 			...this.snap,
 			ready: false,
 			loadError: detail,
-			notice: `This episode did not load (${detail}).`
+			notice: LIVE_DRAFT_FAILED_NOTICE
 		};
 		this.emit();
 	}
@@ -424,7 +438,8 @@ export class DraftController {
 			channels: fixture.channels.map((channel) => channel.slice()),
 			reverted: { coldOpen: false, title: false, notes: false, callback: false },
 			decisions: [],
-			notice
+			notice,
+			demo: true
 		});
 	}
 
@@ -535,7 +550,8 @@ export class DraftController {
 				callback: isReverted(callback)
 			},
 			decisions,
-			notice: words.length > 0 ? LIVE_DRAFT_NOTICE : LIVE_DRAFT_EMPTY_NOTICE
+			notice: words.length > 0 ? LIVE_DRAFT_NOTICE : LIVE_DRAFT_EMPTY_NOTICE,
+			demo: false
 		});
 	}
 
@@ -556,6 +572,7 @@ export class DraftController {
 		reverted: { coldOpen: boolean; title: boolean; notes: boolean; callback: boolean };
 		decisions: DecisionRow[];
 		notice: string;
+		demo: boolean;
 	}): void {
 		this.editor = new TranscriptEditor(args.words);
 		for (const cut of args.cuts) {
@@ -566,6 +583,7 @@ export class DraftController {
 		this.snap = {
 			...this.snap,
 			ready: true,
+			demo: args.demo,
 			notice: args.notice,
 			loadError: null,
 			title: args.title,
@@ -603,9 +621,11 @@ export class DraftController {
 					this.snap = { ...this.snap, peaks };
 					this.emit();
 				},
-				() => {
-					this.snap = { ...this.snap, notice: `${this.snap.notice} Peaks unavailable.` };
-					this.emit();
+				(error) => {
+					if (!this.peaksWarned) {
+						this.peaksWarned = true;
+						console.warn('Peaks unavailable. The waveform keeps its flat line.', error);
+					}
 				}
 			);
 		} else if (args.audioUrl) {
@@ -683,14 +703,14 @@ export class DraftController {
 		if (!this.editor) return;
 		const proposalId = this.proposalIdForCut(cutId);
 		if (!proposalId) {
-			this.snap = { ...this.snap, notice: `No stored proposal backs cut ${cutId}. Nothing changed.` };
+			this.snap = { ...this.snap, notice: 'Nothing to revert. That cut already stands.' };
 			this.emit();
 			return;
 		}
 		const index = this.editor.cuts.findIndex((cut) => cut.id === cutId);
 		const result = this.editor.revert(cutId);
 		if (typeof result === 'string') {
-			this.snap = { ...this.snap, notice: `No cut named ${cutId}. Nothing changed.` };
+			this.snap = { ...this.snap, notice: 'Nothing to revert. That cut already stands.' };
 			this.emit();
 			return;
 		}
@@ -704,22 +724,22 @@ export class DraftController {
 		this.snap = {
 			...this.snap,
 			decisions: [...this.snap.decisions, row],
-			notice: `Reverted one cut: ${result.reason}`
+			notice: `Reverted. ${result.reason}`
 		};
 		this.refreshCuts();
 		this.emit();
 		const restored = { ...result, range: { ...result.range } };
-		this.postDecision(row, 'The cut stays in the render.', () => {
+		this.postDecision(row, () => {
 			if (!this.editor) return;
 			this.editor.cuts.splice(Math.max(0, index), 0, restored);
 			this.refreshCuts();
 		});
 	}
 
-	// Post one decision row. A fixture draft has no stored proposals, so a
+	// Post one decision row. A fixture draft has no stored rows, so a
 	// refusal there changes nothing on screen. A live refusal drops the
-	// local row, runs undo, and says the server kept the proposal.
-	private postDecision(row: DecisionRow, kept: string, undo: () => void): void {
+	// local row, runs undo, and names the retry.
+	private postDecision(row: DecisionRow, undo: () => void): void {
 		const live = !this.fixtureMode;
 		void fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}/decisions`, {
 			method: 'POST',
@@ -737,7 +757,7 @@ export class DraftController {
 				undo();
 				this.snap = {
 					...this.snap,
-					notice: `The server did not store that revert (${failure}). ${kept}`
+					notice: "Couldn't keep that change. Try again."
 				};
 				this.emit();
 			});
@@ -750,12 +770,12 @@ export class DraftController {
 	private recordNonCutRevert(kind: keyof StoredIds, reason: string): DecisionRow | null {
 		const proposalId = this.storedIds[kind];
 		if (!proposalId) {
-			this.snap = { ...this.snap, notice: `No stored proposal of that kind. Nothing changed.` };
+			this.snap = { ...this.snap, notice: 'Nothing to revert. It already stands.' };
 			this.emit();
 			return null;
 		}
 		if (this.snap.decisions.some((row) => row.proposalId === proposalId)) {
-			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.snap = { ...this.snap, notice: 'Already reverted. Nothing changed.' };
 			this.emit();
 			return null;
 		}
@@ -775,34 +795,34 @@ export class DraftController {
 	revertColdOpen(): void {
 		if (!this.editor) return;
 		if (this.snap.coldOpenReverted) {
-			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.snap = { ...this.snap, notice: 'Already reverted. Nothing changed.' };
 			this.emit();
 			return;
 		}
-		const reason = this.snap.coldOpen.reason || 'Proposed cold open.';
+		const reason = this.snap.coldOpen.reason || 'Cold open.';
 		const row = this.recordNonCutRevert('coldOpen', reason);
 		if (!row) return;
 		this.snap = {
 			...this.snap,
 			coldOpenReverted: true,
-			notice: `Reverted the cold open. The episode starts at the top.`
+			notice: 'Cold open reverted. The episode starts at the top.'
 		};
 		this.emit();
-		this.postDecision(row, 'The cold open stays in the render.', () => {
+		this.postDecision(row, () => {
 			this.snap = { ...this.snap, coldOpenReverted: false };
 		});
 	}
 
 	// Revert the title with one action. The heading falls back to the
-	// plain episode number, and the proposal stays on screen struck through.
+	// plain episode number, and the suggestion stays on screen struck through.
 	revertTitle(): void {
 		if (!this.editor) return;
 		if (this.snap.titleReverted) {
-			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.snap = { ...this.snap, notice: 'Already reverted. Nothing changed.' };
 			this.emit();
 			return;
 		}
-		const reason = this.snap.proposedTitle || 'Proposed title.';
+		const reason = this.snap.proposedTitle || 'Title.';
 		const row = this.recordNonCutRevert('title', reason);
 		if (!row) return;
 		const title = this.snap.title;
@@ -810,40 +830,40 @@ export class DraftController {
 			...this.snap,
 			title: `Episode ${this.episodeId}`,
 			titleReverted: true,
-			notice: `Reverted the title.`
+			notice: 'Reverted the title.'
 		};
 		this.emit();
-		this.postDecision(row, 'The proposed title stays.', () => {
+		this.postDecision(row, () => {
 			this.snap = { ...this.snap, title, titleReverted: false };
 		});
 	}
 
 	// Revert the show notes with one action. Notes fall back to empty,
-	// and the proposal stays on screen struck through.
+	// and the suggestion stays on screen struck through.
 	revertNotes(): void {
 		if (!this.editor) return;
 		if (this.snap.notesReverted) {
-			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.snap = { ...this.snap, notice: 'Already reverted. Nothing changed.' };
 			this.emit();
 			return;
 		}
-		const reason = this.snap.proposedNotes || 'Proposed show notes.';
+		const reason = this.snap.proposedNotes || 'Show notes.';
 		const row = this.recordNonCutRevert('notes', reason);
 		if (!row) return;
 		const notes = this.snap.notes;
-		this.snap = { ...this.snap, notes: '', notesReverted: true, notice: `Reverted the show notes.` };
+		this.snap = { ...this.snap, notes: '', notesReverted: true, notice: 'Reverted the show notes.' };
 		this.emit();
-		this.postDecision(row, 'The proposed show notes stay.', () => {
+		this.postDecision(row, () => {
 			this.snap = { ...this.snap, notes, notesReverted: false };
 		});
 	}
 
-	// Revert the callback with one action. The proposal state flips and the
-	// planted row clears with it, so the next opening cites nothing new.
+	// Revert the callback with one action. The suggestion state flips and the
+	// planted line clears with it, so the next opening cites nothing new.
 	revertCallback(): void {
 		if (!this.editor) return;
 		if (this.snap.callbackReverted) {
-			this.snap = { ...this.snap, notice: `That proposal is already reverted. Nothing changed.` };
+			this.snap = { ...this.snap, notice: 'Already reverted. Nothing changed.' };
 			this.emit();
 			return;
 		}
@@ -857,10 +877,10 @@ export class DraftController {
 			callbackQuote: '',
 			callbackReverted: true,
 			callbacksCleared: true,
-			notice: `Reverted the callback and cleared it from the next opening.`
+			notice: 'Reverted the callback and cleared it from the next opening.'
 		};
 		this.emit();
-		this.postDecision(row, 'The callback stays planted.', () => {
+		this.postDecision(row, () => {
 			this.snap = {
 				...this.snap,
 				callback,
@@ -942,7 +962,7 @@ export class DraftController {
 		this.snap = {
 			...this.snap,
 			playing: ok,
-			notice: ok ? 'Playing the cold open.' : 'Playback refused. The playhead sits at the open.'
+			notice: ok ? 'Playing the cold open.' : "Couldn't play. Try again."
 		};
 		this.emit();
 	}
@@ -969,25 +989,25 @@ export class DraftController {
 			...this.snap,
 			playing: ok,
 			position: this.player.currentTime || this.snap.position,
-			notice: ok ? this.snap.notice : 'Playback refused. Press play again after a gesture.'
+			notice: ok ? this.snap.notice : "Couldn't play. Try again."
 		};
 		this.emit();
 	}
 
-	// Mark done arms first and starts the render on confirm. Confirming is
-	// the only path that leaves the draft, and it always passes here.
+	// Mark done arms first and finishes the episode on confirm. Confirming
+	// is the only path that leaves the draft, and it always passes here.
 	markDone(): void {
 		if (this.snap.renderStage === 'idle') {
 			this.snap = {
 				...this.snap,
 				renderStage: 'confirm',
-				renderDetail: 'Marking done renders once and runs analysis. Confirm to start.'
+				renderDetail: MARK_DONE_CONFIRM_DETAIL
 			};
 			this.emit();
 			return;
 		}
 		if (this.snap.renderStage !== 'confirm' && this.snap.renderStage !== 'done') return;
-		this.snap = { ...this.snap, renderStage: 'starting', renderDetail: 'Starting the render.' };
+		this.snap = { ...this.snap, renderStage: 'starting', renderDetail: MARK_DONE_STARTING_DETAIL };
 		this.emit();
 		void fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}/done`, { method: 'POST' })
 			.then(async (response) => {
@@ -1011,7 +1031,7 @@ export class DraftController {
 				this.snap = {
 					...this.snap,
 					renderStage: 'done',
-					renderDetail: 'The render request was refused. Open the gallery to see its current state.'
+					renderDetail: MARK_DONE_REFUSED_DETAIL
 				};
 				this.emit();
 			});
@@ -1021,7 +1041,7 @@ export class DraftController {
 		this.snap = {
 			...this.snap,
 			renderStage: 'running',
-			renderDetail: 'The render is queued. It starts once the render ahead of it finishes.'
+			renderDetail: MARK_DONE_QUEUED_DETAIL
 		};
 		this.emit();
 	}
@@ -1040,7 +1060,7 @@ export class DraftController {
 		this.snap = {
 			...this.snap,
 			renderStage: 'running',
-			renderDetail: 'Render running: fixture render. Progress follows the render job when the backend serves it.'
+			renderDetail: LIVE_RENDER_RUNNING_DETAIL
 		};
 		this.emit();
 	}
@@ -1077,25 +1097,24 @@ export class DraftController {
 		this.startFollowPoll();
 	}
 
-	// The render started but its stream could not be followed. The render
+	// The finish started but its feed could not be followed. The finish
 	// itself runs, so the gallery stays the source of truth. Logged once.
 	private onFollowFailed(error: unknown): void {
 		if (!this.followWarned) {
 			this.followWarned = true;
-			console.warn('Render started but progress could not be followed.', error);
+			console.warn('Finish started but progress could not be followed.', error);
 		}
 		this.snap = {
 			...this.snap,
 			renderStage: 'running',
-			renderDetail:
-				'The render started, but its progress could not be followed. Open the gallery to see its state.'
+			renderDetail: MARK_DONE_UNFOLLOWED_DETAIL
 		};
 		this.emit();
 	}
 
-	// Poll the followed stream until it ends. The running line stands
-	// while the job lives. A done job reads the episode once, so a ready
-	// episode links on.
+	// Poll the followed feed until it ends. The waiting line stands
+	// while the finish runs. A done finish reads the episode once, so a
+	// ready episode links on.
 	private startFollowPoll(): void {
 		this.stopFollowPoll();
 		if (typeof window === 'undefined') return;
@@ -1119,11 +1138,10 @@ export class DraftController {
 			stream.status === 'interrupted'
 		) {
 			this.stopFollowPoll();
-			const reason = stream.error?.message ? ` ${stream.error.message}` : '';
 			this.snap = {
 				...this.snap,
 				renderStage: 'done',
-				renderDetail: `Render ${stream.status}.${reason} Open the gallery to see its state.`
+				renderDetail: MARK_DONE_STOPPED_DETAIL
 			};
 			this.emit();
 		}
