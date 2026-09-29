@@ -424,7 +424,7 @@ requires:   T8.4, T8.11, T8.13, T8.14, T8.15
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/identity/status.go, internal/identity/status_test.go
-status:     in-progress:land:t8.12-impl@bffd61cb7d9eeec9fd82e24714d0927b29dc7790
+status:     done:0260e01
 ```
 T8.6 round 1 proved the account page trusts `localStorage` alone: a seeded
 store renders a signed-in screen with zero API calls, desynced from the
@@ -480,6 +480,11 @@ fresh worktree.
 
 ### What exists now
 
+T8.12 landed at 0260e01 after round 1 APPROVE with zero findings.
+The status handler answers the caller's own address or signed
+out, read-only, with mounting scoped into T8.16. Reviewed commit
+bffd61c rebased clean. Race tests pass on the landed commit.
+T8.16 unblocks on this landing.
 T8.15 landed at 9514655 after round 1 APPROVE with zero findings.
 Both Google routes mount from settings with a loud misconfiguration
 path, the golden and mirror carry them, and the google spec runs in
