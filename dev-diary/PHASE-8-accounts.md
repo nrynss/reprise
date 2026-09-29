@@ -144,7 +144,7 @@ size:       L · frontier
 owns:       internal/identity/, internal/api/routes.go, internal/api/routes_test.go,
              web/src/lib/api/types.ts, web/src/lib/api/testdata/routes.json,
              cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t8.4-rem-r1@aab6caf72c46a66df88601f9a718d7f81828f6bf
+status:     done:2ea61d2
 ```
 Two routes, both under the identity middleware.
 
@@ -309,6 +309,16 @@ The one task that needs a person and production.
 
 ### What exists now
 
+T8.4 landed at 2ea61d2 after round 2 APPROVE with zero residue.
+Email code sign-in runs two routes behind the guest middleware,
+with identical 202s, hashes-only storage, four resolution cases,
+and session rotation in one transaction. Round 1 had one H (plain
+address outlived expiry) and one M (concurrent first attach lost
+500). The remediation stores no plain address at all and heals
+racing attaches inside the transaction, both pins proved
+load-bearing by mutation. Reviewed commits 83c5495 and aab6caf
+rebased clean. Race tests on identity, api, and the binary pass
+on the landed commit. T8.5 unblocks on this landing.
 T8.1 landed at 0dc9ea2 after round 1 APPROVE with zero findings.
 `internal/mail` carries a Resend client over plain `net/http`, with
 `Sender` and `Fake` for consumers and a `live`-tagged probe. Reviewed
