@@ -141,7 +141,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/threads/threads.ts,
              web/src/routes/threads/gallery-cards.test.ts, web/src/routes/gallery.spec.ts
-status:     in-progress:remediate-r1:t9.4-rem-r1
+status:     in-progress:land:t9.4-rem-r1@6d94628a0b93c3fa79bbf726b53d4fd0d4864941
 ```
 * Cards on the shared `.cards` grid, all the same height. A card shows its cover when `cover_path`
   is set, and otherwise the "EP.12" tile.
