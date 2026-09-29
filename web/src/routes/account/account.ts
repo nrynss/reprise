@@ -70,8 +70,11 @@ export const SIGNED_OUT = 'Signed out on this device. A fresh diary starts here.
 // SIGN_OUT_FAILED answers a sign-out the server refused.
 export const SIGN_OUT_FAILED = 'Signing out did not work. Try again.';
 
-// DELETE_ACCOUNT names the link that opens account deletion.
+// DELETE_ACCOUNT names the deletion entry on the signed in screen.
 export const DELETE_ACCOUNT = 'Delete account';
+
+// DELETE_SOON says deletion arrives later. The entry stays inert, so no one follows a missing screen.
+export const DELETE_SOON = 'Account deletion arrives with the next update.';
 
 // CONFLICT_HEADING names the choice between two diaries.
 export const CONFLICT_HEADING = 'This device already holds takes';

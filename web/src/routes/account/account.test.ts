@@ -12,6 +12,7 @@ import {
 	CONFLICT_HEADING,
 	DEFAULT_RESEND_WAIT,
 	DELETE_ACCOUNT,
+	DELETE_SOON,
 	DIARY_CONFLICT,
 	EMAIL_HELP,
 	EMAIL_LABEL,
@@ -200,6 +201,7 @@ describe('account copy', () => {
 			SIGNED_OUT,
 			SIGN_OUT_FAILED,
 			DELETE_ACCOUNT,
+			DELETE_SOON,
 			CONFLICT_HEADING,
 			CONFLICT_BODY,
 			KEEP_DIARY,
@@ -222,5 +224,10 @@ describe('account copy', () => {
 	it('names the capped request code, so the page honours the wait', () => {
 		expect(SEND_LIMITED).toBe('send_limited');
 		expect(INVALID_REQUEST).toBe('invalid_request');
+	});
+
+	it('names deletion as a waiting entry, never as a dead address', () => {
+		expect(DELETE_ACCOUNT).toBe('Delete account');
+		expect(DELETE_SOON).toBe('Account deletion arrives with the next update.');
 	});
 });

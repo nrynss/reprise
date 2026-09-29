@@ -13,6 +13,7 @@
 		CONFLICT_HEADING,
 		DEFAULT_RESEND_WAIT,
 		DELETE_ACCOUNT,
+		DELETE_SOON,
 		EMAIL_HELP,
 		EMAIL_LABEL,
 		ENTER_ADDRESS,
@@ -274,9 +275,11 @@
 			<p role="status">{signedInNotice(email)}</p>
 			<div class="choices">
 				<Button.Root type="button" disabled={busy} onclick={() => void quit()}>{SIGN_OUT}</Button.Root>
-				<!-- The deletion page lands separately, so resolve cannot name it yet. -->
-				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-				<a href="/account/delete">{DELETE_ACCOUNT}</a>
+				<!-- The deletion screen ships separately, so this entry waits here instead of stranding anyone. -->
+				<div>
+					<Button.Root type="button" disabled>{DELETE_ACCOUNT}</Button.Root>
+					<p class="help">{DELETE_SOON}</p>
+				</div>
 			</div>
 		</section>
 	{/if}
