@@ -7,6 +7,7 @@ import {
 	formatTime,
 	LIVE_DRAFT_EMPTY_NOTICE,
 	LIVE_DRAFT_NOTICE,
+	LIVE_RENDER_RUNNING_DETAIL,
 	queryValue,
 	type DraftSnapshot
 } from './draft';
@@ -198,7 +199,7 @@ describe('draft controller', () => {
 			await vi.waitFor(() => {
 				expect(controller.snapshot.renderStage).toBe('running');
 			});
-			expect(controller.snapshot.renderDetail).toContain('r-1');
+			expect(controller.snapshot.renderDetail).toContain(LIVE_RENDER_RUNNING_DETAIL);
 			expect(controller.snapshot.renderDetail).not.toContain('refused');
 			expect(controller.snapshot.renderDetail).not.toContain('could not be followed');
 			controller.destroy();

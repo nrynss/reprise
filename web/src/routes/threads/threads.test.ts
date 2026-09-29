@@ -28,6 +28,7 @@ import {
 	installMockJob,
 	LIVE_EPISODE_FAILED_NOTICE,
 	LIVE_EPISODE_NOTICE,
+	LIVE_ERASE_STARTED_NOTICE,
 	LIVE_SEASON_FAILED_NOTICE,
 	LIVE_SEASON_NOTICE,
 	listSeason,
@@ -528,7 +529,7 @@ describe('release controls', () => {
 		}
 	});
 
-	it('names the erasure job a live erase starts', async () => {
+	it('shows the started notice a live erase returns', async () => {
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -560,7 +561,7 @@ describe('release controls', () => {
 			expect(snaps.at(-1)?.eraseArmed).toBe(true);
 			await controller.erase();
 			await vi.waitFor(() => {
-				expect(snaps.at(-1)?.notice).toContain('job-erase-9');
+				expect(snaps.at(-1)?.notice).toContain(LIVE_ERASE_STARTED_NOTICE);
 			});
 			controller.destroy();
 		} finally {

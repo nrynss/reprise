@@ -479,8 +479,8 @@ test('mark done follows its render to done with no refusal', async ({ page }) =>
 	await page.getByRole('button', { name: 'Mark episode done' }).click();
 	await page.getByRole('button', { name: 'Confirm mark done' }).click();
 
-	await expect(page.getByText(/Render done/)).toBeVisible({ timeout: 15_000 });
+	await expect(page.getByText(/The render is done/)).toBeVisible({ timeout: 15_000 });
 	await expect(page.getByText('refused')).toHaveCount(0);
 	await expect(page.getByText('could not be followed')).toHaveCount(0);
-	await expect(page.getByText(/\/episode\/live-done/)).toBeVisible();
+	await expect(page.getByText('The render is done. Open the gallery to hear the finished episode.')).toBeVisible();
 });
