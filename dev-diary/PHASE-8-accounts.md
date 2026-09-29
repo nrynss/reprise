@@ -267,7 +267,7 @@ requires:   T8.4
 fixture-ok: yes
 size:       S · mid
 owns:       internal/limits/
-status:     in-progress:land:t8.9-impl@af5066e03ce57e39e6ea84d6787ca0c0e107053a
+status:     done:9094573
 ```
 Replace `StubOwnerAuth` with a check that the request's user holds an identity listed in the
 `operators` setting. An `email:` entry works as soon as T8.4 lands, and a `google:` entry works once
@@ -400,6 +400,12 @@ in a fresh worktree.
 
 ### What exists now
 
+T8.9 landed at 9094573 after round 1 APPROVE with zero findings.
+`OperatorAuth` gates admin endpoints behind the operators setting,
+with 401 for guests and 403 `operator_required` for signed-in
+non-operators, proved wireable for T8.13. Reviewed commit af5066e
+rebased clean. Race tests pass on the landed commit. T8.13
+unblocks on T8.11 now.
 T8.6 landed at 85394fb after round 2 APPROVE with zero residue.
 The account page walks the mailed code flow with conflict choice
 and sign-out against stubbed routes, pinned on Chromium and
