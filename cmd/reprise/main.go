@@ -822,13 +822,14 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect media: %w", err)
 	}
-	// loginAll serves the sign-in pair beside the sign-out route and the
-	// Google pair. Each owns its mux or handler, so the boot joins them
-	// here and the mount wraps all five alike. An empty client id leaves
+	// loginAll serves the sign-in pair beside the sign-out route, the
+	// status route, and the Google pair. Each owns its mux or handler, so the boot joins them
+	// here and the mount wraps all six alike. An empty client id leaves
 	// the Google start refusing, never crashing.
 	loginAll := http.NewServeMux()
 	loginAll.Handle("/api/login/", identitySvc.LoginHandler())
 	loginAll.Handle("POST /api/login/signout", identitySvc.SignOutHandler())
+	loginAll.Handle("GET /api/login/status", identitySvc.StatusHandler())
 	loginAll.Handle("/api/login/google/", identitySvc.GoogleHandler(googleConfig(loaded, googleSecret)))
 	// accountDelete serves the account deletion route. The privacy
 	// feature builds the deletion service in its kinds hook, so the boot

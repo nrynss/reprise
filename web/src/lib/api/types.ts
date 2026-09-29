@@ -36,6 +36,7 @@ export const API_ROUTES: readonly ApiRoute[] = [
 	{ method: 'POST', pattern: '/api/login/code' },
 	{ method: 'POST', pattern: '/api/login/verify' },
 	{ method: 'POST', pattern: '/api/login/signout' },
+	{ method: 'GET', pattern: '/api/login/status' },
 	{ method: 'GET', pattern: '/api/login/google/start' },
 	{ method: 'GET', pattern: '/api/login/google/callback' },
 	{ method: 'POST', pattern: '/api/account/delete' },

@@ -3024,7 +3024,9 @@ func TestPublicDetailReloadCarriesSharePath(t *testing.T) {
 // behind the guest middleware. Empty bodies answer 400, which proves the
 // table mounted the login handler instead of a stub, without sending mail.
 // The sign-out route answers 200 with a fresh guest cookie, which proves
-// the boot joined it beside the pair.
+// the boot joined it beside the pair. The status route answers signed out
+// for a guest and signed in with the address for a planted owner, which
+// proves the boot joined it beside the pair too.
 func TestBootMountsLoginRoutes(t *testing.T) {
 	loaded := bootSettings(t, t.TempDir())
 	ctx, stop := context.WithCancel(t.Context())
@@ -3070,6 +3072,84 @@ func TestBootMountsLoginRoutes(t *testing.T) {
 	}
 	if !hasCookie {
 		t.Fatalf("POST /api/login/signout set no %q cookie", identity.CookieName)
+	}
+	guestStatus := httptest.NewRecorder()
+	mux.ServeHTTP(guestStatus, httptest.NewRequest(http.MethodGet, "/api/login/status", nil))
+	if guestStatus.Code != http.StatusOK {
+		t.Fatalf("GET /api/login/status status = %d, want 200", guestStatus.Code)
+	}
+	var guestBody struct {
+		SignedIn bool   `json:"signed_in"`
+		Email    string `json:"email"`
+	}
+	if err := json.Unmarshal(guestStatus.Body.Bytes(), &guestBody); err != nil {
+		t.Fatalf("GET /api/login/status: decode body: %v", err)
+	}
+	if guestBody.SignedIn {
+		t.Fatal("GET /api/login/status answers signed in for a guest, want signed out")
+	}
+	if guestBody.Email != "" {
+		t.Fatalf("GET /api/login/status email = %q, want empty for a guest", guestBody.Email)
+	}
+	db := openBootDB(t, loaded)
+	ownerCookie := plantLoginOwner(t, ctx, db, "user-status-owner", "owner-status@example.com")
+	ownerStatus := httptest.NewRecorder()
+	ownerReq := httptest.NewRequest(http.MethodGet, "/api/login/status", nil)
+	ownerReq.AddCookie(ownerCookie)
+	mux.ServeHTTP(ownerStatus, ownerReq)
+	if ownerStatus.Code != http.StatusOK {
+		t.Fatalf("GET /api/login/status status = %d, want 200", ownerStatus.Code)
+	}
+	var ownerBody struct {
+		SignedIn bool   `json:"signed_in"`
+		Email    string `json:"email"`
+	}
+	if err := json.Unmarshal(ownerStatus.Body.Bytes(), &ownerBody); err != nil {
+		t.Fatalf("GET /api/login/status: decode body: %v", err)
+	}
+	if !ownerBody.SignedIn {
+		t.Fatal("GET /api/login/status answers signed out for a signed-in user, want signed in")
+	}
+	if ownerBody.Email != "owner-status@example.com" {
+		t.Fatalf("GET /api/login/status email = %q, want the caller own address", ownerBody.Email)
+	}
+}
+
+// plantLoginOwner leaves one signed-in owner with one session and returns
+// its cookie. It signs with the boot settings key, so the session resolves
+// behind the guest middleware.
+func plantLoginOwner(t *testing.T, ctx context.Context, db *keelsqlite.DB, userID, address string) *http.Cookie {
+	t.Helper()
+	sessionID, err := keelid.New()
+	if err != nil {
+		t.Fatalf("mint session id: %v", err)
+	}
+	identityID, err := keelid.New()
+	if err != nil {
+		t.Fatalf("mint identity id: %v", err)
+	}
+	now := time.Now().Unix()
+	writer := db.Writer()
+	if _, err := writer.ExecContext(ctx,
+		`INSERT INTO users (id, kind, created_at, last_seen_at) VALUES (?, 'owner', ?, ?)`,
+		userID, now, now); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	if _, err := writer.ExecContext(ctx,
+		`INSERT INTO identities (id, user_id, provider, subject, created_at) VALUES (?, ?, 'email', ?, ?)`,
+		identityID, userID, address, now); err != nil {
+		t.Fatalf("insert identity: %v", err)
+	}
+	if _, err := writer.ExecContext(ctx,
+		`INSERT INTO guest_sessions (id, user_id, created_at, revoked) VALUES (?, ?, ?, 0)`,
+		sessionID, userID, now); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	mac := hmac.New(sha256.New, []byte("boot-probe-signing-key"))
+	_, _ = mac.Write([]byte(sessionID))
+	return &http.Cookie{
+		Name:  identity.CookieName,
+		Value: sessionID + "." + hex.EncodeToString(mac.Sum(nil)),
 	}
 }
 
