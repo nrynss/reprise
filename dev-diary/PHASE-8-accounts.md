@@ -207,7 +207,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/account/, web/src/lib/components/AccountLink.svelte,
              web/src/lib/components/SeasonNav.svelte
-status:     in-progress:land:t8.6-rem-r1@4d6ea896963175de25c5942e3c53b49b493168a1
+status:     done:85394fb
 ```
 * `SeasonNav` gains a quiet "Sign in" link. It reads "Account" once signed in.
 * `/account`: an email field, then a 6-digit code field with a resend link that honours
@@ -369,6 +369,16 @@ in a fresh worktree.
 
 ### What exists now
 
+T8.6 landed at 85394fb after round 2 APPROVE with zero residue.
+The account page walks the mailed code flow with conflict choice
+and sign-out against stubbed routes, pinned on Chromium and
+Firefox. Round 1 had one L (dead delete link); the remediation
+holds the entry inert until T8.7 ships its screen. Three out of
+scope items stay open under T8.11 and T8.12: no sign-out route
+yet, so "revokes the session and starts a fresh guest" is unmet,
+localStorage-only auth state, and the account spec outside the
+e2e chain. Reviewed commits 26bd49a and 4d6ea89 rebased clean.
+Unit pins pass on the landed commit.
 T8.4 landed at 2ea61d2 after round 2 APPROVE with zero residue.
 Email code sign-in runs two routes behind the guest middleware,
 with identical 202s, hashes-only storage, four resolution cases,
