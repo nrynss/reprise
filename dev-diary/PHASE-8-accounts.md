@@ -85,7 +85,7 @@ requires:   none
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/migrations/
-status:     in-progress:land:t8.2-rem-r1@39c385f4fb7daa4ed557e0bd439639d533ed7eed
+status:     done:26af203
 ```
 New migrations under the identity namespace. Keep `guest_sessions` as it is. The diary already has a
 `sessions` table for recording sessions, so a rename would collide.
@@ -309,6 +309,12 @@ T8.1 landed at 0dc9ea2 after round 1 APPROVE with zero findings.
 `Sender` and `Fake` for consumers and a `live`-tagged probe. Reviewed
 commit e443c20 rebased clean onto main. Race tests pass on the landed
 commit.
+T8.2 landed at 26af203 after round 2 APPROVE with zero residue.
+Round 1 had one H finding, no standing test for the new guards.
+The remediation added a test beside the migrations that pins the
+provider subject uniqueness and the send lookup index, with both
+pins proved load-bearing by mutation. Reviewed commits d0e0e72 and
+39c385f rebased clean. Race tests pass on the landed commit.
 Nothing else yet. The phase opened on 2026-09-29.
 
 ### What surprised us
