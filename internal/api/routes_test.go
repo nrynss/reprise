@@ -50,6 +50,8 @@ var expectedTable = []Route{
 	{Method: "POST", Pattern: "/api/login/code"},
 	{Method: "POST", Pattern: "/api/login/verify"},
 	{Method: "POST", Pattern: "/api/login/signout"},
+	{Method: "GET", Pattern: "/api/login/google/start"},
+	{Method: "GET", Pattern: "/api/login/google/callback"},
 	{Method: "POST", Pattern: "/api/account/delete"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
@@ -304,6 +306,8 @@ func TestMountServesHandlersThroughChain(t *testing.T) {
 		{http.MethodPost, "/api/login/code"},
 		{http.MethodPost, "/api/login/verify"},
 		{http.MethodPost, "/api/login/signout"},
+		{http.MethodGet, "/api/login/google/start"},
+		{http.MethodGet, "/api/login/google/callback"},
 		{http.MethodPost, "/api/account/delete"},
 		{http.MethodPost, "/api/uploads"},
 		{http.MethodPut, "/api/uploads/e01/chunks/0"},

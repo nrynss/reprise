@@ -48,9 +48,9 @@ type Route struct {
 // handler takes the upload prefix later, mounted at its base path. The job
 // stream takes the events route later, serving one job topic. The blob
 // store takes the media route later, behind the ownership check. The admin
-// trio takes the limits handler, behind the owner proof. The login trio
-// takes the sign-in handler beside the sign-out route, behind the guest
-// middleware like the rest. The account deletion route takes the privacy
+// trio takes the limits handler, behind the owner proof. The login routes
+// take the sign-in handler beside the sign-out and the Google pair, behind
+// the guest middleware like the rest. The account deletion route takes the
 // service deletion handler, behind the guest middleware like the rest.
 var routeTable = []Route{
 	{Method: "POST", Pattern: "/api/sessions"},
@@ -72,6 +72,8 @@ var routeTable = []Route{
 	{Method: "POST", Pattern: "/api/login/code"},
 	{Method: "POST", Pattern: "/api/login/verify"},
 	{Method: "POST", Pattern: "/api/login/signout"},
+	{Method: "GET", Pattern: "/api/login/google/start"},
+	{Method: "GET", Pattern: "/api/login/google/callback"},
 	{Method: "POST", Pattern: "/api/account/delete"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
@@ -146,8 +148,8 @@ type Dependencies struct {
 	Threads http.Handler
 	// Admin answers the caps, the switch, and spend.
 	Admin http.Handler
-	// Login serves the sign-in code request, the verify, and the sign-out
-	// routes through its mux.
+	// Login serves the sign-in code request, the verify, the sign-out,
+	// and the Google start plus callback routes through its mux.
 	Login http.Handler
 	// Account serves the account deletion route.
 	Account http.Handler
@@ -235,7 +237,8 @@ func (d Dependencies) handlerFor(route Route) http.Handler {
 		"POST " + limits.PatternPause,
 		"POST " + limits.PatternOwnerLimit:
 		return d.Admin
-	case "POST /api/login/code", "POST /api/login/verify", "POST /api/login/signout":
+	case "POST /api/login/code", "POST /api/login/verify", "POST /api/login/signout",
+		"GET /api/login/google/start", "GET /api/login/google/callback":
 		return d.Login
 	case "POST /api/account/delete":
 		return d.Account

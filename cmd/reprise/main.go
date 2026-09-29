@@ -31,6 +31,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nrynss/keel/config"
 	"github.com/nrynss/keel/cost"
 	costsqlitestore "github.com/nrynss/keel/cost/sqlitestore"
 	"github.com/nrynss/keel/ffmpeg"
@@ -419,6 +420,24 @@ func (w *mediaRefusalWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
+// googleIssuer is the provider origin Google sign-in checks tokens
+// against. The flow reads its endpoints from this origin on every start,
+// so the handler carries no baked in address.
+const googleIssuer = "https://accounts.google.com"
+
+// googleConfig builds the Google sign-in config from the settings file.
+// The client pair stays empty until sign-in is configured, and the start
+// route refuses while it is. The callback URL follows the public origin,
+// which matches the address the provider console registered.
+func googleConfig(loaded settings.Settings, secret string) identity.GoogleConfig {
+	return identity.GoogleConfig{
+		Issuer:       googleIssuer,
+		ClientID:     loaded.GoogleClientID,
+		ClientSecret: secret,
+		RedirectURL:  strings.TrimRight(loaded.PublicOrigin, "/") + "/api/login/google/callback",
+	}
+}
+
 // identityOperatorSource adapts the sign-in service to the operator check
 // seam. The check declares the interface and the sign-in service owns the
 // rows, so this type is the one place the two meet. It reads only, so the
@@ -649,6 +668,16 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: reveal mail key: %w", err)
 	}
+	// The Google secret stays unresolved while no settings file names it.
+	// The flow is optional, so the boot carries an empty secret and the
+	// start route refuses. Any other reveal fault stops the boot by name.
+	googleSecret, err := loaded.Secrets.GoogleClientSecret.Reveal()
+	if err != nil {
+		if !errors.Is(err, config.ErrUnresolved) {
+			return nil, fmt.Errorf("reprise: reveal google secret: %w", err)
+		}
+		googleSecret = ""
+	}
 	mailClient, err := mail.New(mail.Config{
 		APIKey:  resendKey,
 		From:    loaded.MailFrom,
@@ -793,12 +822,14 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect media: %w", err)
 	}
-	// loginAll serves the sign-in pair beside the sign-out route. The
-	// pair owns its mux and the sign-out owns its handler, so the boot
-	// joins them here and the mount wraps all three alike.
+	// loginAll serves the sign-in pair beside the sign-out route and the
+	// Google pair. Each owns its mux or handler, so the boot joins them
+	// here and the mount wraps all five alike. An empty client id leaves
+	// the Google start refusing, never crashing.
 	loginAll := http.NewServeMux()
 	loginAll.Handle("/api/login/", identitySvc.LoginHandler())
 	loginAll.Handle("POST /api/login/signout", identitySvc.SignOutHandler())
+	loginAll.Handle("/api/login/google/", identitySvc.GoogleHandler(googleConfig(loaded, googleSecret)))
 	// accountDelete serves the account deletion route. The privacy
 	// feature builds the deletion service in its kinds hook, so the boot
 	// reads it back from the holder and checks codes through the sign-in

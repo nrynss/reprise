@@ -3073,6 +3073,67 @@ func TestBootMountsLoginRoutes(t *testing.T) {
 	}
 }
 
+// TestBootMountsGoogleRoutes checks the boot wires the Google start and
+// callback routes behind the guest middleware. With no client id the start
+// refuses plainly with no redirect, and the callback lands a bogus state on
+// the failure flag. Neither path crashes the process.
+func TestBootMountsGoogleRoutes(t *testing.T) {
+	loaded := bootSettings(t, t.TempDir())
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	mux := http.NewServeMux()
+	if _, err := wireAPI(ctx, mux, loaded, bootPlan{advancePeriod: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	start := httptest.NewRecorder()
+	mux.ServeHTTP(start, httptest.NewRequest(http.MethodGet, "/api/login/google/start", nil))
+	if start.Code != http.StatusInternalServerError {
+		t.Fatalf("GET /api/login/google/start status = %d, want 500", start.Code)
+	}
+	if loc := start.Header().Get("Location"); loc != "" {
+		t.Fatalf("GET /api/login/google/start redirects to %q, want no redirect", loc)
+	}
+	var refusal struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(start.Body.Bytes(), &refusal); err != nil {
+		t.Fatalf("GET /api/login/google/start: decode refusal: %v", err)
+	}
+	if refusal.Error.Code != identity.CodeInternal {
+		t.Fatalf("GET /api/login/google/start code = %q, want internal error", refusal.Error.Code)
+	}
+	callback := httptest.NewRecorder()
+	mux.ServeHTTP(callback, httptest.NewRequest(http.MethodGet, "/api/login/google/callback?state=no-such-state&code=no-such-code", nil))
+	if callback.Code != http.StatusSeeOther {
+		t.Fatalf("GET /api/login/google/callback status = %d, want 303", callback.Code)
+	}
+	if got, want := callback.Header().Get("Location"), "/account/google/callback?error=signin_failed"; got != want {
+		t.Fatalf("GET /api/login/google/callback redirects to %q, want %q", got, want)
+	}
+}
+
+// TestGoogleConfigFollowsSettings checks the Google config names the
+// provider origin, carries the settings client pair, and builds the callback
+// URL from the public origin with no doubled slash.
+func TestGoogleConfigFollowsSettings(t *testing.T) {
+	loaded := settings.Settings{GoogleClientID: "boot-probe-client", PublicOrigin: "http://localhost:8080/"}
+	got := googleConfig(loaded, "boot-probe-secret")
+	if got.Issuer != "https://accounts.google.com" {
+		t.Fatalf("issuer = %q, want the provider origin", got.Issuer)
+	}
+	if got.ClientID != "boot-probe-client" {
+		t.Fatalf("client id = %q, want the settings value", got.ClientID)
+	}
+	if got.ClientSecret != "boot-probe-secret" {
+		t.Fatalf("client secret = %q, want the revealed value", got.ClientSecret)
+	}
+	if want := "http://localhost:8080/api/login/google/callback"; got.RedirectURL != want {
+		t.Fatalf("redirect URL = %q, want %q", got.RedirectURL, want)
+	}
+}
+
 // TestBootOperatorGateAnswers401403AndServesOperator boots the real route
 // wiring with one operator address and drives the admin snapshot route three
 // ways. A guest answers 401, a signed-in caller with no listed identity
