@@ -181,7 +181,7 @@ fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/sendlimit.go, internal/identity/sendlimit_test.go,
              internal/identity/login.go, internal/identity/login_test.go
-status:     in-progress:land:t8.5-rem-r1@e0fc2e9c7f41eafc2e9c6c12fae0d1c063d45715
+status:     done:028169c
 ```
 Refuse before the send, never after it. Every limit answers `429` with `Retry-After`.
 
@@ -325,6 +325,14 @@ racing attaches inside the transaction, both pins proved
 load-bearing by mutation. Reviewed commits 83c5495 and aab6caf
 rebased clean. Race tests on identity, api, and the binary pass
 on the landed commit. T8.5 unblocks on this landing.
+T8.5 landed at 028169c after round 2 APPROVE with zero residue.
+Round 1 had one H (checker wired to no route) and one M (gate
+probe spent client budget before the durable global check). Owns
+widened to the request path by decision, and the remediation wires
+identical 429s with Retry-After and orders durable checks first,
+both pins proved load-bearing by mutation. Reviewed commits
+64fa4a1 and e0fc2e9 rebased clean. Race tests pass on the landed
+commit. T8.6 unblocks on this landing.
 T8.1 landed at 0dc9ea2 after round 1 APPROVE with zero findings.
 `internal/mail` carries a Resend client over plain `net/http`, with
 `Sender` and `Fake` for consumers and a `live`-tagged probe. Reviewed
