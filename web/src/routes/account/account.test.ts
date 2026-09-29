@@ -5,6 +5,7 @@ import { ApiError } from '@nrynss/chaaya/api';
 import {
 	ACCOUNT_EVENT,
 	ACCOUNT_HEADING,
+	ACCOUNT_PATH,
 	ACCOUNT_SUB,
 	CHECK_CODE,
 	CODE_LABEL,
@@ -22,8 +23,15 @@ import {
 	KEEP_DIARY,
 	KEEP_HELP,
 	KEPT_DIARY,
+	NAME_FAILED,
+	NAME_HELP,
+	NAME_INVALID,
+	NAME_LABEL,
+	NAME_PATH,
+	NAME_SAVED,
 	REQUEST_FAILED,
 	RESEND_CODE,
+	SAVE_NAME,
 	SEND_CODE,
 	SEND_LIMITED,
 	SIGN_OUT,
@@ -32,8 +40,10 @@ import {
 	SIGNED_OUT,
 	SWITCH_ACCOUNT,
 	SWITCH_HELP,
+	UNAUTHORIZED,
 	WRONG_CODE,
 	codeSentNotice,
+	fetchAccount,
 	forgetSignedInEmail,
 	normalizeEmail,
 	readRetryAfterSeconds,
@@ -41,6 +51,7 @@ import {
 	rememberSignedInEmail,
 	requestCode,
 	retryWaitNotice,
+	saveDisplayName,
 	signedInNotice,
 	signOut,
 	verifyCode,
@@ -141,6 +152,48 @@ describe('signOut', () => {
 	});
 });
 
+describe('shared name', () => {
+	it('reads the stored name beside the address', async () => {
+		const seen: string[] = [];
+		const fetchFn: FetchFn = async (url) => {
+			seen.push(url);
+			return jsonAnswer({ email: 'friend@example.com', display_name: 'Mara' }, 200);
+		};
+		const account = await fetchAccount(fetchFn);
+		expect(seen).toEqual([ACCOUNT_PATH]);
+		expect(account).toEqual({ email: 'friend@example.com', displayName: 'Mara' });
+	});
+
+	it('writes the name with PUT and answers what the server kept', async () => {
+		const seen: Array<{ url: string; method?: string; body: unknown }> = [];
+		const fetchFn: FetchFn = async (url, init) => {
+			seen.push({ url, method: init?.method, body: JSON.parse(String(init?.body)) });
+			return jsonAnswer({ email: 'friend@example.com', display_name: 'Mara' }, 200);
+		};
+		const account = await saveDisplayName(fetchFn, 'Mara');
+		expect(seen).toEqual([
+			{ url: NAME_PATH, method: 'PUT', body: { display_name: 'Mara' } }
+		]);
+		expect(account.displayName).toBe('Mara');
+	});
+
+	it('throws the unauthorized code for a guest read', async () => {
+		const fetchFn: FetchFn = async () => jsonAnswer(envelope(UNAUTHORIZED), 401);
+		const failure = await fetchAccount(fetchFn).catch((error: unknown) => error);
+		expect(failure).toBeInstanceOf(ApiError);
+		expect((failure as ApiError).code).toBe(UNAUTHORIZED);
+	});
+
+	it('throws the invalid code for a refused name', async () => {
+		const fetchFn: FetchFn = async () => jsonAnswer(envelope(INVALID_REQUEST), 400);
+		const failure = await saveDisplayName(fetchFn, 'x'.repeat(61)).catch(
+			(error: unknown) => error
+		);
+		expect(failure).toBeInstanceOf(ApiError);
+		expect((failure as ApiError).code).toBe(INVALID_REQUEST);
+	});
+});
+
 describe('retry wait', () => {
 	it('reads seconds from the header and falls back without one', () => {
 		const named = new Response('x', { headers: { 'retry-after': '30' } });
@@ -200,6 +253,12 @@ describe('account copy', () => {
 			SIGNED_OUT,
 			SIGN_OUT_FAILED,
 			DELETE_ACCOUNT,
+			NAME_LABEL,
+			NAME_HELP,
+			SAVE_NAME,
+			NAME_SAVED,
+			NAME_INVALID,
+			NAME_FAILED,
 			CONFLICT_HEADING,
 			CONFLICT_BODY,
 			KEEP_DIARY,

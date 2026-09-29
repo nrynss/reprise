@@ -22,35 +22,14 @@
 </svelte:head>
 
 <main>
-	<p class="eyebrow">Season one</p>
 	<h1>{HEADING}</h1>
 	<p class="sub">{SUB}</p>
 	<nav aria-label="Season">
 		<SeasonNav current="none" />
 	</nav>
 
-	<div class="choices">
-		<Button.Root type="button" onclick={() => begin()}>{CONTINUE}</Button.Root>
-		<a class="plain" href={resolve(ACCOUNT_PAGE)}>{BACK}</a>
+	<div class="actions">
+		<Button.Root type="button" class="button" onclick={() => begin()}>{CONTINUE}</Button.Root>
+		<a class="button quiet" href={resolve(ACCOUNT_PAGE)}>{BACK}</a>
 	</div>
 </main>
-
-<style>
-	.eyebrow {
-		text-transform: uppercase;
-		letter-spacing: 0.12em;
-		font-size: 0.8rem;
-	}
-	.sub {
-		max-width: 34rem;
-	}
-	.choices {
-		display: grid;
-		gap: 1rem;
-		max-width: 30rem;
-		margin-top: 1rem;
-	}
-	.plain {
-		color: inherit;
-	}
-</style>

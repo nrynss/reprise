@@ -23,8 +23,14 @@
 		KEEP_DIARY,
 		KEEP_HELP,
 		KEPT_DIARY,
+		NAME_FAILED,
+		NAME_HELP,
+		NAME_INVALID,
+		NAME_LABEL,
+		NAME_SAVED,
 		REQUEST_FAILED,
 		RESEND_CODE,
+		SAVE_NAME,
 		SEND_CODE,
 		SEND_LIMITED,
 		SIGN_OUT,
@@ -34,12 +40,14 @@
 		SWITCH_HELP,
 		WRONG_CODE,
 		codeSentNotice,
+		fetchAccount,
 		forgetSignedInEmail,
 		normalizeEmail,
 		readSignedInEmail,
 		rememberSignedInEmail,
 		requestCode,
 		retryWaitNotice,
+		saveDisplayName,
 		signedInNotice,
 		signOut,
 		verifyCode
@@ -56,6 +64,39 @@
 	let busy = $state(false);
 	let resendWait = $state(0);
 	let resendTimer = $state(0);
+	let displayName = $state('');
+	let nameBusy = $state(false);
+	let nameSaved = $state('');
+	let nameProblem = $state('');
+
+	// loadName reads the stored shared name for a signed in device. A
+	// refusal leaves the field blank, and saving still tries.
+	async function loadName() {
+		try {
+			const account = await fetchAccount(fetch);
+			displayName = account.displayName;
+		} catch {
+			return;
+		}
+	}
+
+	// saveName stores the typed shared name. A refused name names the
+	// next step, and any other refusal asks for another try.
+	async function saveName() {
+		nameBusy = true;
+		nameSaved = '';
+		nameProblem = '';
+		try {
+			const account = await saveDisplayName(fetch, displayName);
+			displayName = account.displayName;
+			nameSaved = NAME_SAVED;
+		} catch (error) {
+			nameProblem =
+				error instanceof ApiError && error.code === INVALID_REQUEST ? NAME_INVALID : NAME_FAILED;
+		} finally {
+			nameBusy = false;
+		}
+	}
 
 	// stopResendTimer drops a pending resend countdown, if one runs.
 	// Zero means no countdown, so clearing it never fires.
@@ -134,6 +175,7 @@
 			code = '';
 			notice = '';
 			phase = 'signedin';
+			void loadName();
 		} catch (error) {
 			problem = error instanceof ApiError && error.code === INVALID_CODE ? WRONG_CODE : REQUEST_FAILED;
 		} finally {
@@ -175,6 +217,7 @@
 		if (stored !== null) {
 			email = stored;
 			phase = 'signedin';
+			void loadName();
 		}
 		return () => stopResendTimer();
 	});
@@ -282,6 +325,35 @@
 	{#if phase === 'signedin'}
 		<section aria-label="Signed in">
 			<p role="status">{signedInNotice(email)}</p>
+			<form
+				aria-label="Shared name"
+				onsubmit={(event) => {
+					event.preventDefault();
+					void saveName();
+				}}
+			>
+				<div class="field">
+					<Label.Root for="account-name">{NAME_LABEL}</Label.Root>
+					<input
+						id="account-name"
+						type="text"
+						autocomplete="off"
+						maxlength={60}
+						bind:value={displayName}
+						disabled={nameBusy}
+					/>
+					<p class="help">{NAME_HELP}</p>
+				</div>
+				<Button.Root type="submit" class="button secondary" disabled={nameBusy}>
+					{SAVE_NAME}
+				</Button.Root>
+			</form>
+			{#if nameSaved}
+				<p role="status">{nameSaved}</p>
+			{/if}
+			{#if nameProblem}
+				<p role="alert">{nameProblem}</p>
+			{/if}
 			<div class="choices">
 				<Button.Root
 					type="button"

@@ -45,6 +45,12 @@ export function welcomeMode(search: string): WelcomeMode {
 	return 'empty';
 }
 
+// Read demo mode from the query string. The fixture flag means the teaser
+// behind the page stands in for the season, so the page wears the badge.
+export function isDemo(search: string): boolean {
+	return queryValue(search, 'fixture') === '1';
+}
+
 // Seconds as m:ss for the teaser readout.
 export function formatClock(seconds: number): string {
 	const clamped = Math.max(0, Math.round(seconds));
@@ -243,6 +249,7 @@ export interface WelcomeSnapshot {
 	audioUrl: string;
 	capped: boolean;
 	episodes: number;
+	demo: boolean;
 }
 
 export function emptyWelcome(): WelcomeSnapshot {
@@ -256,7 +263,8 @@ export function emptyWelcome(): WelcomeSnapshot {
 		teaser: TEASER,
 		audioUrl: '',
 		capped: true,
-		episodes: 0
+		episodes: 0,
+		demo: false
 	};
 }
 
@@ -296,7 +304,8 @@ export function initialWelcome(search = ''): WelcomeSnapshot {
 		teaser: TEASER,
 		audioUrl: '',
 		capped: true,
-		episodes: mode === 'seeded' ? 4 : 0
+		episodes: mode === 'seeded' ? 4 : 0,
+		demo: isDemo(search)
 	};
 }
 
@@ -318,7 +327,13 @@ export class WelcomeController {
 
 	mount(search: string): void {
 		const initial = initialWelcome(search);
-		this.snap = { ...this.snap, ready: true, mode: initial.mode, notice: initial.notice };
+		this.snap = {
+			...this.snap,
+			ready: true,
+			mode: initial.mode,
+			notice: initial.notice,
+			demo: initial.demo
+		};
 		if (initial.mode === 'seeded') {
 			this.loadSource(teaserToneUrl(initial.teaser.episodeNumber), true);
 		}

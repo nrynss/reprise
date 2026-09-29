@@ -218,7 +218,7 @@
 		<section aria-label="Deleted">
 			<p role="status">{DELETE_DONE}</p>
 			<div class="choices">
-				<a href={resolve('/account')}>{DELETE_BACK}</a>
+				<a class="button quiet" href={resolve('/account')}>{DELETE_BACK}</a>
 			</div>
 		</section>
 	{/if}

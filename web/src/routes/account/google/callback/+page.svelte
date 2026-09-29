@@ -51,7 +51,6 @@
 </svelte:head>
 
 <main>
-	<p class="eyebrow">Season one</p>
 	<h1>Google sign-in</h1>
 	<nav aria-label="Season">
 		<SeasonNav current="none" />
@@ -59,37 +58,31 @@
 
 	{#if flag === 'done'}
 		<p role="status">{DONE}</p>
-		<a href={resolve(ACCOUNT_PAGE)}>{VIEW_ACCOUNT}</a>
+		<div class="actions">
+			<a class="button quiet" href={resolve(ACCOUNT_PAGE)}>{VIEW_ACCOUNT}</a>
+		</div>
 	{:else if flag === 'conflict'}
-		<section aria-label="Pick a diary">
+		<section class="section" aria-label="Pick a diary">
 			<h2>{CONFLICT_HEADING}</h2>
 			<p>{CONFLICT_BODY}</p>
-			<div class="choices">
+			<div class="actions">
 				<!-- Keeping leaves the device alone, so it links to the account screen. -->
-				<a href={resolve(ACCOUNT_PAGE)}>{KEEP}</a>
+				<a class="button secondary" href={resolve(ACCOUNT_PAGE)}>{KEEP}</a>
 				{#if flowState !== ''}
-					<Button.Root type="button" onclick={() => move()}>{SWITCH}</Button.Root>
+					<Button.Root type="button" class="button secondary" onclick={() => move()}>
+						{SWITCH}
+					</Button.Root>
 				{/if}
 			</div>
 		</section>
 	{:else if flag === 'failed'}
 		<p role="alert">{FAILED}</p>
-		<a href={resolve(GOOGLE_PAGE)}>{TRY_AGAIN}</a>
+		<div class="actions">
+			<a class="button quiet" href={resolve(GOOGLE_PAGE)}>{TRY_AGAIN}</a>
+		</div>
 	{:else}
-		<a href={resolve(GOOGLE_PAGE)}>{TRY_AGAIN}</a>
+		<div class="actions">
+			<a class="button quiet" href={resolve(GOOGLE_PAGE)}>{TRY_AGAIN}</a>
+		</div>
 	{/if}
 </main>
-
-<style>
-	.eyebrow {
-		text-transform: uppercase;
-		letter-spacing: 0.12em;
-		font-size: 0.8rem;
-	}
-	.choices {
-		display: grid;
-		gap: 1rem;
-		max-width: 30rem;
-		margin-top: 1rem;
-	}
-</style>

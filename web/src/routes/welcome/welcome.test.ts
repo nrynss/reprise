@@ -13,6 +13,7 @@ import {
 	fetchWelcome,
 	formatClock,
 	initialWelcome,
+	isDemo,
 	liveNotice,
 	queryValue,
 	recordLabel,
@@ -45,6 +46,15 @@ describe('catalog state', () => {
 		expect(initialWelcome('').ready).toBe(true);
 		expect(initialWelcome('?seed=1').mode).toBe('seeded');
 		expect(emptyWelcome().ready).toBe(false);
+	});
+
+	it('wears the demo badge behind the fixture flag only', () => {
+		expect(isDemo('?fixture=1')).toBe(true);
+		expect(isDemo('?seed=1')).toBe(false);
+		expect(isDemo('')).toBe(false);
+		expect(initialWelcome('?fixture=1').demo).toBe(true);
+		expect(initialWelcome('?seed=1').demo).toBe(false);
+		expect(emptyWelcome().demo).toBe(false);
 	});
 });
 

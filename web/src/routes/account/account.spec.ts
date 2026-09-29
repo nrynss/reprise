@@ -136,10 +136,11 @@ test('the account page shares the gallery shell and pill buttons', async ({ page
 	await expect(page.getByText('Season one')).toHaveCount(0);
 	const shell = page.locator('main');
 	await expect(shell).toBeVisible();
-	expect(await shell.evaluate((element) => getComputedStyle(element).maxWidth)).toBe('832px');
 	const box = await shell.boundingBox();
 	const viewport = page.viewportSize();
 	if (box === null || viewport === null) throw new Error('The page reported no layout.');
+	expect(box.width).toBeLessThanOrEqual(1025);
+	expect(box.width).toBeGreaterThan(1000);
 	const left = box.x;
 	const right = viewport.width - (box.x + box.width);
 	expect(Math.abs(left - right)).toBeLessThanOrEqual(2);
@@ -154,6 +155,69 @@ test('the account page shares the gallery shell and pill buttons', async ({ page
 	expect(await accountLink.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(
 		'rgb(232, 163, 61)'
 	);
+});
+
+for (const width of [375, 768, 1280, 1920]) {
+	test(`the account layout holds at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 800 });
+		await page.goto('/account');
+		const scroll = await page.evaluate(() => ({
+			scroll: document.documentElement.scrollWidth,
+			inner: window.innerWidth
+		}));
+		expect(scroll.scroll, `sideways scroll at ${width}px`).toBeLessThanOrEqual(
+			scroll.inner + 1
+		);
+		const box = await page.locator('main').boundingBox();
+		if (box === null) throw new Error('The page reported no layout.');
+		expect(box.width, `main width at ${width}px`).toBeLessThanOrEqual(1025);
+		if (width === 375) {
+			const heights = await page.locator('button, .button').evaluateAll((controls) =>
+				controls.map((entry) => (entry as HTMLElement).getBoundingClientRect().height)
+			);
+			for (const height of heights) {
+				expect(height, `tap target at ${width}px`).toBeGreaterThanOrEqual(43.5);
+			}
+		}
+	});
+}
+
+test('a signed in device names its shared episodes', async ({ page }) => {
+	await acceptCodes(page);
+	await page.route('**/api/login/verify', async (route) => {
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: '{"ok":true}'
+		});
+	});
+	const writes: unknown[] = [];
+	await page.route('**/api/account/name', async (route) => {
+		expect(route.request().method()).toBe('PUT');
+		writes.push(route.request().postDataJSON());
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ email: ADDRESS, display_name: 'Mara' })
+		});
+	});
+	await page.route('**/api/account', async (route) => {
+		await route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ email: ADDRESS, display_name: '' })
+		});
+	});
+	await page.goto('/account');
+	await requestFrom(page);
+	await page.getByLabel('Six digit code').fill('123456');
+	await page.getByRole('button', { name: 'Check the code' }).click();
+	const name = page.getByLabel('Name on shared episodes');
+	await expect(name).toBeVisible();
+	await name.fill('Mara');
+	await page.getByRole('button', { name: 'Save the name' }).click();
+	await expect(page.getByText('Name saved.')).toBeVisible();
+	expect(writes).toEqual([{ display_name: 'Mara' }]);
 });
 
 test('a capped resend names the wait and reopens after it', async ({ page }) => {

@@ -70,3 +70,37 @@ test('the welcome screen passes both gates', async ({ page }) => {
 		);
 	}
 });
+
+test('a fixture teaser wears the demo badge, and the live season does not', async ({
+	page
+}) => {
+	await page.goto('/welcome?fixture=1');
+	await expect(page.getByText('Demo', { exact: true })).toBeVisible();
+	await page.goto(EMPTY);
+	await expect(page.getByText('Demo', { exact: true })).toHaveCount(0);
+});
+
+for (const width of [375, 768, 1280, 1920]) {
+	test(`the welcome layout holds at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 800 });
+		await page.goto(SEEDED);
+		const scroll = await page.evaluate(() => ({
+			scroll: document.documentElement.scrollWidth,
+			inner: window.innerWidth
+		}));
+		expect(scroll.scroll, `sideways scroll at ${width}px`).toBeLessThanOrEqual(
+			scroll.inner + 1
+		);
+		const box = await page.locator('main').boundingBox();
+		if (box === null) throw new Error('The page reported no layout.');
+		expect(box.width, `main width at ${width}px`).toBeLessThanOrEqual(1025);
+		if (width === 375) {
+			const heights = await page.locator('button, .button').evaluateAll((controls) =>
+				controls.map((entry) => (entry as HTMLElement).getBoundingClientRect().height)
+			);
+			for (const height of heights) {
+				expect(height, `tap target at ${width}px`).toBeGreaterThanOrEqual(43.5);
+			}
+		}
+	});
+}

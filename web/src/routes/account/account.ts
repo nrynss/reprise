@@ -21,6 +21,37 @@ export const SEND_LIMITED = 'send_limited';
 // a contract change until it lands.
 export const SIGNOUT_PATH = '/api/login/signout';
 
+// ACCOUNT_PATH reads the caller address beside its shared name. A guest
+// answers 401, because there is no account to read.
+export const ACCOUNT_PATH = '/api/account';
+
+// NAME_PATH writes the caller shared name. The server trims it, keeps at
+// most 60 characters, and refuses control characters. An empty name
+// clears the stored value.
+export const NAME_PATH = '/api/account/name';
+
+// UNAUTHORIZED answers a guest on either account route. Guests hold no
+// address, so there is no account to read or rename.
+export const UNAUTHORIZED = 'unauthorized';
+
+// NAME_LABEL names the shared name field on the signed in screen.
+export const NAME_LABEL = 'Name on shared episodes';
+
+// NAME_HELP says where the shared name appears.
+export const NAME_HELP = 'Shared episodes show this name beside the title.';
+
+// SAVE_NAME names the button that stores the shared name.
+export const SAVE_NAME = 'Save the name';
+
+// NAME_SAVED confirms the shared name reached the server.
+export const NAME_SAVED = 'Name saved. New shared episodes carry it.';
+
+// NAME_INVALID answers a name the server refused.
+export const NAME_INVALID = 'That name did not fit. Keep it short and try again.';
+
+// NAME_FAILED answers a save the page has no words for.
+export const NAME_FAILED = "Couldn't save the name. Try again.";
+
 // DEFAULT_RESEND_WAIT fills in when a capped answer names no wait. The
 // page still honours the header first, so this only covers a bare 429.
 export const DEFAULT_RESEND_WAIT = 60;
@@ -134,6 +165,101 @@ export function readRetryAfterSeconds(response: Response): number | undefined {
 	if (header === null) return undefined;
 	const trimmed = header.trim();
 	return /^\d+$/.test(trimmed) ? Number(trimmed) : undefined;
+}
+
+// Account names the address beside its shared name. DisplayName is
+// empty while the caller never set one.
+export interface Account {
+	email: string;
+	displayName: string;
+}
+
+// parseAccount decodes an account body. It throws an ApiError naming the
+// envelope code the server refused with.
+export function parseAccount(raw: string, status: number): Account {
+	let decoded: unknown;
+	try {
+		decoded = JSON.parse(raw);
+	} catch {
+		throw new ApiError('The server answer held malformed JSON.', 'http_error', status);
+	}
+	if (typeof decoded !== 'object' || decoded === null) {
+		throw new ApiError('The server answer held malformed JSON.', 'http_error', status);
+	}
+	const body = decoded as Record<string, unknown>;
+	if (typeof body['email'] !== 'string' || typeof body['display_name'] !== 'string') {
+		const parsed = parseErrorEnvelope(raw);
+		if (parsed.ok) {
+			throw new ApiError(parsed.value.error.message, parsed.value.error.code, status);
+		}
+		throw new ApiError('The server answer held malformed JSON.', 'http_error', status);
+	}
+	return { email: body['email'], displayName: body['display_name'] };
+}
+
+// getAccount runs one account read and decodes its answer. It throws an
+// ApiError when the request never leaves or when the server refuses.
+async function getAccount(fetchFn: FetchFn, path: string): Promise<Account> {
+	let response: Response;
+	try {
+		response = await fetchFn(path);
+	} catch {
+		throw new ApiError('The request could not reach the server.', 'network', 0);
+	}
+	const raw = await response.text();
+	if (!response.ok) {
+		const parsed = parseErrorEnvelope(raw);
+		if (parsed.ok) {
+			throw new ApiError(parsed.value.error.message, parsed.value.error.code, response.status);
+		}
+		throw new ApiError(
+			`The server answered ${response.status}.`,
+			'http_error',
+			response.status
+		);
+	}
+	return parseAccount(raw, response.status);
+}
+
+// putName runs one shared name write and decodes its answer. It throws
+// an ApiError when the request never leaves or when the server refuses.
+async function putName(fetchFn: FetchFn, name: string): Promise<Account> {
+	let response: Response;
+	try {
+		response = await fetchFn(NAME_PATH, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ display_name: name })
+		});
+	} catch {
+		throw new ApiError('The request could not reach the server.', 'network', 0);
+	}
+	const raw = await response.text();
+	if (!response.ok) {
+		const parsed = parseErrorEnvelope(raw);
+		if (parsed.ok) {
+			throw new ApiError(parsed.value.error.message, parsed.value.error.code, response.status);
+		}
+		throw new ApiError(
+			`The server answered ${response.status}.`,
+			'http_error',
+			response.status
+		);
+	}
+	return parseAccount(raw, response.status);
+}
+
+// fetchAccount reads the caller account with its shared name. A guest
+// throws with the unauthorized code, so the caller leaves the field
+// blank instead of showing another diary name.
+export async function fetchAccount(fetchFn: FetchFn): Promise<Account> {
+	return getAccount(fetchFn, ACCOUNT_PATH);
+}
+
+// saveDisplayName stores one shared name and answers what the server
+// kept. An empty name clears the stored value.
+export async function saveDisplayName(fetchFn: FetchFn, name: string): Promise<Account> {
+	return putName(fetchFn, name);
 }
 
 // postJson runs one JSON call and reads its answer. It throws an ApiError
