@@ -113,7 +113,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
              web/src/lib/voice/record-state.ts, web/src/lib/voice/processing-state.ts
-status:     in-progress:review-r1:t9.3-rev-r1@c99a918e6f7f37e7f1f339566d17177471e18c5d
+status:     in-progress:land:t9.3-rem-r1@91a8102
 ```
 * Record uses the shared shell. It rendered as a white, unstyled page on 2026-09-29. Start is the
   one large primary button, centred, and the live view keeps the clock and End in reach on a phone.
@@ -126,6 +126,14 @@ status:     in-progress:review-r1:t9.3-rev-r1@c99a918e6f7f37e7f1f339566d17177471
 **Done when:** The layout checks from T9.2 pass on both pages at all four widths, the specs pass on the new
 wording, and the gate passes in a fresh worktree.
 
+**Decision, 2026-09-29.** Owns widened to
+`web/src/routes/record/confirm-processing.spec.ts` and
+`web/src/routes/record/mock-session.spec.ts`, the specs that pin the old
+`{state}: {detail}` rendering. Round 1 returned 3 H stale-pin findings:
+the status-word rows replace that rendering by design, same pattern as
+T7.82 and T9.6. The remediation updates the asserts to the new named
+notices and rows with no product change.
+
 ### T9.4: Gallery
 ```yaml
 requires:   T9.1, T9.2
@@ -133,7 +141,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/threads/threads.ts,
              web/src/routes/threads/gallery-cards.test.ts, web/src/routes/gallery.spec.ts
-status:     in-progress:implement:t9.4-impl
+status:     in-progress:review-r1:t9.4-rev-r1@69f85387c6e5c2118a0fc8a9ad5aface51269aac
 ```
 * Cards on the shared `.cards` grid, all the same height. A card shows its cover when `cover_path`
   is set, and otherwise the "EP.12" tile.
@@ -213,7 +221,7 @@ requires:   T9.1, T9.2
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/account/, web/src/routes/share/, web/src/routes/welcome/
-status:     in-progress:implement:t9.8-impl
+status:     in-progress:review-r1:t9.8-rev-r1@8620d0b372ff67cdf73f398fb97423e3ef382df5
 ```
 * **Account and delete pages.** Use the shared shell and buttons, with a signed-in "Name on shared
   episodes" field saving through `PUT /api/account/name`. The copy follows `voice.md`.
