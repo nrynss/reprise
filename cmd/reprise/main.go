@@ -768,6 +768,12 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: protect media: %w", err)
 	}
+	// loginAll serves the sign-in pair beside the sign-out route. The
+	// pair owns its mux and the sign-out owns its handler, so the boot
+	// joins them here and the mount wraps all three alike.
+	loginAll := http.NewServeMux()
+	loginAll.Handle("/api/login/", identitySvc.LoginHandler())
+	loginAll.Handle("POST /api/login/signout", identitySvc.SignOutHandler())
 	if err := api.Mount(mux, api.Dependencies{
 		Gate:              spendGate,
 		Rule:              outer,
@@ -777,7 +783,7 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 		SessionEnd:        sessionEnd,
 		Threads:           threads,
 		Admin:             admin,
-		Login:             identitySvc.LoginHandler(),
+		Login:             loginAll,
 		Uploads:           uploads,
 		Media:             media,
 		Events:            events,

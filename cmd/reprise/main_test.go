@@ -3019,6 +3019,8 @@ func TestPublicDetailReloadCarriesSharePath(t *testing.T) {
 // TestBootMountsLoginRoutes checks the boot wires the sign-in code routes
 // behind the guest middleware. Empty bodies answer 400, which proves the
 // table mounted the login handler instead of a stub, without sending mail.
+// The sign-out route answers 200 with a fresh guest cookie, which proves
+// the boot joined it beside the pair.
 func TestBootMountsLoginRoutes(t *testing.T) {
 	loaded := bootSettings(t, t.TempDir())
 	ctx, stop := context.WithCancel(t.Context())
@@ -3044,5 +3046,25 @@ func TestBootMountsLoginRoutes(t *testing.T) {
 		if body.Error.Code != identity.CodeInvalidRequest {
 			t.Fatalf("POST %s code = %q, want invalid request", path, body.Error.Code)
 		}
+	}
+	signout := httptest.NewRecorder()
+	mux.ServeHTTP(signout, httptest.NewRequest(http.MethodPost, "/api/login/signout", strings.NewReader(`{}`)))
+	if signout.Code != http.StatusOK {
+		t.Fatalf("POST /api/login/signout status = %d, want 200", signout.Code)
+	}
+	var ok struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(signout.Body.Bytes(), &ok); err != nil || !ok.OK {
+		t.Fatalf("POST /api/login/signout body = %q, want the shared ok shape", signout.Body.String())
+	}
+	var hasCookie bool
+	for _, c := range signout.Result().Cookies() {
+		if c.Name == identity.CookieName {
+			hasCookie = true
+		}
+	}
+	if !hasCookie {
+		t.Fatalf("POST /api/login/signout set no %q cookie", identity.CookieName)
 	}
 }

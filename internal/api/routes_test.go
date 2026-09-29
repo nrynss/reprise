@@ -49,6 +49,7 @@ var expectedTable = []Route{
 	{Method: "POST", Pattern: "/api/admin/limits/owner"},
 	{Method: "POST", Pattern: "/api/login/code"},
 	{Method: "POST", Pattern: "/api/login/verify"},
+	{Method: "POST", Pattern: "/api/login/signout"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
 
@@ -300,6 +301,7 @@ func TestMountServesHandlersThroughChain(t *testing.T) {
 		{http.MethodPost, "/api/admin/limits/owner"},
 		{http.MethodPost, "/api/login/code"},
 		{http.MethodPost, "/api/login/verify"},
+		{http.MethodPost, "/api/login/signout"},
 		{http.MethodPost, "/api/uploads"},
 		{http.MethodPut, "/api/uploads/e01/chunks/0"},
 		{http.MethodGet, "/media/blob1"},

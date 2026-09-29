@@ -48,8 +48,9 @@ type Route struct {
 // handler takes the upload prefix later, mounted at its base path. The job
 // stream takes the events route later, serving one job topic. The blob
 // store takes the media route later, behind the ownership check. The admin
-// trio takes the limits handler, behind the owner proof. The login pair
-// takes the sign-in handler, behind the guest middleware like the rest.
+// trio takes the limits handler, behind the owner proof. The login trio
+// takes the sign-in handler beside the sign-out route, behind the guest
+// middleware like the rest.
 var routeTable = []Route{
 	{Method: "POST", Pattern: "/api/sessions"},
 	{Method: "POST", Pattern: "/api/sessions/{id}/end"},
@@ -69,6 +70,7 @@ var routeTable = []Route{
 	{Method: "POST", Pattern: limits.PatternOwnerLimit},
 	{Method: "POST", Pattern: "/api/login/code"},
 	{Method: "POST", Pattern: "/api/login/verify"},
+	{Method: "POST", Pattern: "/api/login/signout"},
 	{Method: "GET", Pattern: "/media/{id}"},
 }
 
@@ -141,8 +143,8 @@ type Dependencies struct {
 	Threads http.Handler
 	// Admin answers the caps, the switch, and spend.
 	Admin http.Handler
-	// Login serves the sign-in code request and verify routes through
-	// its own mux.
+	// Login serves the sign-in code request, the verify, and the sign-out
+	// routes through its mux.
 	Login http.Handler
 	// Uploads receives stem chunks.
 	Uploads http.Handler
@@ -227,7 +229,7 @@ func (d Dependencies) handlerFor(route Route) http.Handler {
 		"POST " + limits.PatternPause,
 		"POST " + limits.PatternOwnerLimit:
 		return d.Admin
-	case "POST /api/login/code", "POST /api/login/verify":
+	case "POST /api/login/code", "POST /api/login/verify", "POST /api/login/signout":
 		return d.Login
 	case " " + UploadBasePath + "/":
 		return d.Uploads
