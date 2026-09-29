@@ -229,7 +229,7 @@ fixture-ok: yes
 size:       M · frontier
 owns:       internal/privacy/account.go, internal/privacy/account_test.go,
              web/src/routes/account/delete/
-status:     in-progress:implement:t8.7-impl
+status:     in-progress:review-r1:t8.7-rev-r1@bcb16c9e8feeb930d576809b3ead4f8c9170e43a
 ```
 * Deleting needs a fresh code, typed within the last 10 minutes, as re-authentication.
 * It erases every episode through the existing erase fan-out. It then deletes the identity rows,
@@ -277,6 +277,32 @@ The role changes nothing about ownership.
 **Done when:** Tests cover a guest, a signed-in non-operator, an email operator, and a Google operator
 against a stubbed identity. The gate passes in a fresh worktree. T7.4's live check then runs inside
 T8.10b, because a task may not require a higher id.
+
+### T8.14: Account-deletion wiring
+```yaml
+requires:   T8.7, T8.13
+fixture-ok: yes
+size:       S · mid
+owns:       cmd/reprise/privacy.go, internal/api/routes.go, internal/api/routes_test.go,
+             cmd/reprise/main.go, cmd/reprise/main_test.go,
+             web/src/routes/account/+page.svelte, web/src/routes/account/account.spec.ts
+status:     not-started
+```
+T8.7 ships deletion behind an unmounted handler and an unregistered job
+kind: the route 404s and a restart drops a running deletion. The account
+page still holds its entry inert.
+
+* Register the account-delete kind beside the erasure kind in
+  `cmd/reprise/privacy.go`, so restarts resume a deletion.
+* Mount `POST /api/account/delete` behind the guest middleware in the
+  route table and the boot, with golden and mirror updates if those
+  files list routes individually.
+* Flip the inert delete entry on the account page to link
+  `/account/delete`, and update its spec.
+
+**Done when:** A booted binary deletes an account end to end through the
+route, survives a restart mid-deletion, and the account page links the
+delete screen. The gate passes in a fresh worktree.
 
 ### T8.13: Operator wiring
 ```yaml
