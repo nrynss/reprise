@@ -2566,6 +2566,54 @@ circled topic is ever stored.
 probe returns entities and key phrases. Threads still needs two rendered episodes that share a
 name or a topic before a row forms. Say so in the handoff.
 
+### T7.81: The episode page's links are buttons, and live notices speak to people
+```yaml
+requires:   T7.77
+fixture-ok: yes
+size:       S · mid
+owns:       web/src/routes/episode/[id]/+page.svelte, web/src/lib/components/SeasonNav.svelte,
+             web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
+             web/src/lib/editor/draft.ts, web/src/lib/editor/draft.test.ts,
+             web/src/lib/voice/processing-state.ts, web/src/lib/voice/processing-state.test.ts,
+             web/src/lib/copy.test.ts
+status:     not-started
+```
+**Defect 1.** On 2026-09-29 the owner saw "Threads" and "Edit" as bare links on the episode page.
+T7.77 styled only the Gallery and Threads pages and the back link. In the `<nav aria-label="Season">`
+of `web/src/routes/episode/[id]/+page.svelte`, the live branch still writes
+`<a href={resolve('/threads')}>Threads</a>` and `<a href={resolve(editHref)}>Edit</a>`. The
+fixture branch writes bare "Gallery" and "Threads".
+
+**Defect 2.** Several notices that a real user reads use the build's own vocabulary:
+* `threads.ts`: "Live episode from the wired detail.", "The season endpoint refused, so no rows
+  render. Retry the load.", and "The episode endpoint refused, so nothing renders. Retry the load."
+* `processing-state.ts`: "Following the job."
+* `draft.ts`: "Draft loaded." and "Draft loaded. No words stored yet."
+
+**Change.**
+1. Give `SeasonNav` an optional `current` of `'none'`, and use it on the episode page, so Gallery
+   and Threads render as the same pill tabs with neither filled. Render Edit as a filled primary
+   pill, in the episode page's own button style, beside them. Keep `GalleryLink` for the missing and
+   refused views, where the page shows no nav.
+2. Rewrite the live notices in plain words. Suggested copy:
+   * "Live episode from the wired detail." becomes no notice at all. The page already shows the
+     episode.
+   * "The season endpoint refused…" becomes "Your episodes did not load. Retry."
+   * "The episode endpoint refused…" becomes "This episode did not load. Retry."
+   * "Following the job." becomes "Transcribing your take."
+   * "Draft loaded." becomes no notice. "Draft loaded. No words stored yet." becomes "No
+     transcript yet."
+   Fixture-mode strings stay as they are. Only a person running the scripted season sees them.
+3. Add `web/src/lib/copy.test.ts`. It imports every live notice string that the three controllers
+   export or return. It fails when one contains `endpoint`, `wired`, `fixture`, `scripted`, `job`,
+   `backend` or `detail`. Export the strings as named constants so the test can read them.
+
+**Tests.** `copy.test.ts` as above. A component check that the episode page's nav renders Threads
+as a tab and Edit as a primary pill. The existing specs change to the new wording.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree. Restoring "Live episode from
+the wired detail." fails `copy.test.ts`.
+
 ---
 
 ## Exit criteria
