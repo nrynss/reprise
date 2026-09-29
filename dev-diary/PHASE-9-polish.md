@@ -141,7 +141,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/threads/threads.ts,
              web/src/routes/threads/gallery-cards.test.ts, web/src/routes/gallery.spec.ts
-status:     in-progress:review-r1:t9.4-rev-r1@69f85387c6e5c2118a0fc8a9ad5aface51269aac
+status:     in-progress:remediate-r1:t9.4-rem-r1
 ```
 * Cards on the shared `.cards` grid, all the same height. A card shows its cover when `cover_path`
   is set, and otherwise the "EP.12" tile.
@@ -228,7 +228,7 @@ requires:   T9.1, T9.2
 fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/account/, web/src/routes/share/, web/src/routes/welcome/
-status:     in-progress:land:t9.8-rem-r1@b26bc0709a0263da057a222b3e40fb9e75e04f2f
+status:     done:63972cd
 ```
 * **Account and delete pages.** Use the shared shell and buttons, with a signed-in "Name on shared
   episodes" field saving through `PUT /api/account/name`. The copy follows `voice.md`.
@@ -289,6 +289,14 @@ The gate passes in a fresh worktree three times in a row, because the gate grew.
 
 ### What exists now
 
+T9.8 landed at 63972cd after round 2 APPROVE with zero residue.
+Account, share and welcome ride the shared shell with the display
+name field, the byline, and the one-line footer. The account shell
+pin now asserts the new measure, closing the interim red. Round 1
+had one out of scope H on the mirrored PUT type; owns widened to
+that line by decision and the remediation fixed it with no runtime
+change. Reviewed commits 8620d0b and b26bc07 rebased clean. Spec
+pins pass on the landed commit.
 T9.3 landed at 66d644f after round 2 APPROVE with zero residue.
 Record and processing ride the shared shell with a centred Start,
 phone-reachable clock and End, four status-word rows, and plain
