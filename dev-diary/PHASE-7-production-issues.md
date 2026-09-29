@@ -2418,7 +2418,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       internal/episode/query.go, internal/episode/service.go, internal/privacy/publish.go,
              internal/privacy/publish_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:land:t7.80-impl@3e54a566fec1cfb03d5550f662b30e2cba56dc65
+status:     done:64eccd3
 ```
 T7.76 round 1 recorded an out of scope H finding. The binary
 mounts the episode detail with a nil share lookup, so a public
@@ -2630,6 +2630,12 @@ the wired detail." fails `copy.test.ts`.
 
 ### What exists now
 
+T7.80 landed at 64eccd3 after round 1 APPROVE with zero findings.
+The episode service carries an owner-scoped share token reader, and
+the binary mounts the detail through it, so a reloaded public detail
+answers the share path on every load. Reviewed commit 3e54a56
+rebased clean. Race tests on episode, privacy, and the binary pass
+on the landed commit.
 T7.77 landed at bca9d69 after round 1 APPROVE with zero findings.
 One styled gallery link and season tabs on every page. The tree
 matches reviewed commit 8e9e466. Main had moved, so the landing
