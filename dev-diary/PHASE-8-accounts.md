@@ -110,7 +110,7 @@ requires:   none
 fixture-ok: yes
 size:       XS · light
 owns:       internal/settings/, config/, deploy/, cmd/reprise/boot_test.go
-status:     in-progress:review-r1:t8.3-rev-r1@3b838c3a592004488b14b51ae8a3a9a93a73650a
+status:     in-progress:remediate-r1:t8.3-rem-r1
 ```
 Every setting this phase needs, added once so later tasks share no path.
 
