@@ -5,7 +5,7 @@ import type { ErrorEnvelope } from '@nrynss/chaaya/wire';
 
 // HttpMethod names the methods the table uses. An empty method on a route
 // means every method, which suits a subtree such as the upload prefix.
-export type HttpMethod = 'GET' | 'POST' | 'DELETE';
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
 // ApiRoute names one entry of the route table. Method and pattern follow
 // the server table field for field.
