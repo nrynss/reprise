@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import DemoBadge from '$lib/components/DemoBadge.svelte';
 	import SeasonNav from '$lib/components/SeasonNav.svelte';
 	import { pageTitle } from '$lib/shell';
 	import {
@@ -12,13 +13,17 @@
 		formatEpisodeNumber,
 		listThreads,
 		liveQuoteHref,
+		LIVE_THREADS_EMPTY_NOTICE,
+		LIVE_THREADS_FAILED_NOTICE,
+		LIVE_THREADS_LOADING_NOTICE,
+		LIVE_THREADS_NOTICE,
 		queryValue,
 		quoteHref,
 		runSeasonGates
 	} from './threads';
 
 	let ready = $state(false);
-	let notice = $state('Loading the threads.');
+	let notice = $state(LIVE_THREADS_LOADING_NOTICE);
 	let failed = $state(false);
 	let live = $state(true);
 	const blank = listThreads(false);
@@ -42,9 +47,7 @@
 			people = threads.people;
 			topics = threads.topics;
 			ready = true;
-			notice = fifthReady
-				? 'Scripted threads with episode five folded in. No backend needed.'
-				: 'Scripted threads. No backend needed.';
+			notice = LIVE_THREADS_NOTICE;
 		} else {
 			live = true;
 			try {
@@ -54,12 +57,12 @@
 				ready = true;
 				notice =
 					index.names.length === 0 && index.topics.length === 0
-						? 'Nothing threads yet. Two episodes must name someone before a row forms.'
-						: 'Live threads from stored mentions. Quotes and links, nothing else.';
+						? LIVE_THREADS_EMPTY_NOTICE
+						: LIVE_THREADS_NOTICE;
 			} catch {
 				ready = true;
 				failed = true;
-				notice = 'The thread index refused, so nothing renders. Retry the load.';
+				notice = LIVE_THREADS_FAILED_NOTICE;
 			}
 		}
 		if (queryValue(search, 'gate') === '1') {
@@ -81,7 +84,7 @@
 	<title>{pageTitle('Threads')}</title>
 	<meta
 		name="description"
-		content="The thread across episodes: people, promises, and circling topics. Quotes and links, nothing else."
+		content="People and topics that keep coming up, and the moments you mentioned them."
 	/>
 </svelte:head>
 
@@ -89,10 +92,14 @@
 	<p class="eyebrow">The thread across episodes</p>
 	<h1>What keeps coming up</h1>
 	<p class="sub">
-		People, promises, and circling topics. Each one links to the moment it was
-		said. No scores, no gauges. Quotes and links, nothing else.
+		People and topics that keep coming up, and the moments you mentioned them.
 	</p>
-	<p role="status">{notice}</p>
+	{#if !live}
+		<DemoBadge />
+	{/if}
+	{#if notice}
+		<p role="status">{notice}</p>
+	{/if}
 	{#if failed}
 		<button onclick={() => void load()}>Retry the threads</button>
 	{/if}
@@ -102,27 +109,27 @@
 
 	{#if ready && !failed}
 		{#if !live}
-			<section aria-label="Open commitments">
+			<section class="section" aria-label="Open commitments">
 				<h2>Open commitments</h2>
 				{#each commitments as item (item.id)}
-					<article aria-label={item.name}>
+					<article class="card" aria-label={item.name}>
 						<h3>{item.name}</h3>
 						{#if item.who}<p class="who">{item.who}</p>{/if}
 						<p class="facts">{item.count}{item.opened ? ` · since ${item.opened}` : ''}</p>
 						{#if item.status}
-							<p class="status">{item.status === 'open' ? 'Open' : 'Resolved'}</p>
+							<p class="state">{item.status === 'open' ? 'Open' : 'Resolved'}</p>
 						{/if}
-						<ul>
+						<ul class="quotes">
 							{#each item.quotes as quote (`${quote.episode}-${quote.offset}`)}
 								<li>
 									<a href={resolve(quoteHref(quote.episode, quote.offset))}>
-										<span
+										<span class="when"
 											>{formatEpisodeNumber(episodeNumber(quote.episode))} · {formatClock(
 												quote.offset
 											)}</span
 										>
-										<span>“{quote.text}”</span>
-										<span class="listen">Play from this quote</span>
+										<span class="words">“{quote.text}”</span>
+										<span class="open">Play from this quote</span>
 									</a>
 								</li>
 							{/each}
@@ -131,24 +138,24 @@
 				{/each}
 			</section>
 
-			<section aria-label="People who recur">
+			<section class="section" aria-label="People who recur">
 				<h2>People who recur</h2>
 				{#each people as item (item.id)}
-					<article aria-label={item.name}>
+					<article class="card" aria-label={item.name}>
 						<h3>{item.name}</h3>
 						{#if item.who}<p class="who">{item.who}</p>{/if}
 						<p class="facts">{item.count}</p>
-						<ul>
+						<ul class="quotes">
 							{#each item.quotes as quote (`${quote.episode}-${quote.offset}`)}
 								<li>
 									<a href={resolve(quoteHref(quote.episode, quote.offset))}>
-										<span
+										<span class="when"
 											>{formatEpisodeNumber(episodeNumber(quote.episode))} · {formatClock(
 												quote.offset
 											)}</span
 										>
-										<span>“{quote.text}”</span>
-										<span class="listen">Play from this quote</span>
+										<span class="words">“{quote.text}”</span>
+										<span class="open">Play from this quote</span>
 									</a>
 								</li>
 							{/each}
@@ -157,23 +164,23 @@
 				{/each}
 			</section>
 
-			<section aria-label="Circled topics">
+			<section class="section" aria-label="Circled topics">
 				<h2>Circled topics</h2>
 				{#each topics as item (item.id)}
-					<article aria-label={item.name}>
+					<article class="card" aria-label={item.name}>
 						<h3>{item.name}</h3>
 						<p class="facts">{item.count}</p>
-						<ul>
+						<ul class="quotes">
 							{#each item.quotes as quote (`${quote.episode}-${quote.offset}`)}
 								<li>
 									<a href={resolve(quoteHref(quote.episode, quote.offset))}>
-										<span
+										<span class="when"
 											>{formatEpisodeNumber(episodeNumber(quote.episode))} · {formatClock(
 												quote.offset
 											)}</span
 										>
-										<span>“{quote.text}”</span>
-										<span class="listen">Play from this quote</span>
+										<span class="words">“{quote.text}”</span>
+										<span class="open">Play from this quote</span>
 									</a>
 								</li>
 							{/each}
@@ -182,19 +189,19 @@
 				{/each}
 			</section>
 		{:else}
-			<section aria-label="People who recur">
+			<section class="section" aria-label="People who recur">
 				<h2>People who recur</h2>
 				{#each liveNames as item (item.key)}
-					<article aria-label={item.display}>
+					<article class="card" aria-label={item.display}>
 						<h3>{item.display}</h3>
 						<p class="facts">{item.mentionCount} mentions · {item.episodeCount} episodes</p>
-						<ul>
+						<ul class="quotes">
 							{#each item.episodes as hit (`${hit.episodeId}-${hit.offset}`)}
 								<li>
 									<a href={resolve(liveQuoteHref(hit.episodeId, hit.offset))}>
-										<span>{formatEpisodeNumber(hit.number)} · word {hit.offset}</span>
-										<span>“{hit.quote}”</span>
-										<span class="listen">Open at this quote</span>
+										<span class="when">{formatEpisodeNumber(hit.number)} · word {hit.offset}</span>
+										<span class="words">“{hit.quote}”</span>
+										<span class="open">Open at this quote</span>
 									</a>
 								</li>
 							{/each}
@@ -203,19 +210,19 @@
 				{/each}
 			</section>
 
-			<section aria-label="Circled topics">
+			<section class="section" aria-label="Circled topics">
 				<h2>Circled topics</h2>
 				{#each liveTopics as item (item.key)}
-					<article aria-label={item.display}>
+					<article class="card" aria-label={item.display}>
 						<h3>{item.display}</h3>
 						<p class="facts">{item.mentionCount} mentions · {item.episodeCount} episodes</p>
-						<ul>
+						<ul class="quotes">
 							{#each item.episodes as hit (`${hit.episodeId}-${hit.offset}`)}
 								<li>
 									<a href={resolve(liveQuoteHref(hit.episodeId, hit.offset))}>
-										<span>{formatEpisodeNumber(hit.number)} · word {hit.offset}</span>
-										<span>“{hit.quote}”</span>
-										<span class="listen">Open at this quote</span>
+										<span class="when">{formatEpisodeNumber(hit.number)} · word {hit.offset}</span>
+										<span class="words">“{hit.quote}”</span>
+										<span class="open">Open at this quote</span>
 									</a>
 								</li>
 							{/each}
@@ -232,70 +239,8 @@
 </main>
 
 <style>
-	:root {
-		color-scheme: dark;
-		--paper: #191410;
-		--raised: #241d15;
-		--ink: #f4edde;
-		--muted: #d9cfbb;
-		--accent: #e8a33d;
-		--on-accent: #201809;
-		--line: #5a4f41;
-	}
-	main {
-		max-width: 44rem;
-		margin: 0 auto;
-		padding: 3rem 1.5rem 5rem;
-		font-family: system-ui, sans-serif;
-		background: var(--paper);
-		color: var(--ink);
-	}
-	.eyebrow {
-		font-size: 0.75rem;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-		color: var(--accent);
-		margin: 0 0 0.5rem;
-	}
-	h1 {
-		font-size: 2rem;
-		margin: 0 0 0.5rem;
-		color: var(--ink);
-	}
-	.sub {
-		color: var(--muted);
-		line-height: 1.6;
-	}
-	button {
-		background: var(--accent);
-		color: var(--on-accent);
-		border: none;
-		border-radius: 100px;
-		padding: 0.55rem 1.1rem;
-		font-weight: 600;
+	.section .card {
 		margin-bottom: 1rem;
-	}
-	nav {
-		display: flex;
-		gap: 1rem;
-		margin: 1.5rem 0;
-	}
-	h2 {
-		font-size: 1.25rem;
-		margin: 2.5rem 0 1rem;
-		color: var(--ink);
-	}
-	article {
-		background: var(--raised);
-		border: 1px solid var(--line);
-		border-radius: 0.75rem;
-		padding: 1.25rem 1.5rem;
-		margin-bottom: 1rem;
-	}
-	article h3 {
-		margin: 0 0 0.25rem;
-		font-size: 1.35rem;
-		color: var(--ink);
 	}
 	.who {
 		color: var(--muted);
@@ -307,39 +252,40 @@
 		color: var(--muted);
 		margin: 0 0 0.75rem;
 	}
-	.status {
+	.state {
 		font-size: 0.8rem;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: var(--accent);
 		margin: 0 0 0.75rem;
 	}
-	ul {
+	.quotes {
 		list-style: none;
 		padding: 0;
-		margin: 0;
+		margin: 1rem 0 0;
+		border-top: 1px solid var(--line);
 	}
-	li a {
+	.quotes li {
+		padding: 0.75rem 0;
+		border-bottom: 1px solid var(--line);
+	}
+	.quotes a {
 		display: block;
-		border: 1px solid var(--line);
-		border-radius: 0.6rem;
-		padding: 0.7rem 0.9rem;
-		margin-top: 0.5rem;
-		color: var(--muted);
+		color: var(--ink);
 		text-decoration: none;
 		line-height: 1.55;
 	}
-	li a:hover {
-		border-color: var(--accent);
+	.quotes a:hover .words {
+		text-decoration: underline;
 	}
-	li a span:first-child {
+	.quotes .when {
 		display: block;
 		font-size: 0.75rem;
 		letter-spacing: 0.08em;
 		color: var(--accent);
 		margin-bottom: 0.25rem;
 	}
-	.listen {
+	.open {
 		display: block;
 		font-size: 0.8rem;
 		color: var(--accent);

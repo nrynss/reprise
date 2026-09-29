@@ -2619,6 +2619,17 @@ export function parseThreadsIndex(raw: string): LiveThreads {
 export function emptyLiveThreads(): LiveThreads {
 	return { names: [], topics: [] };
 }
+
+// Live thread notices in plain words. The loading line shows while the
+// index loads. The failed line names the retry with no machinery behind
+// it. The empty line shows while no two episodes name anyone yet. A
+// loaded index with threads shows no notice at all, and demo runs show
+// the badge beside the heading instead of a sentence.
+export const LIVE_THREADS_LOADING_NOTICE = 'Loading these threads.';
+export const LIVE_THREADS_FAILED_NOTICE = "Couldn't load these threads. Try again.";
+export const LIVE_THREADS_EMPTY_NOTICE =
+	'Nothing threads yet. They form once two episodes name someone.';
+export const LIVE_THREADS_NOTICE = '';
 // A refused read carries its status and the wait the server asked for, so
 // the gallery pauses on 429 and keeps its refusal line for every other failure.
 export class ReadRefused extends Error {
