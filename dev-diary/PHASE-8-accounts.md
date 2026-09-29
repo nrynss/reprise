@@ -589,6 +589,39 @@ and a guest sees no name field.
 
 **Done when:** The tests pass in Chromium and Firefox, and the gate passes in a fresh worktree.
 
+### T8.21: The admin page tells the truth about spend in plain words
+```yaml
+requires:   T8.13
+fixture-ok: yes
+size:       XS · mid
+owns:       web/src/routes/admin/
+status:     not-started
+```
+**Defect.** On 2026-09-29 the owner opened `/admin` as operator. It read "Spent $33.24 of $1000.00
+today. The ledger carries no history, so this page shows today only." and "Daily ceiling:
+$1000.00". Both are false. Keel v0.3.0 budgets never reset
+(https://github.com/nrynss/keel/issues/2), so $33.24 is all spend since 2026-09-19, and the ceiling is
+a lifetime one. The page also shows build vocabulary a person cannot act on: "Guest lookup" with an
+"Owner id" field, and "Past the cap, a guest sees the guest limit reached notice."
+
+**Change.**
+1. Spend reads "$33.24 spent in total. Spending does not reset each day yet." The cap reads
+   "Spending ceiling: $1000.00". When Keel ships budget periods and Reprise adopts them, a later
+   task restores the daily wording.
+2. Rename "Guest caps" to "Limits", with "Sessions per guest", "Longest session" and "Spending
+   ceiling".
+3. Remove the guest lookup by owner id. The operator has no way to learn an id. The route may stay
+   for tooling.
+4. Drop the sentence about what a guest sees past the cap. "Recording open" and "Pause sessions"
+   stay. Add one line under Pause: "Pausing stops new takes. A take already running finishes."
+5. Wording goes through the shared `copy.test.ts` banned-word check where the strings are
+   exported.
+
+**Tests.** The admin spec finds no "today", no "Owner id", and no "guest limit reached notice". It
+finds "spent in total".
+
+**Done when:** The spec passes, and the gate passes in a fresh worktree.
+
 ---
 
 ## Exit criteria
