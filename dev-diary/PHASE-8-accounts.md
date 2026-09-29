@@ -110,7 +110,7 @@ requires:   none
 fixture-ok: yes
 size:       XS · light
 owns:       internal/settings/, config/, deploy/, cmd/reprise/boot_test.go
-status:     in-progress:land:t8.3-rem-r1@0bf3ac6d21f904100f2cca683fd6695928174f69
+status:     done:0ab2f2c
 ```
 Every setting this phase needs, added once so later tasks share no path.
 
@@ -320,7 +320,13 @@ The remediation added a test beside the migrations that pins the
 provider subject uniqueness and the send lookup index, with both
 pins proved load-bearing by mutation. Reviewed commits d0e0e72 and
 39c385f rebased clean. Race tests pass on the landed commit.
-Nothing else yet. The phase opened on 2026-09-29.
+T8.3 landed at 0ab2f2c after round 2 APPROVE with zero residue.
+Round 1 had one H finding: five `cmd/reprise` tests sharing the
+boot helper failed on the new required keys. Owns widened to the
+helper by decision, and the remediation carries the keys there.
+Reviewed commits 3b838c3 and 0bf3ac6 rebased clean. Race tests on
+settings and the binary pass on the landed commit.
+Wave 1 is done. T8.4 unblocks on this landing.
 
 ### What surprised us
 
