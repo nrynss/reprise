@@ -291,7 +291,7 @@ requires:   T9.3, T9.4, T9.5, T9.6, T9.7, T9.8
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/copy.test.ts, web/tests/layout.spec.ts
-status:     not-started
+status:     in-progress:land:t9.9-rem-r1@764ca69
 ```
 * `copy.test.ts` scans every `.svelte` file under `web/src/routes` and every exported string in the
   page controllers. It fails on `voice.md`'s banned words, on "No backend", "Scripted", "survives a
@@ -302,6 +302,56 @@ status:     not-started
 
 **Done when:** Both guards pass. Restoring any one "Before" line from `voice.md` fails `copy.test.ts`.
 The gate passes in a fresh worktree three times in a row, because the gate grew.
+
+### T9.11: Plain words on the privacy and Google pages
+```yaml
+requires:   none
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/privacy/+page.svelte, web/src/routes/account/google/+page.svelte
+status:     in-progress:remediate-r1:t9.11-rem-r1
+```
+Two true copy positives the T9.9 guard caught in pages no Wave 2 task owns.
+
+* Rewrite the privacy page body and meta in plain words per `voice.md`: no render, stem, or provider wording, including the `aria-label` the guard now also scans. The page must still say what is kept and deleted.
+* Fix the Google start-page meta description to match the page's own `SUB` ("Google confirms it is you").
+
+**Done when:** `copy.test.ts` names no violation in either file, and the gate passes in a fresh worktree.
+
+**Decision, 2026-09-30.** Owns widened to `web/src/routes/share/share.spec.ts:97`,
+which asserts the exact banned line this task removes. Round 1 recorded it
+as an out of scope H stale pin, same pattern as T7.82 and the Wave 2
+widenings. The remediation asserts the new caveat line with no product
+change.
+
+### T9.12: Stale shell header pin
+```yaml
+requires:   T9.4
+fixture-ok: yes
+size:       XS · light
+owns:       web/tests/shell.spec.ts
+status:     in-progress:land:t9.12-impl@893da8d0c836c21745bb85bfd173c54887c0dd6b
+```
+`shell.spec.ts:5` expects the pre-T9.4 gallery h1. T9.4 replaced that header by design.
+
+* Update the pin to the landed header. No product change.
+
+**Done when:** The shell spec passes, and the gate passes in a fresh worktree.
+
+### T9.13: Scope the display-name migration out of the empty-DB login path
+```yaml
+requires:   T9.1
+fixture-ok: yes
+size:       S · frontier
+owns:       internal/identity/migrations/
+status:     in-progress:land:t9.13-impl@34cdca3ce41f23d0a9dc940828e7431544d423d0
+```
+`TestLoginMigrationsApplyOnEmptyDatabase` fails: the login migration set applies the users-table ALTER from `0003_display_name.sql` on a database with no diary tables (`no such table: users`). T9.1 proved the boot path, not the login set alone.
+
+* Make the login set apply cleanly on an empty database, with 0003 still altering real deployments. Keep the backfill behavior for existing rows.
+* Pin both: empty-DB login set applies, and a production-schema copy still gains the column with backfilled defaults.
+
+**Done when:** `go test ./internal/identity/migrations/` passes, and the gate passes in a fresh worktree.
 
 ---
 
