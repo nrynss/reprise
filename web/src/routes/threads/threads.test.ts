@@ -22,17 +22,29 @@ import {
 	episodeById,
 	episodeNumber,
 	eraseJob,
+	failedTakeNotice,
+	fixtureSharePath,
 	formatClock,
 	formatEpisodeNumber,
 	GalleryController,
 	installMockJob,
 	LIVE_CARD_STALLED_NOTICE,
 	LIVE_CARD_WAITING_NOTICE,
+	LIVE_COPY_FAILED_NOTICE,
 	LIVE_EPISODE_FAILED_NOTICE,
 	LIVE_EPISODE_NOTICE,
+	LIVE_ERASE_ARM_NOTICE,
+	LIVE_ERASE_FAILED_NOTICE,
 	LIVE_ERASE_STARTED_NOTICE,
+	LIVE_LINK_COPIED_NOTICE,
+	LIVE_NO_AUDIO_NOTICE,
+	LIVE_PLAYBACK_FAILED_NOTICE,
+	LIVE_PUBLISH_FAILED_NOTICE,
+	LIVE_REVOKE_FAILED_NOTICE,
 	LIVE_SEASON_FAILED_NOTICE,
 	LIVE_SEASON_NOTICE,
+	LIVE_TAKE_FAILED_NOTICE,
+	LIVE_TAKE_UNFINISHED_NOTICE,
 	listSeason,
 	listThreads,
 	parseEpisodeDetail,
@@ -471,7 +483,12 @@ describe('release controls', () => {
 			controller.mount('?fixture=1');
 			controller.publishState();
 			expect(snaps.at(-1)?.published).toBe(true);
-			expect(snaps.at(-1)?.notice).toContain('Fixture link public');
+			expect(snaps.at(-1)?.sharePath).toBe(fixtureSharePath('ep-4'));
+			expect(snaps.at(-1)?.notice).toBe('');
+			expect(fetchSpy).not.toHaveBeenCalled();
+			controller.publishState();
+			expect(snaps.at(-1)?.published).toBe(false);
+			expect(snaps.at(-1)?.sharePath).toBe('');
 			expect(fetchSpy).not.toHaveBeenCalled();
 			controller.destroy();
 		} finally {
@@ -516,13 +533,15 @@ describe('release controls', () => {
 			await vi.waitFor(() => {
 				expect(snaps.at(-1)?.published).toBe(true);
 			});
-			expect(snaps.at(-1)?.notice).toContain('/share/tok-1');
+			expect(snaps.at(-1)?.sharePath).toBe('/share/tok-1');
+			expect(snaps.at(-1)?.notice).toBe('');
 			expect(snaps.at(-1)?.visibility).toBe('public');
 			controller.publishState();
 			await vi.waitFor(() => {
 				expect(snaps.at(-1)?.published).toBe(false);
 			});
-			expect(snaps.at(-1)?.notice).toContain('revoked');
+			expect(snaps.at(-1)?.sharePath).toBe('');
+			expect(snaps.at(-1)?.notice).toBe('');
 			const publishCalls = calls.filter((call) => call.url.endsWith('/publish'));
 			expect(publishCalls.map((call) => call.method)).toEqual(['POST', 'DELETE']);
 			controller.destroy();
@@ -531,14 +550,54 @@ describe('release controls', () => {
 		}
 	});
 
-	it('shows the started notice a live erase returns', async () => {
+	it('shows the retry on a refused live publish and on a refused revoke', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				if (url.endsWith('/publish')) {
+					return new Response('{"error":"slow"}', { status: 500 });
+				}
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'ep-live', number: 2, title: 'Quiet take', state: 'ready', visibility: 'public' },
+					proposals: [],
+					words: [],
+					audio_url: '',
+					render_audio_url: '',
+					share_path: '/share/tok-9'
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('ep-live', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			expect(snaps.at(-1)?.published).toBe(true);
+			controller.publishState();
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.notice).toBe(LIVE_REVOKE_FAILED_NOTICE);
+			});
+			expect(snaps.at(-1)?.published).toBe(true);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('erases on a 202 by leaving for the gallery', async () => {
 		vi.stubGlobal(
 			'fetch',
 			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
 				const method = init?.method ?? 'GET';
 				if (url === '/api/episodes/ep-live' && method === 'DELETE') {
-					return Response.json({ job_id: 'job-erase-9' });
+					return Response.json({ job_id: 'job-erase-9' }, { status: 202 });
 				}
 				if (url.includes('/api/threads')) {
 					return Response.json({ name_threads: [], circled_topics: [] });
@@ -561,10 +620,88 @@ describe('release controls', () => {
 			});
 			await controller.erase();
 			expect(snaps.at(-1)?.eraseArmed).toBe(true);
+			expect(snaps.at(-1)?.notice).toBe(LIVE_ERASE_ARM_NOTICE);
 			await controller.erase();
 			await vi.waitFor(() => {
-				expect(snaps.at(-1)?.notice).toContain(LIVE_ERASE_STARTED_NOTICE);
+				expect(snaps.at(-1)?.notice).toBe(LIVE_ERASE_STARTED_NOTICE);
 			});
+			expect(snaps.at(-1)?.redirect).toBe('/?erased=1');
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('counts a 404 erase as already erased', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				const method = init?.method ?? 'GET';
+				if (url === '/api/episodes/ep-live' && method === 'DELETE') {
+					return new Response('{}', { status: 404 });
+				}
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'ep-live', number: 2, title: 'Quiet take', state: 'ready', visibility: 'private' },
+					proposals: [],
+					words: [],
+					audio_url: '',
+					render_audio_url: ''
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('ep-live', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			await controller.erase();
+			await controller.erase();
+			expect(snaps.at(-1)?.notice).toBe(LIVE_ERASE_STARTED_NOTICE);
+			expect(snaps.at(-1)?.redirect).toBe('/?erased=1');
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('shows the retry on any other erase failure', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				const method = init?.method ?? 'GET';
+				if (url === '/api/episodes/ep-live' && method === 'DELETE') {
+					return new Response('{"error":"slow"}', { status: 500 });
+				}
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'ep-live', number: 2, title: 'Quiet take', state: 'ready', visibility: 'private' },
+					proposals: [],
+					words: [],
+					audio_url: '',
+					render_audio_url: ''
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('ep-live', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			await controller.erase();
+			await controller.erase();
+			expect(snaps.at(-1)?.notice).toBe(LIVE_ERASE_FAILED_NOTICE);
+			expect(snaps.at(-1)?.redirect).toBeNull();
 			controller.destroy();
 		} finally {
 			vi.unstubAllGlobals();
@@ -603,7 +740,7 @@ describe('release controls', () => {
 			});
 			controller.publishState();
 			await vi.waitFor(() => {
-				expect(snaps.at(-1)?.notice).toContain('stays private');
+				expect(snaps.at(-1)?.notice).toBe(LIVE_PUBLISH_FAILED_NOTICE);
 			});
 			expect(snaps.at(-1)?.published).toBe(false);
 			controller.destroy();
@@ -959,8 +1096,7 @@ describe('share link release', () => {
 				expect(snaps.at(-1)?.sharePath).toBe('/share/tok-2');
 			});
 			expect(snaps.at(-1)?.published).toBe(true);
-			expect(snaps.at(-1)?.notice).toContain('/share/tok-2');
-			expect(snaps.at(-1)?.notice).toContain('http');
+			expect(snaps.at(-1)?.notice).toBe('');
 			controller.destroy();
 		} finally {
 			vi.unstubAllGlobals();
@@ -979,10 +1115,38 @@ describe('share link release', () => {
 			});
 			controller.copyLink();
 			await vi.waitFor(() => {
-				expect(snaps.at(-1)?.notice).toBe('Link copied.');
+				expect(snaps.at(-1)?.notice).toBe(LIVE_LINK_COPIED_NOTICE);
 			});
 			expect(written).toHaveLength(1);
 			expect(written[0]).toBe(shareUrl('/share/tok-9'));
+			controller.destroy();
+		} finally {
+			Reflect.deleteProperty(window.navigator, 'clipboard');
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('names the retry when the copy refuses', async () => {
+		stubPublicSeason('/share/tok-2');
+		Object.defineProperty(window.navigator, 'clipboard', {
+			value: {
+				writeText: async () => {
+					throw new Error('denied');
+				}
+			},
+			configurable: true
+		});
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('e9', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.sharePath).toBe('/share/tok-9');
+			});
+			controller.copyLink();
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.notice).toBe(LIVE_COPY_FAILED_NOTICE);
+			});
 			controller.destroy();
 		} finally {
 			Reflect.deleteProperty(window.navigator, 'clipboard');
@@ -999,19 +1163,19 @@ describe('share link release', () => {
 				expect(document.querySelector('h1')?.textContent).toBe('Ninth real');
 			});
 			const anchor = document.querySelector(
-				'section[aria-label="Episode controls"] a[target="_blank"]'
+				'section[aria-label="Release"] a[target="_blank"]'
 			);
 			expect(anchor instanceof HTMLAnchorElement).toBe(true);
 			const href = anchor instanceof HTMLAnchorElement ? anchor.href : '';
 			expect(href.endsWith('/share/tok-9')).toBe(true);
 			const buttons = Array.from(
-				document.querySelectorAll<HTMLButtonElement>('section[aria-label="Episode controls"] button')
+				document.querySelectorAll<HTMLButtonElement>('section[aria-label="Release"] button')
 			);
 			const labels = buttons.map((button) => button.textContent);
 			expect(labels).toContain('Copy link');
-			expect(labels).toContain('Revoke link');
+			expect(labels).toContain('Revoke');
 			const releaseText = (document.body.textContent ?? '').replace(/\s+/g, ' ');
-			expect(releaseText).toContain('Stems and the transcript stay private.');
+			expect(releaseText).not.toContain('Stems and the transcript stay private.');
 			buttons.find((button) => button.textContent === 'Copy link')?.click();
 			await vi.waitFor(() => {
 				expect(document.body.textContent).toContain('Link copied.');
@@ -1223,7 +1387,7 @@ describe('episode first press', () => {
 			await controller.togglePlay();
 			expect(play).toHaveBeenCalledTimes(2);
 			expect(snaps.at(-1)?.playing).toBe(false);
-			expect(snaps.at(-1)?.notice).toContain('refused');
+			expect(snaps.at(-1)?.notice).toBe(LIVE_PLAYBACK_FAILED_NOTICE);
 		} finally {
 			controller.destroy();
 			vi.unstubAllGlobals();
@@ -1284,6 +1448,176 @@ describe('gallery card progress lines', () => {
 		} finally {
 			controller.destroy();
 			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('failed takes', () => {
+	it('names the transcription when the transcript pass failed', () => {
+		expect(
+			failedTakeNotice({
+				outcome: { jobId: 'job-t', status: 'error', error: 'raw-boom' },
+				renderOutcome: null
+			})
+		).toBe(LIVE_TAKE_FAILED_NOTICE);
+		expect(LIVE_TAKE_FAILED_NOTICE).toBe("This take couldn't be transcribed.");
+	});
+
+	it('names the finish when a later pass failed', () => {
+		expect(
+			failedTakeNotice({
+				outcome: { jobId: 'job-t', status: 'done', error: '' },
+				renderOutcome: { jobId: 'job-r', status: 'error', error: 'raw-boom' }
+			})
+		).toBe(LIVE_TAKE_UNFINISHED_NOTICE);
+		expect(
+			failedTakeNotice({
+				outcome: null,
+				renderOutcome: null
+			})
+		).toBe(LIVE_TAKE_UNFINISHED_NOTICE);
+	});
+
+	it('shows one plain line on a failed episode and never the raw error', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'e1', number: 1, title: 'First take', state: 'failed', visibility: 'private' },
+					proposals: [],
+					words: [{ text: 'Hello', start: 0, end: 0.4 }],
+					audio_url: '',
+					render_audio_url: '',
+					transcript_outcome: { job_id: 'job-t', status: 'error', error: 'raw-boom-xyz' }
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('e1', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			expect(snaps.at(-1)?.notice).toBe(LIVE_TAKE_FAILED_NOTICE);
+			expect(snaps.at(-1)?.notice).not.toContain('raw-boom-xyz');
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('takes without audio', () => {
+	it('reads no audio yet on a press with nothing loaded', async () => {
+		const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+		const controller = new EpisodeController('ep-live', (snap) => snaps.push(snap));
+		try {
+			await controller.togglePlay();
+			expect(snaps.at(-1)?.notice).toBe(LIVE_NO_AUDIO_NOTICE);
+			expect(LIVE_NO_AUDIO_NOTICE).toBe('No audio yet.');
+		} finally {
+			controller.destroy();
+		}
+	});
+
+	it('reads no audio yet on a live draft with no render address', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+				if (url.includes('/api/threads')) {
+					return Response.json({ name_threads: [], circled_topics: [] });
+				}
+				return Response.json({
+					episode: { id: 'e1', number: 1, title: 'First take', state: 'draft', visibility: 'private' },
+					proposals: [],
+					words: [],
+					audio_url: '/media/user-blob',
+					render_audio_url: ''
+				});
+			})
+		);
+		try {
+			const snaps: Array<ReturnType<typeof emptyScreen>> = [];
+			const controller = new EpisodeController('e1', (snap) => snaps.push(snap));
+			controller.mount('');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			expect(snaps.at(-1)?.audioUrl).toBe('');
+			await controller.togglePlay();
+			expect(snaps.at(-1)?.notice).toBe(LIVE_NO_AUDIO_NOTICE);
+			controller.destroy();
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('erased gallery', () => {
+	it('shows the erased line after an erase lands back on the season', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = seasonStubUrl(input);
+				if (url.endsWith('/api/episodes')) {
+					return Response.json({
+						episodes: [{ id: 'e1', number: 1, title: 'Take', state: 'ready', visibility: 'private' }]
+					});
+				}
+				return new Response('', { status: 404 });
+			})
+		);
+		let controller: GalleryController | null = null;
+		try {
+			const snaps: GallerySnapshot[] = [];
+			controller = new GalleryController((snap) => {
+				snaps.push(structuredClone(snap));
+			});
+			controller.mount('?erased=1');
+			await vi.waitFor(() => {
+				expect(snaps.at(-1)?.ready).toBe(true);
+			});
+			expect(snaps.at(-1)?.rows).toHaveLength(1);
+			expect(snaps.at(-1)?.notice).toBe(LIVE_ERASE_STARTED_NOTICE);
+			expect(snaps.at(-1)?.notice).toBe('Episode erased.');
+		} finally {
+			controller?.destroy();
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+describe('episode notices read plain', () => {
+	it('names no machinery and keeps every line short', () => {
+		const banned = ['endpoint', 'wired', 'fixture', 'scripted', 'job', 'backend', 'detail'];
+		const lines = [
+			LIVE_NO_AUDIO_NOTICE,
+			LIVE_PLAYBACK_FAILED_NOTICE,
+			LIVE_PUBLISH_FAILED_NOTICE,
+			LIVE_REVOKE_FAILED_NOTICE,
+			LIVE_LINK_COPIED_NOTICE,
+			LIVE_COPY_FAILED_NOTICE,
+			LIVE_ERASE_ARM_NOTICE,
+			LIVE_ERASE_STARTED_NOTICE,
+			LIVE_ERASE_FAILED_NOTICE,
+			LIVE_TAKE_FAILED_NOTICE,
+			LIVE_TAKE_UNFINISHED_NOTICE
+		];
+		for (const line of lines) {
+			const lower = line.toLowerCase();
+			for (const word of banned) expect(lower, `episode notice reads "${line}"`).not.toContain(word);
+			for (const sentence of line.split('.')) {
+				expect(
+					sentence.trim().split(/\s+/).filter(Boolean).length,
+					`long sentence in "${line}"`
+				).toBeLessThanOrEqual(20);
+			}
 		}
 	});
 });

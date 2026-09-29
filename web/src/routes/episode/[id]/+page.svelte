@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import DemoBadge from '$lib/components/DemoBadge.svelte';
 	import GalleryLink from '$lib/components/GalleryLink.svelte';
 	import SeasonNav from '$lib/components/SeasonNav.svelte';
 	import { pageTitle } from '$lib/shell';
@@ -30,6 +31,11 @@
 			controller = null;
 		};
 	});
+
+	// An erase hands the gallery its erased line, so the page moves there.
+	$effect(() => {
+		if (browser && snap.redirect) window.location.assign(snap.redirect);
+	});
 </script>
 
 <svelte:head>
@@ -45,18 +51,39 @@
 		<p role="status">Loading the episode.</p>
 	{:else if snap.missing}
 		<h1>Missing episode</h1>
-		<p role="status">{snap.notice}</p>
+		{#if snap.notice}
+			<p role="status">{snap.notice}</p>
+		{/if}
 		<GalleryLink />
 	{:else if snap.failed}
 		<h1>Episode refused</h1>
-		<p role="status">{snap.notice}</p>
+		{#if snap.notice}
+			<p role="status">{snap.notice}</p>
+		{/if}
 		<button onclick={() => controller?.retry()}>Retry the episode</button>
 		<GalleryLink />
 	{:else}
-		<p class="eyebrow">{formatEpisodeNumber(snap.number)} · {snap.state} · {snap.visibility}</p>
+		{#if snap.coverPath}
+			<img
+				class="cover"
+				src={snap.coverPath}
+				alt={`Cover of episode ${snap.number}`}
+				width="512"
+				height="512"
+			/>
+		{:else}
+			<div class="cover tile" role="img" aria-label={`Cover of episode ${snap.number}`}>
+				<span>{formatEpisodeNumber(snap.number)}</span>
+			</div>
+		{/if}
+		<p class="eyebrow">{formatEpisodeNumber(snap.number)}</p>
 		<h1>{snap.title}</h1>
-		<p class="state">{snap.published ? 'Public' : 'Private'}</p>
-		<p role="status">{snap.notice}</p>
+		{#if !snap.live}
+			<DemoBadge />
+		{/if}
+		{#if snap.notice}
+			<p role="status">{snap.notice}</p>
+		{/if}
 		<nav aria-label="Season">
 			{#if snap.live}
 				{@const editHref = draftEditHref(snap)}
@@ -70,7 +97,7 @@
 		</nav>
 
 		{#if snap.audioUrl && snap.duration !== null}
-			<section aria-label="Episode playback">
+			<section class="player" aria-label="Episode playback">
 				<button
 					onclick={() => void controller?.togglePlay()}
 					aria-label={snap.playing ? 'Pause episode' : `Play ${snap.title}`}
@@ -93,72 +120,64 @@
 					{formatClock(snap.position)} of {formatClock(snap.duration)}
 				</p>
 				{#if snap.live && snap.words.length === 0}
-					<p>No stored words sit on this render yet, so no transcript follows playback.</p>
+					<p>No transcript yet.</p>
 				{/if}
 			</section>
 		{:else if snap.live}
-			<section aria-label="Episode playback">
+			<section class="player" aria-label="Episode playback">
 				<h2>Playback</h2>
-				<p>
-					The detail carries no audio stream address yet, so playback waits
-					here. The proposals and the quoted moment below still read.
-				</p>
+				<p>No audio yet.</p>
 			</section>
 		{/if}
 
-		{#if snap.outcome}
-			<section aria-label="Latest transcript pass">
-				<h2>Transcript pass</h2>
-				<p>State: {snap.outcome.status}</p>
-				{#if snap.outcome.error}
-					<p>Error: {snap.outcome.error}</p>
-				{/if}
-				<p class="dim">Job {snap.outcome.jobId}</p>
-			</section>
-		{/if}
-
-		<section aria-label="Episode controls">
+		<section aria-label="Release">
 			<h2>Release</h2>
 			{#if snap.published}
-				{#if snap.live && snap.sharePath}
+				{#if snap.sharePath}
 					{@const url = shareUrl(snap.sharePath)}
-					<p>
+					<div class="actions">
 						<!-- The address carries its origin, so resolve must not rewrite it. -->
 						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 						<a href={url} target="_blank" rel="noopener">{url}</a>
-					</p>
-					<button onclick={() => controller?.copyLink()}>Copy link</button>
-					<p>
-						Anyone with this link can play the finished episode. Stems and the transcript
-						stay private.
-					</p>
-				{:else if !snap.live}
-					<p>Fixture link: https://reprise.nryn.dev/e/{snap.id}-fixture</p>
+						<button onclick={() => controller?.copyLink()}>Copy link</button>
+						<button onclick={() => controller?.publishState()}>Revoke</button>
+					</div>
+				{:else}
+					<div class="actions">
+						<button onclick={() => controller?.publishState()}>Revoke</button>
+					</div>
 				{/if}
-				<button onclick={() => controller?.publishState()}>Revoke link</button>
 			{:else if canPublish(snap)}
-				<button onclick={() => controller?.publishState()}>Publish…</button>
+				<div class="actions">
+					<button onclick={() => controller?.publishState()}>Publish</button>
+				</div>
 			{:else if snap.state === 'recording'}
 				<p>This take ended before it was stored. There is nothing to play or publish.</p>
 			{/if}
 			{#if snap.live}
 				{#if snap.state === 'ready'}
-					<button
-						onclick={() => void controller?.exportBundle()}
-						disabled={snap.exporting}
-					>
-						{snap.exporting ? 'Building bundle…' : 'Export bundle'}
-					</button>
+					<div class="actions">
+						<button
+							onclick={() => void controller?.exportBundle()}
+							disabled={snap.exporting}
+						>
+							{snap.exporting ? 'Building bundle…' : 'Export bundle'}
+						</button>
+					</div>
 				{/if}
 			{:else}
-				<button onclick={() => controller?.exportNotes()}>Export for YouTube</button>
+				<div class="actions">
+					<button onclick={() => controller?.exportNotes()}>Export for YouTube</button>
+				</div>
 			{/if}
-			<button
-				onclick={() => void controller?.erase()}
-				aria-label={snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
-			>
-				{snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
-			</button>
+			<div class="actions">
+				<button
+					onclick={() => void controller?.erase()}
+					aria-label={snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
+				>
+					{snap.eraseArmed ? 'Confirm erase' : 'Erase this episode'}
+				</button>
+			</div>
 		</section>
 
 		{#if snap.chapters.length > 0}
@@ -273,16 +292,31 @@
 		color: var(--accent);
 		margin: 0 0 0.5rem;
 	}
-	.state {
-		font-size: 0.75rem;
-		letter-spacing: 0.1em;
-		text-transform: uppercase;
-		color: var(--accent);
-	}
 	h1 {
 		font-size: 2rem;
 		margin: 0 0 0.5rem;
 		color: var(--ink);
+	}
+	.cover {
+		width: 100%;
+		max-width: 22rem;
+		aspect-ratio: 1 / 1;
+		border-radius: 0.75rem;
+		border: 1px solid var(--line);
+		background: var(--raised);
+		margin: 0 0 1.5rem;
+		display: block;
+		object-fit: cover;
+	}
+	.cover.tile {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.cover.tile span {
+		color: var(--accent);
+		font-size: 0.85rem;
+		letter-spacing: 0.12em;
 	}
 	nav {
 		display: flex;
@@ -301,11 +335,18 @@
 		color: var(--accent);
 	}
 	section {
+		margin-bottom: 2.5rem;
+	}
+	section.player {
 		background: var(--raised);
 		border: 1px solid var(--line);
 		border-radius: 0.75rem;
 		padding: 1.25rem 1.5rem;
-		margin-bottom: 1.25rem;
+	}
+	section[aria-label='Release'] .actions a {
+		color: var(--accent);
+		overflow-wrap: anywhere;
+		max-width: 100%;
 	}
 	h2 {
 		font-size: 1.1rem;
@@ -321,6 +362,7 @@
 		font-weight: 600;
 		margin-right: 0.5rem;
 		margin-bottom: 0.5rem;
+		min-height: 2.75rem;
 	}
 	section[aria-label='Transcript, follows playback'] button {
 		background: transparent;
@@ -330,6 +372,7 @@
 		padding: 0.1rem 0.15rem;
 		margin: 0 0.3rem 0.15rem 0;
 		font-weight: 400;
+		min-height: 0;
 	}
 	section[aria-label='Transcript, follows playback'] button.active {
 		background: var(--accent);

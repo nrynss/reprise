@@ -249,17 +249,32 @@ test('the episode transcript seeks on word click', async ({ page }) => {
 	await expect(page.getByRole('status', { name: 'Playback position' })).toHaveText('0:14 of 2:00');
 });
 
-test('the episode renders its release states without backend actions', async ({ page }) => {
+test('the episode shows its cover, a bare release row, and erases to the gallery', async ({
+	page
+}) => {
 	await page.goto('/episode/ep-4?fixture=1');
-	await expect(page.getByText('Private', { exact: true }).first()).toBeVisible();
-	await page.getByRole('button', { name: 'Publish…' }).click();
-	await expect(page.getByText('Fixture link:', { exact: false })).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Revoke link' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Three weeks of almost' })).toBeVisible();
+	await expect(page.locator('.cover').first()).toBeVisible();
+	await expect(page.locator('p.eyebrow')).toHaveText('EP.04');
+	await expect(page.getByText('Private', { exact: true })).toHaveCount(0);
+	await expect(page.getByText('Public', { exact: true })).toHaveCount(0);
+	await expect(page.getByText('Demo', { exact: true })).toBeVisible();
+
+	const row = page.locator('section[aria-label="Release"]');
+	await row.getByRole('button', { name: 'Publish', exact: true }).click();
+	await expect(row.getByRole('link').first()).toContainText('/episode/ep-4?fixture=1');
+	await expect(row.getByRole('button', { name: 'Copy link' })).toBeVisible();
+	await expect(row.getByRole('button', { name: 'Revoke', exact: true })).toBeVisible();
+	await expect(row.getByText('Only the finished audio')).toHaveCount(0);
+
+	await row.getByRole('button', { name: 'Revoke', exact: true }).click();
+	await expect(row.getByRole('button', { name: 'Publish', exact: true })).toBeVisible();
 
 	await page.getByRole('button', { name: 'Erase this episode' }).click();
 	await expect(page.getByRole('button', { name: 'Confirm erase' })).toBeVisible();
 	await page.getByRole('button', { name: 'Confirm erase' }).click();
-	await expect(page.getByText('The erase did not go through. Retry.')).toBeVisible();
+	await expect(page).toHaveURL(/\/\?fixture=1&erased=1/);
+	await expect(page.getByText('Episode erased.')).toBeVisible();
 });
 
 test('a live episode walks its release controls against the routes', async ({ page }) => {
@@ -282,7 +297,7 @@ test('a live episode walks its release controls against the routes', async ({ pa
 	await page.route('**/api/episodes/e9', (route: Route) => {
 		if (route.request().method() === 'DELETE') {
 			void route.fulfill({
-				status: 200,
+				status: 202,
 				contentType: 'application/json',
 				body: JSON.stringify({ job_id: 'erase-7' })
 			});
@@ -292,19 +307,135 @@ test('a live episode walks its release controls against the routes', async ({ pa
 	});
 	await page.goto('/episode/e9');
 	await expect(page.getByRole('heading', { name: 'Ninth real' })).toBeVisible();
+	await expect(page.locator('p.eyebrow')).toHaveText('EP.09');
 
-	await page.getByRole('button', { name: 'Publish…' }).click();
-	await expect(page.getByText('Public at /share/token-1.', { exact: false })).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Revoke link' })).toBeVisible();
+	const row = page.locator('section[aria-label="Release"]');
+	await row.getByRole('button', { name: 'Publish', exact: true }).click();
+	await expect(row.getByRole('link').first()).toContainText('/share/token-1');
+	await expect(row.getByRole('button', { name: 'Copy link' })).toBeVisible();
+	await expect(row.getByRole('button', { name: 'Revoke', exact: true })).toBeVisible();
+	await expect(page.getByText('Public at')).toHaveCount(0);
+	await expect(page.getByText('Only the finished audio')).toHaveCount(0);
 
-	await page.getByRole('button', { name: 'Revoke link' }).click();
-	await expect(page.getByText('The link is revoked.', { exact: false })).toBeVisible();
-	await expect(page.getByRole('button', { name: 'Publish…' })).toBeVisible();
+	await row.getByRole('button', { name: 'Revoke', exact: true }).click();
+	await expect(row.getByRole('button', { name: 'Publish', exact: true })).toBeVisible();
 
 	await page.getByRole('button', { name: 'Erase this episode' }).click();
 	await expect(page.getByRole('button', { name: 'Confirm erase' })).toBeVisible();
 	await page.getByRole('button', { name: 'Confirm erase' }).click();
-	await expect(page.getByText('The erase started. The episode leaves the gallery once it is gone.', { exact: false })).toBeVisible();
+	await expect(page).toHaveURL(/\/\?erased=1/);
+	await expect(page.getByText('Episode erased.')).toBeVisible();
+});
+
+test('an erase that answers 404 still lands on the gallery', async ({ page }) => {
+	await stubEpisodeApi(
+		page,
+		[{ id: 'e9', number: 9, title: 'Ninth real', state: 'ready', visibility: 'private' }],
+		{ e9: { outcome: null } }
+	);
+	await page.route('**/api/episodes/e9', (route: Route) => {
+		if (route.request().method() === 'DELETE') {
+			void route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+			return;
+		}
+		void route.fallback();
+	});
+	await page.goto('/episode/e9');
+	await expect(page.getByRole('heading', { name: 'Ninth real' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Erase this episode' }).click();
+	await page.getByRole('button', { name: 'Confirm erase' }).click();
+	await expect(page).toHaveURL(/\/\?erased=1/);
+	await expect(page.getByText('Episode erased.')).toBeVisible();
+});
+
+test('a refused erase stays on the episode with the retry', async ({ page }) => {
+	await stubEpisodeApi(
+		page,
+		[{ id: 'e9', number: 9, title: 'Ninth real', state: 'ready', visibility: 'private' }],
+		{ e9: { outcome: null } }
+	);
+	await page.route('**/api/episodes/e9', (route: Route) => {
+		if (route.request().method() === 'DELETE') {
+			void route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+			return;
+		}
+		void route.fallback();
+	});
+	await page.goto('/episode/e9');
+	await expect(page.getByRole('heading', { name: 'Ninth real' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Erase this episode' }).click();
+	await page.getByRole('button', { name: 'Confirm erase' }).click();
+	await expect(page.getByText("Couldn't erase this episode. Try again.")).toBeVisible();
+	await expect(page).toHaveURL(/\/episode\/e9/);
+});
+
+test('a failed take shows one plain line and never the raw error', async ({ page }) => {
+	await stubEpisodeApi(
+		page,
+		[{ id: 'e9', number: 9, title: 'Ninth real', state: 'failed', visibility: 'private' }],
+		{
+			e9: {
+				outcome: { job_id: 'job-t', status: 'error', error: 'raw-boom-xyz' }
+			}
+		}
+	);
+	await page.route('**/api/threads', (route: Route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ name_threads: [], circled_topics: [] })
+		})
+	);
+	await page.goto('/episode/e9');
+	await expect(page.getByRole('heading', { name: 'Ninth real' })).toBeVisible();
+	await expect(page.getByText("This take couldn't be transcribed.")).toBeVisible();
+	await expect(page.getByText('raw-boom-xyz')).toHaveCount(0);
+	await expect(page.getByText('Transcript pass')).toHaveCount(0);
+});
+
+test('a draft with no audio says so in three words', async ({ page }) => {
+	await stubEpisodeApi(
+		page,
+		[{ id: 'e9', number: 9, title: 'Ninth real', state: 'draft', visibility: 'private' }],
+		{ e9: { outcome: null } }
+	);
+	await page.route('**/api/threads', (route: Route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({ name_threads: [], circled_topics: [] })
+		})
+	);
+	await page.goto('/episode/e9');
+	await expect(page.getByRole('heading', { name: 'Ninth real' })).toBeVisible();
+	await expect(page.getByText('No audio yet.')).toBeVisible();
+});
+
+test('the episode page holds its column at every width', async ({ page }) => {
+	for (const width of [375, 768, 1280, 1920]) {
+		await page.setViewportSize({ width, height: 800 });
+		await page.goto('/episode/ep-4?fixture=1');
+		await expect(page.getByRole('heading', { name: 'Three weeks of almost' })).toBeVisible();
+		const scroll = await page.evaluate(() => ({
+			scroll: document.documentElement.scrollWidth,
+			inner: window.innerWidth
+		}));
+		expect(scroll.scroll, `sideways scroll at ${width}px`).toBeLessThanOrEqual(scroll.inner + 1);
+		const box = await page.locator('main').boundingBox();
+		if (box === null) throw new Error('The episode page reported no layout.');
+		expect(box.width, `main width at ${width}px`).toBeLessThanOrEqual(1025);
+	}
+	await page.setViewportSize({ width: 375, height: 800 });
+	await page.goto('/episode/ep-4?fixture=1');
+	await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeVisible();
+	const heights = await page
+		.locator('section[aria-label="Episode playback"] button, section[aria-label="Release"] button')
+		.evaluateAll((controls) => controls.map((entry) => (entry as HTMLElement).getBoundingClientRect().height));
+	for (const height of heights) {
+		expect(height, 'tap target at 375px').toBeGreaterThanOrEqual(43.5);
+	}
 });
 
 test('the season screens pass both gates', async ({ page }) => {

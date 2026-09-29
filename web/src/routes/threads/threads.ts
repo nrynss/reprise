@@ -1128,7 +1128,7 @@ export class GalleryController {
 			rows: snapshot.rows,
 			ready: true,
 			live: false,
-			notice: snapshot.notice
+			notice: queryValue(search, 'erased') === '1' ? LIVE_ERASE_STARTED_NOTICE : snapshot.notice
 		};
 		for (const row of this.snap.rows) {
 			if (row.jobId) {
@@ -1166,11 +1166,16 @@ export class GalleryController {
 			}
 		}
 		if (token !== this.mountToken) return;
+		// An erase lands back here with the erased flag, so the gallery
+		// shows the erased line instead of the season line.
+		const erased = queryValue(this.search, 'erased') === '1';
 		if (listed.length === 0) {
 			this.snap = {
 				...this.snap,
 				ready: true,
-				notice: 'No episodes yet. Record the first one and it lands here.'
+				notice: erased
+					? LIVE_ERASE_STARTED_NOTICE
+					: 'No episodes yet. Record the first one and it lands here.'
 			};
 			this.emit();
 			return;
@@ -1179,7 +1184,7 @@ export class GalleryController {
 			...this.snap,
 			rows: listed.map((episode) => liveRow(episode, '')),
 			ready: true,
-			notice: LIVE_SEASON_NOTICE
+			notice: erased ? LIVE_ERASE_STARTED_NOTICE : LIVE_SEASON_NOTICE
 		};
 		this.emit();
 		await this.followUnfinished(listed);
@@ -1447,6 +1452,12 @@ export interface EpisodeScreen {
 	// The detail answers it on load, publish sets it, and revoke clears
 	// it. The page shows the absolute address behind it as a link.
 	sharePath: string;
+	// The cover route while a cover exists, or empty otherwise. The page
+	// shows the cover when set, and the episode tile when empty.
+	coverPath: string;
+	// The gallery address the page moves to after an erase, or null while
+	// the episode stays open. The controller never navigates itself.
+	redirect: string | null;
 	eraseArmed: boolean;
 	exporting: boolean;
 	activeWord: number | null;
@@ -1454,12 +1465,14 @@ export interface EpisodeScreen {
 	gateResult: string;
 }
 
-// Live erase notices in plain words. A started erase leaves the gallery
-// once it lands. A refused erase names the retry. The screen shows the
-// outcome only, never the reference behind it.
-export const LIVE_ERASE_STARTED_NOTICE =
-	'The erase started. The episode leaves the gallery once it is gone.';
-export const LIVE_ERASE_FAILED_NOTICE = 'The erase did not go through. Retry.';
+// Live erase notices in plain words. A finished erase lands on the
+// gallery, which shows the erased line. A 404 reads as already erased,
+// so only another failure names the retry.
+export const LIVE_ERASE_STARTED_NOTICE = 'Episode erased.';
+export const LIVE_ERASE_FAILED_NOTICE = "Couldn't erase this episode. Try again.";
+// The erase arm names the second press. The button already reads Confirm
+// erase, and this line says the same for the status reader.
+export const LIVE_ERASE_ARM_NOTICE = 'Press Confirm erase to erase this episode.';
 
 // eraseJob reads the erasure job id one erase answer carries, or
 // empty when the body drifts. The screen shows plain words instead,
@@ -1507,6 +1520,12 @@ export function shareUrl(path: string): string {
 	return path;
 }
 
+// The address a fixture publish shows. No publish route answers in the
+// demo, so the row links the fixture episode itself.
+export function fixtureSharePath(id: string): `/episode/${string}?${string}` {
+	return `/episode/${id}?fixture=1`;
+}
+
 // The export bundle route behind one episode. The owner download reads
 // it, and a stranger reads 404.
 export function exportPath(id: string): `/api/episodes/${string}/export` {
@@ -1530,15 +1549,15 @@ export function bundleFilename(response: Response, id: string): string {
 // The line the screen shows when the export bundle refuses. Screens
 // branch on the status the route answers with, and never on wording.
 export function exportRefusal(status: number): string {
-	if (status === 404) return 'No episode lives at this id.';
-	if (status === 409) return 'The episode never finished, so nothing exports yet.';
-	return 'The export refused, so nothing downloaded. Retry the control.';
+	if (status === 404) return LIVE_EPISODE_MISSING_NOTICE;
+	if (status === 409) return LIVE_EXPORT_UNREADY_NOTICE;
+	return LIVE_EXPORT_FAILED_NOTICE;
 }
 
 export function emptyScreen(id: string): EpisodeScreen {
 	return {
 		ready: false,
-		notice: 'Loading the episode.',
+		notice: LIVE_EPISODE_LOADING_NOTICE,
 		failed: false,
 		missing: false,
 		live: true,
@@ -1562,6 +1581,8 @@ export function emptyScreen(id: string): EpisodeScreen {
 		playing: false,
 		published: false,
 		sharePath: '',
+		coverPath: '',
+		redirect: null,
 		eraseArmed: false,
 		exporting: false,
 		activeWord: null,
@@ -1575,6 +1596,38 @@ export function emptyScreen(id: string): EpisodeScreen {
 // names what the guest lost and offers the retry.
 export const LIVE_EPISODE_NOTICE = '';
 export const LIVE_EPISODE_FAILED_NOTICE = 'This episode did not load. Retry.';
+
+// Episode notices in plain words. The loading line shows while the detail
+// loads. The missing line shows for an unknown id. A take with no audio
+// file says so in three words. Play, publish, revoke, copy, and export
+// failures each name the retry in one line, and never paste a raw error.
+export const LIVE_EPISODE_LOADING_NOTICE = 'Loading the episode.';
+export const LIVE_EPISODE_MISSING_NOTICE = 'No episode lives at this id.';
+export const LIVE_NO_AUDIO_NOTICE = 'No audio yet.';
+export const LIVE_PLAYBACK_FAILED_NOTICE = "Couldn't play this episode. Try again.";
+export const LIVE_PUBLISH_FAILED_NOTICE = "Couldn't publish this episode. Try again.";
+export const LIVE_REVOKE_FAILED_NOTICE = "Couldn't revoke the link. Try again.";
+export const LIVE_LINK_COPIED_NOTICE = 'Link copied.';
+export const LIVE_COPY_FAILED_NOTICE = "Couldn't copy the link. Copy the address by hand.";
+export const LIVE_EXPORT_FIXTURE_NOTICE = 'Exports need a stored episode.';
+export const LIVE_EXPORT_BUILDING_NOTICE = 'Building the export bundle.';
+export const LIVE_EXPORT_DONE_NOTICE =
+	'The export bundle downloaded. It holds audio, video, captions, cover, and chapters.';
+export const LIVE_EXPORT_UNREADY_NOTICE = 'The episode never finished, so nothing exports yet.';
+export const LIVE_EXPORT_FAILED_NOTICE = 'The export failed, so nothing downloaded. Retry.';
+// A failed take shows one plain line. A transcript failure names the
+// transcription, any later failure names the finish, and the raw error
+// stays server-side.
+export const LIVE_TAKE_FAILED_NOTICE = "This take couldn't be transcribed.";
+export const LIVE_TAKE_UNFINISHED_NOTICE = "This take couldn't be finished.";
+
+// The plain line a failed take shows. A transcript failure names the
+// transcription, and any later failure names the finish. The raw error
+// never reaches the screen.
+export function failedTakeNotice(detail: Pick<LiveDetail, 'outcome' | 'renderOutcome'>): string {
+	if (detail.outcome && detail.outcome.status !== 'done') return LIVE_TAKE_FAILED_NOTICE;
+	return LIVE_TAKE_UNFINISHED_NOTICE;
+}
 
 // The episode behind its view. The fixture flag keeps the scripted
 // episode with generated audio. Otherwise the view reads the stored
@@ -1653,7 +1706,7 @@ export class EpisodeController {
 
 	async togglePlay(): Promise<void> {
 		if (!this.player || !this.snap.audioUrl) {
-			this.snap = { ...this.snap, notice: 'No audio stream on this episode yet.' };
+			this.snap = { ...this.snap, notice: LIVE_NO_AUDIO_NOTICE };
 			this.emit();
 			return;
 		}
@@ -1678,7 +1731,7 @@ export class EpisodeController {
 			...this.snap,
 			playing: ok,
 			position: player.currentTime || this.snap.position,
-			notice: ok ? `Playing from ${formatClock(player.currentTime || this.snap.position)}.` : 'Playback refused. Press play again.'
+			notice: ok ? `Playing from ${formatClock(player.currentTime || this.snap.position)}.` : LIVE_PLAYBACK_FAILED_NOTICE
 		};
 		this.emit();
 		if (ok) this.startTicker();
@@ -1706,18 +1759,18 @@ export class EpisodeController {
 		void this.publish();
 	}
 
-	// Flip the release link. Fixture episodes flip a local flag with no
-	// backend behind them. Live episodes call the publish routes, so the
-	// screen shows the real link or the real refusal.
+	// Flip the release link. Fixture episodes flip a local flag with a
+	// local address, because no publish route answers there. Live episodes
+	// call the publish routes. Either way the link row or the Publish
+	// button carries the state, so success shows no sentence.
 	async publish(): Promise<void> {
 		if (!this.snap.live) {
 			const published = !this.snap.published;
 			this.snap = {
 				...this.snap,
 				published,
-				notice: published
-					? 'Fixture link public at the address below. The publish endpoint owns real links.'
-					: 'Back to private. The publish endpoint owns real links.'
+				sharePath: published ? fixtureSharePath(this.episodeId) : '',
+				notice: LIVE_EPISODE_NOTICE
 			};
 			this.emit();
 			return;
@@ -1735,9 +1788,7 @@ export class EpisodeController {
 				published: !revoked,
 				visibility: revoked ? 'private' : this.snap.visibility,
 				sharePath: revoked ? '' : this.snap.sharePath,
-				notice: revoked
-					? 'The link is revoked. The episode is private again.'
-					: 'The revoke refused, so the episode stays public. Retry the control.'
+				notice: revoked ? LIVE_EPISODE_NOTICE : LIVE_REVOKE_FAILED_NOTICE
 			};
 			this.emit();
 			return;
@@ -1755,9 +1806,7 @@ export class EpisodeController {
 			published,
 			visibility: published ? 'public' : this.snap.visibility,
 			sharePath: published ? link : this.snap.sharePath,
-			notice: published
-				? `Public at ${link}. Full address ${shareUrl(link)}. Only the finished audio opens behind it.`
-				: 'The publish refused, so the episode stays private. Retry the control.'
+			notice: published ? LIVE_EPISODE_NOTICE : LIVE_PUBLISH_FAILED_NOTICE
 		};
 		this.emit();
 	}
@@ -1772,31 +1821,48 @@ export class EpisodeController {
 		const url = shareUrl(this.snap.sharePath);
 		try {
 			await navigator.clipboard.writeText(url);
-			this.snap = { ...this.snap, notice: 'Link copied.' };
+			this.snap = { ...this.snap, notice: LIVE_LINK_COPIED_NOTICE };
 		} catch {
 			this.snap = {
 				...this.snap,
-				notice: 'The copy refused, so copy the link address by hand.'
+				notice: LIVE_COPY_FAILED_NOTICE
 			};
 		}
 		this.emit();
 	}
 
+	// Erase the episode in two presses. A finished erase hands the gallery
+	// its erased line, so the screen records where the page moves next. A
+	// 404 reads as already erased. Only another failure names the retry.
 	async erase(): Promise<void> {
 		if (!this.snap.eraseArmed) {
-			this.snap = { ...this.snap, eraseArmed: true, notice: 'Erase works in two steps. Press again to confirm the erase.' };
+			this.snap = { ...this.snap, eraseArmed: true, notice: LIVE_ERASE_ARM_NOTICE };
 			this.emit();
 			return;
 		}
 		this.snap = { ...this.snap, eraseArmed: false };
+		if (!this.snap.live) {
+			this.snap = {
+				...this.snap,
+				notice: LIVE_ERASE_STARTED_NOTICE,
+				redirect: '/?fixture=1&erased=1'
+			};
+			this.emit();
+			return;
+		}
 		try {
 			const response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`, {
 				method: 'DELETE'
 			});
-			this.snap = {
-				...this.snap,
-				notice: response.ok ? LIVE_ERASE_STARTED_NOTICE : LIVE_ERASE_FAILED_NOTICE
-			};
+			if (response.ok || response.status === 404) {
+				this.snap = {
+					...this.snap,
+					notice: LIVE_ERASE_STARTED_NOTICE,
+					redirect: '/?erased=1'
+				};
+			} else {
+				this.snap = { ...this.snap, notice: LIVE_ERASE_FAILED_NOTICE };
+			}
 		} catch {
 			this.snap = { ...this.snap, notice: LIVE_ERASE_FAILED_NOTICE };
 		}
@@ -1804,7 +1870,7 @@ export class EpisodeController {
 	}
 
 	exportNotes(): void {
-		this.snap = { ...this.snap, notice: 'Export needs the backend. The fixture stays on this screen.' };
+		this.snap = { ...this.snap, notice: LIVE_EXPORT_FIXTURE_NOTICE };
 		this.emit();
 	}
 
@@ -1813,7 +1879,7 @@ export class EpisodeController {
 			this.exportNotes();
 			return;
 		}
-		this.snap = { ...this.snap, exporting: true, notice: 'Building the export bundle.' };
+		this.snap = { ...this.snap, exporting: true, notice: LIVE_EXPORT_BUILDING_NOTICE };
 		this.emit();
 		try {
 			const response = await fetch(exportPath(this.episodeId));
@@ -1841,13 +1907,13 @@ export class EpisodeController {
 			this.snap = {
 				...this.snap,
 				exporting: false,
-				notice: 'The export bundle downloaded. It holds audio, video, captions, cover, and chapters.'
+				notice: LIVE_EXPORT_DONE_NOTICE
 			};
 		} catch {
 			this.snap = {
 				...this.snap,
 				exporting: false,
-				notice: 'The export refused, so nothing downloaded. Retry the control.'
+				notice: LIVE_EXPORT_FAILED_NOTICE
 			};
 		}
 		this.emit();
@@ -1856,7 +1922,7 @@ export class EpisodeController {
 	private mountFixture(search: string): void {
 		const found = episodeById(this.episodeId);
 		if (!found) {
-			this.snap = { ...this.snap, ready: true, missing: true, live: false, notice: 'No scripted episode carries that id.' };
+			this.snap = { ...this.snap, ready: true, missing: true, live: false, notice: LIVE_EPISODE_MISSING_NOTICE };
 			this.emit();
 			return;
 		}
@@ -1866,11 +1932,12 @@ export class EpisodeController {
 		this.player = new AudioPlayer();
 		const url = episodeAudioUrl(episode);
 		if (url) this.player.load(url);
+		const published = queryValue(search, 'published') === '1';
 		this.snap = {
 			...emptyScreen(this.episodeId),
 			ready: true,
 			live: false,
-			notice: 'Scripted episode. No backend needed.',
+			notice: LIVE_EPISODE_NOTICE,
 			id: episode.id,
 			number: episode.number,
 			title: episode.title,
@@ -1881,7 +1948,9 @@ export class EpisodeController {
 			chapters: episode.chapters,
 			notes: episode.notes,
 			words,
-			published: queryValue(search, 'published') === '1'
+			published,
+			sharePath: published ? fixtureSharePath(episode.id) : '',
+			coverPath: ''
 		};
 		const at = Number(queryValue(search, 't') ?? '');
 		if (Number.isFinite(at) && at > 0) {
@@ -1913,7 +1982,7 @@ export class EpisodeController {
 				missing,
 				failed: !missing,
 				notice: missing
-					? 'No episode lives at this id.'
+					? LIVE_EPISODE_MISSING_NOTICE
 					: LIVE_EPISODE_FAILED_NOTICE
 			};
 			this.emit();
@@ -1940,12 +2009,16 @@ export class EpisodeController {
 			momentWord === null
 				? null
 				: (detail.proposals.find((proposal) => proposal.startWord <= momentWord && momentWord <= proposal.endWord)?.id ?? null);
+		// A failed take names its one plain line instead of the moment or
+		// the empty notice, and the raw error never reaches the screen.
 		const notice =
-			momentWord === null
-				? LIVE_EPISODE_NOTICE
-				: momentQuote === null
-					? `Quoted moment at word ${momentWord}. No stored quote names it.`
-					: `Quoted moment at word ${momentWord}. “${momentQuote}”`;
+			detail.episode.state === 'failed'
+				? failedTakeNotice(detail)
+				: momentWord === null
+					? LIVE_EPISODE_NOTICE
+					: momentQuote === null
+						? `Quoted moment at word ${momentWord}. No stored quote names it.`
+						: `Quoted moment at word ${momentWord}. “${momentQuote}”`;
 		// The player loads the render, so the words and the scrubber sit on
 		// the render clock. The last placed word gives a first length, and
 		// the audio element replaces it once it reads the file.
@@ -1984,7 +2057,8 @@ export class EpisodeController {
 			momentQuote,
 			coveringId,
 			published: detail.episode.visibility === 'public',
-			sharePath: detail.sharePath
+			sharePath: detail.sharePath,
+			coverPath: detail.episode.coverPath
 		};
 		this.emit();
 		this.expose(momentWord);
