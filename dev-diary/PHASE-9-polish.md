@@ -263,7 +263,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/processing/+page.svelte, tools/check.sh,
              web/src/routes/record/mock-session.spec.ts
-status:     in-progress:land:t9.10-impl@48e554e27804cc13ceb22b2a684f22d3c526a60b
+status:     done:f9abfe2
 ```
 Two pre-existing gate reds no page task owns, both proved on pristine
 bases during Wave 2 reviews.
@@ -318,6 +318,11 @@ The gate passes in a fresh worktree three times in a row, because the gate grew.
 
 ### What exists now
 
+T9.10 landed at f9abfe2 after round 1 APPROVE with zero findings.
+The processing step list uses the scanner-clean `$derived.by` form
+with identical behavior, and the memory probe skips on Firefox with
+reason while staying pinned on Chromium. Reviewed commit 48e554e
+rebased clean. Pins pass on the landed commit.
 T9.5 landed at 0867944 after round 2 APPROVE with zero residue.
 The episode page shows the cover with a bare eyebrow, flat
 sections, a sentence-free release row, gallery-bound erase, and
