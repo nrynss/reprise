@@ -309,7 +309,7 @@ requires:   none
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/privacy/+page.svelte, web/src/routes/account/google/+page.svelte
-status:     in-progress:land:t9.11-rem-r1@a0704f50044b9534db05b5a800e588fe654c1ed0
+status:     done:45da0e0
 ```
 Two true copy positives the T9.9 guard caught in pages no Wave 2 task owns.
 
@@ -368,6 +368,12 @@ status:     done:68e2ace
 
 ### What exists now
 
+T9.11 landed at 45da0e0 after round 2 APPROVE with zero residue.
+Privacy and Google start copy speak plain words, and the share pin
+asserts the rewritten caveat. Round 1 had one out of scope H on
+that pin; owns widened to the spec by decision and the remediation
+updated the assert with no product change. Reviewed commits 3f48a73
+and a0704f5 rebased clean. Pins pass on the landed commit.
 T9.12 landed at dee9bd5 after round 1 APPROVE with zero findings.
 The shell spec pins the landed gallery header. Reviewed commit
 893da8d rebased clean. Pin passes on the landed commit.
