@@ -381,7 +381,7 @@ one line.
 Breaking one is a plan change, not an implementation detail. Propose it in a handoff file first.
 
 1. **`internal/assemblyai` is the only code that talks to AssemblyAI.** `internal/gemini` is the only
-   code that talks to Gemini.
+   code that talks to Gemini. `internal/mail` is the only code that talks to Resend.
 2. **Configuration loads once, in `main`, through `keel/config`.** Packages take a settings struct
    and never read the environment.
 3. **Consumers declare interfaces. Producers return concrete types.**
@@ -409,7 +409,7 @@ Breaking one is a plan change, not an implementation detail. Propose it in a han
 ## Stack, frozen
 
 - **Backend:** Go 1.27.1, standard library first, on Keel `v0.3.0`. `google.golang.org/genai` for
-  Gemini, imported only by `internal/gemini`. AssemblyAI over plain `net/http`.
+  Gemini, imported only by `internal/gemini`. AssemblyAI and Resend over plain `net/http`.
 - **Frontend:** Svelte 5 with runes, SvelteKit with the static adapter, served by the Go binary.
   TypeScript strict. Node 26. npm. Chaaya for behaviour. Bits UI for primitives.
 - **Media:** ffmpeg as a runtime binary, through `keel/ffmpeg`.

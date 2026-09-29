@@ -43,8 +43,8 @@ needs only a domain verified with its SPF and DKIM records. Check that against R
 docs before T8.10b. `mail_reply_to` is optional. Unset, replies to the from address vanish, so set
 it to an address the owner reads, or route that address through the DNS provider.
 
-**Proposed invariant, for the owner to approve into AGENTS.md.** `internal/mail` is the only code
-that talks to Resend. Until then this phase keeps to it as a task rule.
+**Invariant.** `internal/mail` is the only code that talks to Resend. The owner approved it into
+AGENTS.md on 2026-09-29.
 
 **Spend.** Resend's free tier carries no per-message charge, so no send reserves budget. The send
 limits in T8.5 are the ceiling. If the account moves to a paid plan, a send becomes a paid call and
