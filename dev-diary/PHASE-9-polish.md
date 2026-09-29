@@ -56,7 +56,7 @@ owns:       internal/api/episodes.go, internal/api/playback_test.go, internal/ap
              cmd/reprise/privacy.go, cmd/reprise/main.go, cmd/reprise/main_test.go,
              internal/identity/migrations/0003_display_name.sql, internal/identity/profile.go,
              internal/identity/profile_test.go, internal/privacy/share.go, internal/privacy/share_test.go
-status:     not-started
+status:     in-progress:land:t9.1-impl@346c65a05aeb3b7108e13150dda13ae1af3f14e2
 ```
 The server half of the cover, link and author work, so the page tasks have what they show.
 
@@ -113,7 +113,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
              web/src/lib/voice/record-state.ts, web/src/lib/voice/processing-state.ts
-status:     not-started
+status:     in-progress:implement:t9.3-impl
 ```
 * Record uses the shared shell. It rendered as a white, unstyled page on 2026-09-29. Start is the
   one large primary button, centred, and the live view keeps the clock and End in reach on a phone.
@@ -175,7 +175,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     not-started
+status:     in-progress:implement:t9.6-impl
 ```
 * The `.wide` column above 1280px. The transcript is left-aligned, never justified, at `65ch`.
 * The player controls and the proposal actions use the shared button kinds at one height.
