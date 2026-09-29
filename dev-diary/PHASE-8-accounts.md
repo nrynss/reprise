@@ -60,7 +60,7 @@ requires:   none
 fixture-ok: yes
 size:       S · mid
 owns:       internal/mail/
-status:     in-progress:land:t8.1-impl@e443c20769097fe5d3b03f9652df83e1149f27ac
+status:     done:0dc9ea2
 ```
 A Resend client over plain `net/http`. `internal/mail` is the only code that talks to Resend.
 
@@ -304,7 +304,12 @@ The one task that needs a person and production.
 
 ### What exists now
 
-Nothing yet. The phase opened on 2026-09-29.
+T8.1 landed at 0dc9ea2 after round 1 APPROVE with zero findings.
+`internal/mail` carries a Resend client over plain `net/http`, with
+`Sender` and `Fake` for consumers and a `live`-tagged probe. Reviewed
+commit e443c20 rebased clean onto main. Race tests pass on the landed
+commit.
+Nothing else yet. The phase opened on 2026-09-29.
 
 ### What surprised us
 
