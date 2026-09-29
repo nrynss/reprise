@@ -285,8 +285,9 @@ fixture-ok: yes
 size:       S · mid
 owns:       cmd/reprise/privacy.go, internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go,
-             web/src/routes/account/+page.svelte, web/src/routes/account/account.spec.ts
-status:     in-progress:implement:t8.14-impl
+             web/src/routes/account/+page.svelte, web/src/routes/account/account.spec.ts,
+             web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts
+status:     in-progress:review-r1:t8.14-rev-r1@736ad3d90a7b87371c797d5bad308902cd395742
 ```
 T8.7 ships deletion behind an unmounted handler and an unregistered job
 kind: the route 404s and a restart drops a running deletion. The account
@@ -303,6 +304,10 @@ page still holds its entry inert.
 **Done when:** A booted binary deletes an account end to end through the
 route, survives a restart mid-deletion, and the account page links the
 delete screen. The gate passes in a fresh worktree.
+
+**Decision, 2026-09-29.** Owns widened to the route golden and the
+browser mirror, which list routes individually and fail on the added
+entry until they carry it (same pattern as T8.11).
 
 ### T8.15: Google wiring
 ```yaml
