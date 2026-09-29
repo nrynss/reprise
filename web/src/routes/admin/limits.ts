@@ -29,6 +29,26 @@ export interface AdminSnapshot {
 // state instead of mistaking denial for a dead route.
 export const OWNER_REQUIRED = 'owner_required';
 
+// OPERATOR_REQUIRED is the envelope code the operator check answers with.
+// Guests get 401 and signed-in callers with no listed identity get 403
+// under this one code, so the page branches once and reads the status
+// for the sign-in state.
+export const OPERATOR_REQUIRED = 'operator_required';
+
+// AdminRefusal carries a refused admin call. Code names the envelope code
+// and status names the HTTP answer, so the page tells a guest to sign in
+// and tells a signed-in caller their address holds no operator role.
+export class AdminRefusal extends Error {
+	code: string;
+	status: number;
+	constructor(code: string, status: number) {
+		super(code);
+		this.name = 'AdminRefusal';
+		this.code = code;
+		this.status = status;
+	}
+}
+
 // SESSIONS_PAUSED is the mint refusal code while the switch is set. The
 // preflight screen branches on it to render the recording paused state.
 export const SESSIONS_PAUSED = 'sessions_paused';
@@ -53,6 +73,13 @@ export function isOwnerRequired(raw: string): boolean {
 	const parsed = parseErrorEnvelope(raw);
 	if (!parsed.ok) return false;
 	return parsed.value.error.code === OWNER_REQUIRED;
+}
+
+// isOperatorRequired reports whether the raw body is the operator denial.
+export function isOperatorRequired(raw: string): boolean {
+	const parsed = parseErrorEnvelope(raw);
+	if (!parsed.ok) return false;
+	return parsed.value.error.code === OPERATOR_REQUIRED;
 }
 
 // parseSnapshot decodes a snapshot body. It returns the snapshot or the
@@ -120,13 +147,13 @@ export function guestSpendNotice(snapshot: AdminSnapshot, query: string): string
 }
 
 // fetchSnapshot reads the admin snapshot, with an optional per-owner
-// figure. It throws the envelope code on refusal.
+// figure. It throws an AdminRefusal on refusal.
 export async function fetchSnapshot(fetchFn: FetchFn, owner?: string): Promise<AdminSnapshot> {
 	const target = owner ? `/api/admin/limits?owner=${encodeURIComponent(owner)}` : '/api/admin/limits';
 	const response = await fetchFn(target);
 	const raw = await response.text();
 	const parsed = parseSnapshot(raw);
-	if (!parsed.ok) throw new Error(parsed.code);
+	if (!parsed.ok) throw new AdminRefusal(parsed.code, response.status);
 	return parsed.value;
 }
 
@@ -139,6 +166,6 @@ export async function setPaused(fetchFn: FetchFn, paused: boolean): Promise<bool
 	});
 	const raw = await response.text();
 	const parsed = parsePause(raw);
-	if (!parsed.ok) throw new Error(parsed.code);
+	if (!parsed.ok) throw new AdminRefusal(parsed.code, response.status);
 	return parsed.paused;
 }

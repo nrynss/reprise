@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { pageTitle } from '$lib/shell';
 	import {
+		AdminRefusal,
 		emptyAdminSnapshot,
 		fetchSnapshot,
 		formatCents,
 		formatMinutes,
 		formatSpend,
 		guestSpendNotice,
+		OPERATOR_REQUIRED,
 		OWNER_REQUIRED,
 		pausedLabel,
 		setPaused
@@ -15,17 +17,25 @@
 	let phase = $state('loading');
 	let snapshot = $state(emptyAdminSnapshot);
 	let failure = $state('');
+	let denial = $state<'signin' | 'forbidden' | ''>('');
 	let ownerQuery = $state('');
 	let flipping = $state(false);
 
 	async function load(owner = '') {
 		phase = 'loading';
 		failure = '';
+		denial = '';
 		try {
 			snapshot = await fetchSnapshot(fetch, owner || undefined);
 			phase = 'ready';
 		} catch (error) {
+			if (error instanceof AdminRefusal && error.code === OPERATOR_REQUIRED) {
+				denial = error.status === 403 ? 'forbidden' : 'signin';
+				phase = 'denied';
+				return;
+			}
 			if (error instanceof Error && error.message === OWNER_REQUIRED) {
+				denial = 'signin';
 				phase = 'denied';
 				return;
 			}
@@ -40,6 +50,11 @@
 		try {
 			snapshot.sessions_paused = await setPaused(fetch, next);
 		} catch (error) {
+			if (error instanceof AdminRefusal && error.code === OPERATOR_REQUIRED) {
+				denial = error.status === 403 ? 'forbidden' : 'signin';
+				phase = 'denied';
+				return;
+			}
 			failure = error instanceof Error ? error.message : 'the switch could not flip';
 			phase = 'failed';
 		} finally {
@@ -65,13 +80,23 @@
 	{/if}
 
 	{#if phase === 'denied'}
-		<section aria-label="Owner sign-in">
-			<h2>Owner sign-in needed</h2>
-			<p>
-				This page flips the session switch and reads today&apos;s spend. It opens
-				once the owner login lands. Guests never reach these controls.
-			</p>
-		</section>
+		{#if denial === 'forbidden'}
+			<section aria-label="Operator access">
+				<h2>Operator access needed</h2>
+				<p>
+					This page flips the session switch and reads today&apos;s spend. This
+					address is signed in, but it is not on the operator list.
+				</p>
+			</section>
+		{:else}
+			<section aria-label="Operator sign-in">
+				<h2>Sign in needed</h2>
+				<p>
+					This page flips the session switch and reads today&apos;s spend. Sign
+					in with an operator address to open it.
+				</p>
+			</section>
+		{/if}
 	{/if}
 
 	{#if phase === 'failed'}

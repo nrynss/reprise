@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -45,6 +46,7 @@ import (
 	"github.com/nrynss/reprise/internal/gemini"
 	"github.com/nrynss/reprise/internal/host"
 	"github.com/nrynss/reprise/internal/identity"
+	"github.com/nrynss/reprise/internal/limits"
 	"github.com/nrynss/reprise/internal/memory"
 	"github.com/nrynss/reprise/internal/privacy"
 	"github.com/nrynss/reprise/internal/render"
@@ -3066,5 +3068,114 @@ func TestBootMountsLoginRoutes(t *testing.T) {
 	}
 	if !hasCookie {
 		t.Fatalf("POST /api/login/signout set no %q cookie", identity.CookieName)
+	}
+}
+
+// TestBootOperatorGateAnswers401403AndServesOperator boots the real route
+// wiring with one operator address and drives the admin snapshot route three
+// ways. A guest answers 401, a signed-in caller with no listed identity
+// answers 403, and the listed email operator reads the snapshot. Both
+// refusals carry the operator code, so screens branch on one value and read
+// the status for the sign-in state. The identities count is unchanged at the
+// end, which proves the check path writes nothing.
+func TestBootOperatorGateAnswers401403AndServesOperator(t *testing.T) {
+	loaded := bootSettings(t, t.TempDir())
+	loaded.Operators = []string{"email:boss@example.com"}
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	mux := http.NewServeMux()
+	if _, err := wireAPI(ctx, mux, loaded, bootPlan{advancePeriod: 10 * time.Millisecond}); err != nil {
+		t.Fatalf("boot: %v", err)
+	}
+	db := openBootDB(t, loaded)
+
+	adminCode := func(rec *httptest.ResponseRecorder) string {
+		t.Helper()
+		var body struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode admin refusal %q: %v", rec.Body.String(), err)
+		}
+		return body.Error.Code
+	}
+
+	guest := httptest.NewRecorder()
+	mux.ServeHTTP(guest, httptest.NewRequest(http.MethodGet, "/api/admin/limits", nil))
+	if guest.Code != http.StatusUnauthorized {
+		t.Fatalf("guest admin status = %d, want 401", guest.Code)
+	}
+	if code := adminCode(guest); code != limits.CodeOperatorRequired {
+		t.Fatalf("guest admin code = %q, want %q", code, limits.CodeOperatorRequired)
+	}
+
+	signSession := func(sessionID string) string {
+		t.Helper()
+		mac := hmac.New(sha256.New, []byte("boot-probe-signing-key"))
+		_, _ = mac.Write([]byte(sessionID))
+		return sessionID + "." + hex.EncodeToString(mac.Sum(nil))
+	}
+	plantSignedIn := func(userID, address string) *http.Cookie {
+		t.Helper()
+		sessionID, err := keelid.New()
+		if err != nil {
+			t.Fatalf("mint session id: %v", err)
+		}
+		identityID, err := keelid.New()
+		if err != nil {
+			t.Fatalf("mint identity id: %v", err)
+		}
+		now := time.Now().Unix()
+		writer := db.Writer()
+		if _, err := writer.ExecContext(ctx, `INSERT INTO users (id, kind, created_at, last_seen_at) VALUES (?, 'owner', ?, ?)`, userID, now, now); err != nil {
+			t.Fatalf("insert user: %v", err)
+		}
+		if _, err := writer.ExecContext(ctx, `INSERT INTO identities (id, user_id, provider, subject, created_at) VALUES (?, ?, 'email', ?, ?)`, identityID, userID, address, now); err != nil {
+			t.Fatalf("insert identity: %v", err)
+		}
+		if _, err := writer.ExecContext(ctx, `INSERT INTO guest_sessions (id, user_id, created_at, revoked) VALUES (?, ?, ?, 0)`, sessionID, userID, now); err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+		return &http.Cookie{Name: identity.CookieName, Value: signSession(sessionID)}
+	}
+
+	stranger := httptest.NewRecorder()
+	strangerReq := httptest.NewRequest(http.MethodGet, "/api/admin/limits", nil)
+	strangerReq.AddCookie(plantSignedIn("user-stranger", "visitor@example.com"))
+	mux.ServeHTTP(stranger, strangerReq)
+	if stranger.Code != http.StatusForbidden {
+		t.Fatalf("non-operator admin status = %d, want 403", stranger.Code)
+	}
+	if code := adminCode(stranger); code != limits.CodeOperatorRequired {
+		t.Fatalf("non-operator admin code = %q, want %q", code, limits.CodeOperatorRequired)
+	}
+
+	operator := httptest.NewRecorder()
+	operatorReq := httptest.NewRequest(http.MethodGet, "/api/admin/limits", nil)
+	operatorReq.AddCookie(plantSignedIn("user-boss", "boss@example.com"))
+	mux.ServeHTTP(operator, operatorReq)
+	if operator.Code != http.StatusOK {
+		t.Fatalf("operator admin status = %d, want 200: %s", operator.Code, operator.Body.String())
+	}
+	var snapshot struct {
+		Caps struct {
+			GuestMaxSessions int `json:"guest_max_sessions"`
+		} `json:"caps"`
+	}
+	if err := json.Unmarshal(operator.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode operator snapshot: %v", err)
+	}
+	if snapshot.Caps.GuestMaxSessions != 10 {
+		t.Fatalf("operator guest cap = %d, want the wired 10", snapshot.Caps.GuestMaxSessions)
+	}
+
+	var identities int
+	if err := db.Reader().QueryRowContext(ctx, `SELECT COUNT(*) FROM identities`).Scan(&identities); err != nil {
+		t.Fatalf("count identities: %v", err)
+	}
+	if identities != 2 {
+		t.Fatalf("identities = %d, want the two planted rows", identities)
 	}
 }

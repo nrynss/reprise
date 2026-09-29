@@ -182,6 +182,41 @@ func (s *Service) Owns(ctx context.Context, ownerID string) bool {
 	return user.ID == ownerID
 }
 
+// IdentityKey is one sign-in key attached to a user. Provider names the
+// sign-in method and Subject names the account behind it.
+type IdentityKey struct {
+	// Provider names the sign-in method, such as email or google.
+	Provider string
+	// Subject names the account, such as the address or the issuer sub.
+	Subject string
+}
+
+// IdentitiesForUser returns every sign-in key attached to userID. It reads
+// only, so the admin gate calls it on the request path without changing
+// ownership or seed state.
+func (s *Service) IdentitiesForUser(ctx context.Context, userID string) ([]IdentityKey, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("%w: user id must not be empty", ErrInvalid)
+	}
+	rows, err := s.db.Reader().QueryContext(ctx, `SELECT provider, subject FROM identities WHERE user_id = ? ORDER BY provider, subject`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("identity: read identities: %w", err)
+	}
+	defer rows.Close()
+	var keys []IdentityKey
+	for rows.Next() {
+		var key IdentityKey
+		if err := rows.Scan(&key.Provider, &key.Subject); err != nil {
+			return nil, fmt.Errorf("identity: read identities: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("identity: read identities: %w", err)
+	}
+	return keys, nil
+}
+
 // Revoke marks a session revoked. The next request carrying it resolves
 // as anonymous, because every request reads the rows. Revoking an unknown
 // id succeeds, since an unknown id is already unusable.

@@ -419,6 +419,27 @@ func (w *mediaRefusalWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
+// identityOperatorSource adapts the sign-in service to the operator check
+// seam. The check declares the interface and the sign-in service owns the
+// rows, so this type is the one place the two meet. It reads only, so the
+// check path writes nothing.
+type identityOperatorSource struct {
+	service *identity.Service
+}
+
+// IdentitiesForUser returns every sign-in key attached to userID.
+func (s identityOperatorSource) IdentitiesForUser(ctx context.Context, userID string) ([]limits.OperatorIdentity, error) {
+	keys, err := s.service.IdentitiesForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]limits.OperatorIdentity, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, limits.OperatorIdentity{Provider: key.Provider, Subject: key.Subject})
+	}
+	return out, nil
+}
+
 // hostBuilder adapts the host prompt loader to the broker config seam. The
 // broker declares the interface and the host owns the rows, so this type is
 // the one place the two meet.
@@ -686,11 +707,15 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 	if err != nil {
 		return nil, fmt.Errorf("reprise: open session broker: %w", err)
 	}
+	operatorAuth, err := limits.NewOperatorAuth(loaded.Operators, nil, identityOperatorSource{service: identitySvc})
+	if err != nil {
+		return nil, fmt.Errorf("reprise: open operator check: %w", err)
+	}
 	adminSvc, err := limits.New(limits.Config{
 		Flags:             flagStore,
 		Budgets:           keyed,
 		Global:            costStore,
-		Auth:              limits.StubOwnerAuth{},
+		Auth:              operatorAuth,
 		GuestMaxSessions:  loaded.GuestMaxSessions,
 		SessionMaxSeconds: loaded.SessionMaxSeconds,
 		DailySpendCents:   loaded.DailySpendCents,

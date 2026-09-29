@@ -2,17 +2,22 @@
 // literal, so no clock and no network stand anywhere near these tests.
 import { describe, expect, it } from 'vitest';
 import {
+	AdminRefusal,
+	fetchSnapshot,
 	formatCents,
 	formatMinutes,
 	formatSpend,
 	guestSpendNotice,
 	GUEST_QUOTA_REACHED,
+	isOperatorRequired,
 	isOwnerRequired,
+	OPERATOR_REQUIRED,
 	OWNER_REQUIRED,
 	parsePause,
 	parseSnapshot,
 	pausedLabel,
-	SESSIONS_PAUSED
+	SESSIONS_PAUSED,
+	setPaused
 } from './limits';
 
 const SNAPSHOT = JSON.stringify({
@@ -25,6 +30,10 @@ const DENIED = JSON.stringify({
 	error: { code: OWNER_REQUIRED, message: 'the admin page needs the owner login' }
 });
 
+const OPERATOR_DENIED = JSON.stringify({
+	error: { code: 'operator_required', message: 'the admin page needs a signed-in operator' }
+});
+
 describe('refusal codes', () => {
 	it('names the mint refusals the preflight screen branches on', () => {
 		expect(SESSIONS_PAUSED).toBe('sessions_paused');
@@ -35,6 +44,14 @@ describe('refusal codes', () => {
 		expect(isOwnerRequired(DENIED)).toBe(true);
 		expect(isOwnerRequired(SNAPSHOT)).toBe(false);
 		expect(isOwnerRequired('not json')).toBe(false);
+	});
+
+	it('recognises the operator denial', () => {
+		expect(OPERATOR_REQUIRED).toBe('operator_required');
+		expect(isOperatorRequired(OPERATOR_DENIED)).toBe(true);
+		expect(isOperatorRequired(DENIED)).toBe(false);
+		expect(isOperatorRequired(SNAPSHOT)).toBe(false);
+		expect(isOperatorRequired('not json')).toBe(false);
 	});
 });
 
@@ -101,5 +118,32 @@ describe('formatting', () => {
 
 	it('renders the session cap as minutes', () => {
 		expect(formatMinutes(1800)).toBe('30 min');
+	});
+});
+
+describe('refusals', () => {
+	it('throws the operator code with the guest status', async () => {
+		const fetchFn = async () => new Response(OPERATOR_DENIED, { status: 401 });
+		const failure = await fetchSnapshot(fetchFn, undefined).catch((error: unknown) => error);
+		expect(failure).toBeInstanceOf(AdminRefusal);
+		if (!(failure instanceof AdminRefusal)) return;
+		expect(failure.code).toBe(OPERATOR_REQUIRED);
+		expect(failure.status).toBe(401);
+		expect(failure.message).toBe(OPERATOR_REQUIRED);
+	});
+
+	it('throws the operator code with the signed-in status on the switch', async () => {
+		const fetchFn = async () => new Response(OPERATOR_DENIED, { status: 403 });
+		const failure = await setPaused(fetchFn, true).catch((error: unknown) => error);
+		expect(failure).toBeInstanceOf(AdminRefusal);
+		if (!(failure instanceof AdminRefusal)) return;
+		expect(failure.code).toBe(OPERATOR_REQUIRED);
+		expect(failure.status).toBe(403);
+	});
+
+	it('still reads the snapshot past no refusal', async () => {
+		const fetchFn = async () => new Response(SNAPSHOT, { status: 200 });
+		const parsed = await fetchSnapshot(fetchFn, undefined);
+		expect(parsed.caps.guest_max_sessions).toBe(10);
 	});
 });
