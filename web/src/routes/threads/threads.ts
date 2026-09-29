@@ -924,6 +924,8 @@ export function jobCardHref(row: SeasonRow): SeasonHref {
 // stays null until the detail exposes it, and the card omits the line.
 // Proposed says whether the editorial pass stored its proposals. Fixture
 // rows carry scripted proposals, and live rows learn it from the detail.
+// CoverPath is /api/episodes/{id}/cover while a cover exists, or empty
+// otherwise. The card shows the cover when set, and the tile when empty.
 export interface SeasonRow {
 	id: string;
 	number: number;
@@ -935,6 +937,7 @@ export interface SeasonRow {
 	jobId: string;
 	fixture: boolean;
 	proposed: boolean;
+	coverPath?: string;
 }
 
 // A fixture episode as a gallery row. Ready rows open the episode,
@@ -951,7 +954,8 @@ export function fixtureRow(episode: EpisodeFixture): SeasonRow {
 		duration: episode.duration,
 		jobId: episode.jobId,
 		fixture: true,
-		proposed: true
+		proposed: true,
+		coverPath: ''
 	};
 }
 
@@ -969,7 +973,8 @@ export function liveRow(episode: LiveEpisode, jobId: string): SeasonRow {
 		duration: null,
 		jobId,
 		fixture: false,
-		proposed: false
+		proposed: false,
+		coverPath: episode.coverPath ?? ''
 	};
 }
 
@@ -1008,14 +1013,16 @@ export interface GallerySnapshot {
 
 // Live gallery notices in plain words. The failure line names what the
 // guest lost and offers the retry, with no build vocabulary behind it.
-// Fixture lines keep their scripted wording for offline runs.
+// The loading line shows while the list loads. Demo runs show the badge
+// beside the heading instead of a sentence, so the demo notice is empty.
 export const LIVE_SEASON_FAILED_NOTICE = 'Your episodes did not load. Retry.';
 export const LIVE_SEASON_NOTICE = 'Live season, newest first.';
+export const LIVE_SEASON_LOADING_NOTICE = 'Loading your episodes.';
 
 export function emptyGallery(): GallerySnapshot {
 	return {
 		ready: false,
-		notice: 'Loading the season.',
+		notice: LIVE_SEASON_LOADING_NOTICE,
 		failed: false,
 		live: true,
 		rows: [],
@@ -1034,7 +1041,7 @@ export function initialGallery(search = ''): GallerySnapshot {
 			: 'rendering';
 	return {
 		ready: true,
-		notice: 'Scripted season. No backend needed.',
+		notice: '',
 		failed: false,
 		live: false,
 		rows: listSeason(state).map((episode) => fixtureRow(episode)),
@@ -1046,8 +1053,16 @@ export function initialGallery(search = ''): GallerySnapshot {
 // Live gallery card lines in plain words. The idle line shows before the
 // first progress reading lands. The stalled line shows when the progress
 // feed drops, and the card keeps the last mark it showed.
-export const LIVE_CARD_WAITING_NOTICE = 'Waiting for the episode to be ready.';
-export const LIVE_CARD_STALLED_NOTICE = 'Progress stopped updating. The mark above is kept.';
+export const LIVE_CARD_WAITING_NOTICE = 'Starting…';
+export const LIVE_CARD_STALLED_NOTICE = "Couldn't update progress. Showing the last mark.";
+
+// The line a running card shows, in plain words. The stage names the pass
+// in one word, so the card reads like Rendering… 75%.
+export function cardProgressDetail(stage: string, percent: number): string {
+	const name = stage.trim();
+	const label = name ? name.charAt(0).toUpperCase() + name.slice(1) : 'Rendering';
+	return `${label}… ${percent}%`;
+}
 
 // The gallery behind the season screen. The fixture flag keeps the
 // scripted season for offline runs. Otherwise the screen lists the
@@ -1082,7 +1097,7 @@ export class GalleryController {
 		if (queryValue(search, 'fixture') === '1') {
 			this.mountFixture(search);
 		} else {
-			this.snap = { ...this.snap, ready: false, notice: 'Loading the live season.' };
+			this.snap = { ...this.snap, ready: false, notice: LIVE_SEASON_LOADING_NOTICE };
 			this.emit();
 			void this.mountLive();
 		}
@@ -1316,7 +1331,7 @@ export class GalleryController {
 				[jobId]: {
 					jobId,
 					percent: seed,
-					detail: seed > 0 ? `Working · ${seed}% · kept across reload` : 'Working · starting.',
+					detail: seed > 0 ? cardProgressDetail('', seed) : LIVE_CARD_WAITING_NOTICE,
 					running: !isTerminalStatus(status),
 					status
 				}
@@ -1374,7 +1389,6 @@ export class GalleryController {
 			// No stream transition ever fires for it, so without this the
 			// card keeps the line its done state shows forever.
 			if (!running) this.recheck(entry.jobId);
-			const stage = entry.stream.stage ? `${entry.stream.stage} · ` : '';
 			const note = this.notes[entry.jobId] ?? '';
 			const detail =
 				!running && note
@@ -1385,7 +1399,7 @@ export class GalleryController {
 							? 'The pass stopped before it finished.'
 							: entry.stream.connection === 'failed'
 								? LIVE_CARD_STALLED_NOTICE
-								: `Working · ${stage}${percent}% · progress survives a reload`;
+								: cardProgressDetail(entry.stream.stage ?? '', percent);
 			const prior = next[entry.jobId];
 			if (!prior || prior.percent !== percent || prior.detail !== detail || prior.status !== status) {
 				next[entry.jobId] = { jobId: entry.jobId, percent, detail, running, status };
@@ -2065,6 +2079,9 @@ export interface LiveEpisode {
 	title: string;
 	state: string;
 	visibility: string;
+	// CoverPath is /api/episodes/{id}/cover while a cover exists, or
+	// empty otherwise. The gallery shows the cover when set.
+	coverPath: string;
 	// Stems the list row reports for the episode, or zero when the row
 	// carries none. A take that closed before storing leaves its episode in
 	// recording with no stems.
@@ -2335,6 +2352,7 @@ function parseLiveEpisode(value: unknown): LiveEpisode | null {
 		title,
 		state: textField(value, 'state'),
 		visibility: textField(value, 'visibility'),
+		coverPath: textField(value, 'cover_path'),
 		stemCount: stemField(value)
 	};
 }

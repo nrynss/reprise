@@ -4,11 +4,18 @@
 // proposal is stored, and a stopped editorial pass says why.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+	cardProgressDetail,
+	fixtureRow,
 	galleryCardKind,
 	GalleryController,
 	galleryPass,
-	parseEpisodeDetail,
 	jobCardHref,
+	LIVE_CARD_STALLED_NOTICE,
+	LIVE_CARD_WAITING_NOTICE,
+	liveRow,
+	parseEpisodeDetail,
+	parseSeasonList,
+	type EpisodeFixture,
 	type GalleryCardProgress,
 	type GallerySnapshot,
 	type SeasonRow
@@ -26,12 +33,13 @@ function row(partial: Partial<SeasonRow>): SeasonRow {
 		jobId: '',
 		fixture: false,
 		proposed: false,
+		coverPath: '',
 		...partial
 	};
 }
 
 function card(status: GalleryCardProgress['status']): GalleryCardProgress {
-	return { jobId: 'job-7', percent: 40, detail: 'Working', running: status === 'running', status };
+	return { jobId: 'job-7', percent: 40, detail: 'Rendering… 40%', running: status === 'running', status };
 }
 
 const titled = [{ id: 'title-1', kind: 'title', start_word: 0, end_word: 0, reason: 'Take', decision: '' }];
@@ -211,5 +219,84 @@ describe('gallery pass', () => {
 
 	it('names no pass when the detail names no transcript pass', () => {
 		expect(galleryPass(detail({ transcript_outcome: null }))).toBeNull();
+	});
+});
+
+describe('gallery cover', () => {
+	it('carries the cover path from the list onto the episode', () => {
+		const season = parseSeasonList(
+			JSON.stringify({
+				episodes: [
+					{ id: 'e1', number: 1, title: 'Take', state: 'ready', visibility: 'private', cover_path: '/api/episodes/e1/cover' },
+					{ id: 'e2', number: 2, title: 'Second', state: 'ready', visibility: 'private' }
+				]
+			})
+		);
+		expect(season.find((episode) => episode.id === 'e1')?.coverPath).toBe('/api/episodes/e1/cover');
+		expect(season.find((episode) => episode.id === 'e2')?.coverPath).toBe('');
+	});
+
+	it('carries the cover path from the episode onto its row', () => {
+		const season = parseSeasonList(
+			JSON.stringify({
+				episodes: [
+					{ id: 'e1', number: 1, title: 'Take', state: 'ready', visibility: 'private', cover_path: '/api/episodes/e1/cover' }
+				]
+			})
+		);
+		const episode = season[0];
+		if (!episode) throw new Error('missing episode');
+		expect(liveRow(episode, '').coverPath).toBe('/api/episodes/e1/cover');
+	});
+
+	it('leaves the tile on a row with no cover', () => {
+		const season = parseSeasonList(
+			JSON.stringify({
+				episodes: [{ id: 'e2', number: 2, title: 'Second', state: 'ready', visibility: 'private' }]
+			})
+		);
+		const episode = season[0];
+		if (!episode) throw new Error('missing episode');
+		expect(liveRow(episode, '').coverPath).toBe('');
+		expect(fixtureRow(listSeasonNone()).coverPath).toBe('');
+	});
+});
+
+function listSeasonNone(): EpisodeFixture {
+	return {
+		id: 'ep-1',
+		number: 1,
+		title: 'Take',
+		date: 'Aug 8',
+		duration: 70,
+		state: 'ready',
+		jobId: '',
+		published: false,
+		notes: '',
+		chapters: [],
+		turns: []
+	};
+}
+
+describe('gallery progress lines', () => {
+	it('reads like Rendering… 75% with the stage named in one word', () => {
+		expect(cardProgressDetail('rendering', 75)).toBe('Rendering… 75%');
+		expect(cardProgressDetail('transcribing', 20)).toBe('Transcribing… 20%');
+		expect(cardProgressDetail('', 40)).toBe('Rendering… 40%');
+	});
+
+	it('names no machinery and no reload in any card line', () => {
+		const banned = ['job', 'backend', 'detail', 'fixture', 'scripted', 'endpoint'];
+		const lines = [
+			cardProgressDetail('rendering', 75),
+			LIVE_CARD_WAITING_NOTICE,
+			LIVE_CARD_STALLED_NOTICE
+		];
+		for (const line of lines) {
+			const lower = line.toLowerCase();
+			for (const word of banned) expect(lower).not.toContain(word);
+			expect(line).not.toContain('Working');
+			expect(line).not.toContain('reload');
+		}
 	});
 });
