@@ -311,7 +311,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       internal/identity/identity.go, cmd/reprise/main.go, cmd/reprise/main_test.go,
              web/src/routes/admin/
-status:     in-progress:land:t8.13-impl@f56ee9b16b4e58315aa44e86217b928613484471
+status:     done:a5e5d3b
 ```
 T8.9 ships the `OperatorAuth` seam against a stubbed source, and production
 still wires `StubOwnerAuth`, so every admin endpoint keeps answering
@@ -387,7 +387,7 @@ golden test fails on the added entry until they carry it.
 
 ### T8.12: Session-status route
 ```yaml
-requires:   T8.4, T8.11, T8.13
+requires:   T8.4, T8.11, T8.13, T8.14
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/identity/status.go, internal/identity/status_test.go
@@ -426,6 +426,11 @@ in a fresh worktree.
 
 ### What exists now
 
+T8.13 landed at a5e5d3b after round 1 APPROVE with zero findings.
+The operator check runs in production behind the operators
+setting, with a read-only identity adapter and plain admin
+refusals. Reviewed commit f56ee9b rebased clean. Race tests pass
+on the landed commit. T8.14 unblocks on this landing.
 T8.7 landed at 008110d after round 1 APPROVE with zero in-scope
 findings. The deletion core is pinned: fresh-code re-auth through
 the sign-in verifier, full fan-out erasure, identity, code,
