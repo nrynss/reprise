@@ -599,8 +599,53 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// TestShippedFilesAgreeOnSecretNames reads the example env file and both
-// shipped settings files and pins that they name the same env variables. A
+// deployEnvNames collects the variable names the deploy notes assign inside
+// fenced blocks. The box env file carries those entries with a placeholder
+// or an empty value. A shipped file may read any of them.
+func deployEnvNames(t *testing.T, root string) map[string]bool {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, "deploy", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	fenced := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			fenced = !fenced
+			continue
+		}
+		if !fenced {
+			continue
+		}
+		name, rest, found := strings.Cut(trimmed, "=")
+		if !found || (rest != "" && !strings.HasPrefix(rest, "...")) {
+			continue
+		}
+		if name == "" {
+			continue
+		}
+		clean := true
+		for _, r := range name {
+			if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+				clean = false
+				break
+			}
+		}
+		if clean {
+			names[name] = true
+		}
+	}
+	if len(names) == 0 {
+		t.Fatal("deploy/README.md names no env variable")
+	}
+	return names
+}
+
+// TestShippedFilesAgreeOnSecretNames reads the example env file, the deploy
+// notes and both shipped settings files. It pins that every env variable a
+// shipped file reads is documented in the example or in the deploy notes. A
 // name that drifts in one file alone is a startup failure nobody sees
 // until boot.
 func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
@@ -609,7 +654,7 @@ func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"ASSEMBLYAI_API_KEY=", "SESSION_SIGNING_KEY=", "RESEND_API_KEY=", "GOOGLE_CLIENT_SECRET=", "LOGIN_CODE_KEY="} {
+	for _, want := range []string{"ASSEMBLYAI_API_KEY=", "SESSION_SIGNING_KEY="} {
 		if !strings.Contains(string(example), want) {
 			t.Fatalf(".env.example lacks %q", want)
 		}
@@ -623,6 +668,9 @@ func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
 			inExample[strings.TrimSpace(name)] = true
 		}
 	}
+	// The deploy notes name the box env entries, including the ones the
+	// local example does not template. Either listing documents a name.
+	inDeployNotes := deployEnvNames(t, root)
 	files := []struct {
 		file    string
 		envPath string
@@ -672,8 +720,8 @@ func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
 			t.Fatalf("%s names no env variable", file.file)
 		}
 		for name := range vars {
-			if !inExample[name] {
-				t.Errorf("%s reads %s and .env.example does not list it", file.file, name)
+			if !inExample[name] && !inDeployNotes[name] {
+				t.Errorf("%s reads %s but neither .env.example nor deploy/README.md names it", file.file, name)
 			}
 		}
 		for name := range inExample {

@@ -64,9 +64,6 @@ func bootSettings(t *testing.T, dir string) settings.Settings {
 	}
 	assembly := write("assembly.key", []byte("boot-probe-assembly-key"))
 	signing := write("signing.key", []byte("boot-probe-signing-key"))
-	resend := write("resend.key", []byte("boot-probe-resend-key"))
-	google := write("google.key", []byte("boot-probe-google-secret"))
-	logincode := write("logincode.key", []byte("boot-probe-login-code-key"))
 	vertex := write("vertex.json", account)
 	doc := `transcription_model = "universal-3.5-pro"
 editorial_model = "gemini-3.8-flash"
@@ -81,10 +78,6 @@ media_dir = "` + filepath.Join(dir, "media") + `"
 vertex_project = "boot-probe"
 vertex_location = "us-central1"
 public_origin = "http://localhost:8080"
-mail_from = "Reprise <reprise@mail.nryn.dev>"
-mail_reply_to = ""
-google_client_id = ""
-operators = []
 
 [secrets.assemblyai_api_key]
 source = "file"
@@ -97,18 +90,6 @@ path = "` + vertex + `"
 [secrets.session_signing_key]
 source = "file"
 path = "` + signing + `"
-
-[secrets.resend_api_key]
-source = "file"
-path = "` + resend + `"
-
-[secrets.google_client_secret]
-source = "file"
-path = "` + google + `"
-
-[secrets.login_code_key]
-source = "file"
-path = "` + logincode + `"
 `
 	for _, sub := range []string{"data", "media"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
