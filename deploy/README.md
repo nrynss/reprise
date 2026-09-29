@@ -52,12 +52,26 @@ sudo $EDITOR /etc/reprise/env
 The directory stays root-owned at `0700`. Each file is bind mounted by
 path, so the container never needs to search the directory.
 
-The env file carries two lines and nothing else:
+The env file carries five lines and nothing else:
 
 ```
 ASSEMBLYAI_API_KEY=...
 SESSION_SIGNING_KEY=...
+RESEND_API_KEY=...
+GOOGLE_CLIENT_SECRET=
+LOGIN_CODE_KEY=...
 ```
+
+`RESEND_API_KEY` sends the sign-in codes. `LOGIN_CODE_KEY` signs the codes
+and the address hashes. `GOOGLE_CLIENT_SECRET` may stay empty until Google
+sign-in is configured. The entry must stay present, because the settings
+file reads it at boot. The boot refuses to start when a required entry is
+missing or empty.
+
+The sending address and the operator list live in the settings file, not
+here. `mail_from` names the sending address. `operators` names the
+identities that hold the operator role. `mail_reply_to` stays empty unless
+replies should reach an inbox the owner reads.
 
 Place the Vertex AI service account key beside it:
 

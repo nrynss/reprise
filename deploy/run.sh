@@ -21,7 +21,9 @@
 # SECRETS. The process reads every secret from two root-owned 0600 files on
 # the box, mounted read-only into the container:
 #
-#   /etc/reprise/env            ASSEMBLYAI_API_KEY and SESSION_SIGNING_KEY
+#   /etc/reprise/env            ASSEMBLYAI_API_KEY, SESSION_SIGNING_KEY,
+#                               RESEND_API_KEY, GOOGLE_CLIENT_SECRET and
+#                               LOGIN_CODE_KEY
 #   /etc/reprise/gemini-sa.json the Vertex AI service account key
 #
 # The settings file baked into the image points at those paths, so no secret
@@ -102,9 +104,11 @@ else
   echo "warning: python3 is not on PATH, skipping the key file parse check." >&2
 fi
 
-# The env file must provide both variables. Sourcing runs in a clean
-# environment so outer shell variables cannot mask a missing key, and only
-# missing names are reported, never values.
+# The env file must provide the required variables. Sourcing runs in a
+# clean environment so outer shell variables cannot mask a missing key,
+# and only missing names are reported, never values. GOOGLE_CLIENT_SECRET
+# stays out of this check. It may stay empty until Google sign-in is
+# configured, and the settings loader accepts the empty entry.
 # The assignment goes after `env -i`, never before it. A prefix assignment
 # sets the variable in env's own environment, which `-i` then wipes before
 # it execs bash, so the inner `set -u` dies on an unbound ENV_FILE and the
@@ -115,6 +119,8 @@ PREFLIGHT_ERR="$(env -i ENV_FILE="${ENV_FILE}" bash -c '
   missing=()
   [[ -z "${ASSEMBLYAI_API_KEY:-}" ]] && missing+=("ASSEMBLYAI_API_KEY")
   [[ -z "${SESSION_SIGNING_KEY:-}" ]] && missing+=("SESSION_SIGNING_KEY")
+  [[ -z "${RESEND_API_KEY:-}" ]] && missing+=("RESEND_API_KEY")
+  [[ -z "${LOGIN_CODE_KEY:-}" ]] && missing+=("LOGIN_CODE_KEY")
   if [[ ${#missing[@]} -gt 0 ]]; then
     echo "required variable(s) missing or empty: ${missing[*]}"
     exit 1

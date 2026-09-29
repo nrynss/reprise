@@ -17,6 +17,9 @@ const (
 	dummyAssemblyKey = "dummy-assembly-key-9f3k2"
 	dummyGeminiCred  = "dummy-gemini-cred-7q2m8"
 	dummySigningKey  = "dummy-signing-key-4z8w1"
+	dummyResendKey   = "dummy-resend-key-6t4n9"
+	dummyGoogleSec   = "dummy-google-secret-3h8j2"
+	dummyLoginKey    = "dummy-login-key-5d7p4"
 )
 
 // helperEnv marks a rerun of this test binary as a startup helper.
@@ -109,11 +112,14 @@ func writeConfig(t *testing.T, body string) string {
 	return path
 }
 
-// fullEnv holds the two dummy values the env file carries. The Gemini
+// fullEnv holds the dummy values the env file carries. The Gemini
 // credential is a key file, so it is not one of them.
 func fullEnv() string {
 	return "ASSEMBLYAI_API_KEY=" + dummyAssemblyKey + "\n" +
-		"SESSION_SIGNING_KEY=" + dummySigningKey + "\n"
+		"SESSION_SIGNING_KEY=" + dummySigningKey + "\n" +
+		"RESEND_API_KEY=" + dummyResendKey + "\n" +
+		"GOOGLE_CLIENT_SECRET=" + dummyGoogleSec + "\n" +
+		"LOGIN_CODE_KEY=" + dummyLoginKey + "\n"
 }
 
 // writeKeyFile writes a dummy service account key at mode 0600 and returns
@@ -154,6 +160,10 @@ media_dir = "./media"
 public_origin = "http://localhost:8080"
 vertex_project = "reprise-test"
 vertex_location = "global"
+mail_from = "Reprise <reprise@mail.nryn.dev>"
+mail_reply_to = ""
+google_client_id = ""
+operators = []
 
 [secrets.assemblyai_api_key]
 source = "env_file"
@@ -168,7 +178,22 @@ path = %q
 source = "env_file"
 path = %q
 var = "SESSION_SIGNING_KEY"
-`, envPath, keyPath, envPath)
+
+[secrets.resend_api_key]
+source = "env_file"
+path = %q
+var = "RESEND_API_KEY"
+
+[secrets.google_client_secret]
+source = "env_file"
+path = %q
+var = "GOOGLE_CLIENT_SECRET"
+
+[secrets.login_code_key]
+source = "env_file"
+path = %q
+var = "LOGIN_CODE_KEY"
+`, envPath, keyPath, envPath, envPath, envPath, envPath)
 }
 
 // TestStartupStopsOnMissingSecret starts the helper against an env file
@@ -225,6 +250,9 @@ func TestBootLogShowsPlanWithoutValues(t *testing.T) {
 		"secrets.assemblyai_api_key",
 		"secrets.gemini_credential",
 		"secrets.session_signing_key",
+		"secrets.resend_api_key",
+		"secrets.google_client_secret",
+		"secrets.login_code_key",
 		"env_file",
 		"file",
 		keyPath,
@@ -254,7 +282,7 @@ func TestBootLogShowsPlanWithoutValues(t *testing.T) {
 	if gemini[3] != "resolved" {
 		t.Fatalf("credential status = %q, want %q", gemini[3], "resolved")
 	}
-	for _, secret := range []string{dummyAssemblyKey, dummyGeminiCred, dummySigningKey} {
+	for _, secret := range []string{dummyAssemblyKey, dummyGeminiCred, dummySigningKey, dummyResendKey, dummyGoogleSec, dummyLoginKey} {
 		if strings.Contains(out, secret) {
 			t.Fatalf("plan output carries a secret value %q", secret)
 		}
@@ -318,6 +346,39 @@ func TestLoadResolvesSecrets(t *testing.T) {
 	if got != dummySigningKey {
 		t.Fatal("signing key revealed the wrong value")
 	}
+	got, err = settings.Secrets.ResendAPIKey.Reveal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != dummyResendKey {
+		t.Fatal("resend key revealed the wrong value")
+	}
+	got, err = settings.Secrets.GoogleClientSecret.Reveal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != dummyGoogleSec {
+		t.Fatal("google secret revealed the wrong value")
+	}
+	got, err = settings.Secrets.LoginCodeKey.Reveal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != dummyLoginKey {
+		t.Fatal("login code key revealed the wrong value")
+	}
+	if settings.MailFrom != "Reprise <reprise@mail.nryn.dev>" {
+		t.Fatalf("mail from = %q, want the file value", settings.MailFrom)
+	}
+	if settings.MailReplyTo != "" {
+		t.Fatalf("mail reply-to = %q, want empty", settings.MailReplyTo)
+	}
+	if settings.GoogleClientID != "" {
+		t.Fatalf("google client id = %q, want empty", settings.GoogleClientID)
+	}
+	if len(settings.Operators) != 0 {
+		t.Fatalf("operators = %q, want none", settings.Operators)
+	}
 	if !strings.Contains(plan.String(), "env_file") {
 		t.Fatalf("plan %q names no source", plan.String())
 	}
@@ -375,8 +436,10 @@ func TestLoaderRefusesUnknownKey(t *testing.T) {
 // must fail with the secret sentinel.
 func TestLoaderRefusesQuotedEnvValue(t *testing.T) {
 	envPath := writeEnv(t, "ASSEMBLYAI_API_KEY=\""+dummyAssemblyKey+"\"\n"+
-		"GEMINI_CREDENTIAL="+dummyGeminiCred+"\n"+
-		"SESSION_SIGNING_KEY="+dummySigningKey+"\n")
+		"SESSION_SIGNING_KEY="+dummySigningKey+"\n"+
+		"RESEND_API_KEY="+dummyResendKey+"\n"+
+		"GOOGLE_CLIENT_SECRET="+dummyGoogleSec+"\n"+
+		"LOGIN_CODE_KEY="+dummyLoginKey+"\n")
 	t.Setenv(PathVar, writeConfig(t, configDoc(envPath)))
 
 	if _, _, err := Load(context.Background()); !errors.Is(err, ErrSecret) {
@@ -546,7 +609,7 @@ func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"ASSEMBLYAI_API_KEY=", "SESSION_SIGNING_KEY="} {
+	for _, want := range []string{"ASSEMBLYAI_API_KEY=", "SESSION_SIGNING_KEY=", "RESEND_API_KEY=", "GOOGLE_CLIENT_SECRET=", "LOGIN_CODE_KEY="} {
 		if !strings.Contains(string(example), want) {
 			t.Fatalf(".env.example lacks %q", want)
 		}
@@ -582,6 +645,12 @@ func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
 			fmt.Sprintf("path = %q", file.keyPath),
 			"[secrets.session_signing_key]",
 			`var = "SESSION_SIGNING_KEY"`,
+			"[secrets.resend_api_key]",
+			`var = "RESEND_API_KEY"`,
+			"[secrets.google_client_secret]",
+			`var = "GOOGLE_CLIENT_SECRET"`,
+			"[secrets.login_code_key]",
+			`var = "LOGIN_CODE_KEY"`,
 		} {
 			if !strings.Contains(doc, want) {
 				t.Fatalf("%s lacks %q", file.file, want)
@@ -627,6 +696,181 @@ func TestShippedFilesAgreeOnSecretNames(t *testing.T) {
 		}
 		if got != dummyGeminiCred {
 			t.Fatalf("%s credential revealed the wrong value", file.file)
+		}
+	}
+}
+
+// TestStartupStopsOnMissingResendKey starts the helper against an env file
+// that lacks the Resend key. Startup must stop, and the report must name
+// the key, the source and the path.
+func TestStartupStopsOnMissingResendKey(t *testing.T) {
+	envPath := writeEnv(t, "ASSEMBLYAI_API_KEY="+dummyAssemblyKey+"\n"+
+		"SESSION_SIGNING_KEY="+dummySigningKey+"\n"+
+		"GOOGLE_CLIENT_SECRET="+dummyGoogleSec+"\n"+
+		"LOGIN_CODE_KEY="+dummyLoginKey+"\n")
+	configPath := writeConfig(t, configDoc(envPath))
+
+	out, code := runSelf(t, "load", "", configPath)
+	if code == 0 {
+		t.Fatal("helper exited 0 with a missing resend key, want nonzero")
+	}
+	for _, want := range []string{"resend_api_key", "env_file", envPath} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("helper output %q lacks %q", out, want)
+		}
+	}
+}
+
+// TestLoaderRefusesMissingMailFrom drops the sending address from an
+// otherwise valid document. The load must fail, because the key is
+// required and sign-in mail names no sender of its own.
+func TestLoaderRefusesMissingMailFrom(t *testing.T) {
+	envPath := writeEnv(t, fullEnv())
+	doc := configDoc(envPath)
+	doc = strings.Replace(doc, "mail_from = \"Reprise <reprise@mail.nryn.dev>\"\n", "", 1)
+	t.Setenv(PathVar, writeConfig(t, doc))
+
+	_, _, err := Load(context.Background())
+	if err == nil {
+		t.Fatal("load succeeded without a sending address, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "mail_from") {
+		t.Fatalf("load error %q names no sending address", err.Error())
+	}
+}
+
+// TestLoaderRefusesMissingLoginCodeKey drops the code key reference from
+// an otherwise valid document. The load must fail, because the key is
+// required and no code hashes without it.
+func TestLoaderRefusesMissingLoginCodeKey(t *testing.T) {
+	envPath := writeEnv(t, fullEnv())
+	doc := configDoc(envPath)
+	marker := "[secrets.login_code_key]\nsource = \"env_file\"\npath = " +
+		fmt.Sprintf("%q", envPath) + "\nvar = \"LOGIN_CODE_KEY\"\n"
+	doc = strings.Replace(doc, marker, "", 1)
+	t.Setenv(PathVar, writeConfig(t, doc))
+
+	_, _, err := Load(context.Background())
+	if err == nil {
+		t.Fatal("load succeeded without a code key, want a refusal")
+	}
+	if !strings.Contains(err.Error(), "login_code_key") {
+		t.Fatalf("load error %q names no code key", err.Error())
+	}
+}
+
+// TestLoadAcceptsEmptyGooglePairAndReplyTo keeps the Google secret empty
+// and the client id and reply-to unset. The load must succeed, because
+// Google sign-in is not configured yet and replies may go nowhere.
+func TestLoadAcceptsEmptyGooglePairAndReplyTo(t *testing.T) {
+	envPath := writeEnv(t, "ASSEMBLYAI_API_KEY="+dummyAssemblyKey+"\n"+
+		"SESSION_SIGNING_KEY="+dummySigningKey+"\n"+
+		"RESEND_API_KEY="+dummyResendKey+"\n"+
+		"GOOGLE_CLIENT_SECRET=\n"+
+		"LOGIN_CODE_KEY="+dummyLoginKey+"\n")
+	t.Setenv(PathVar, writeConfig(t, configDoc(envPath)))
+
+	loaded, _, err := Load(context.Background())
+	if err != nil {
+		t.Fatalf("load with an empty google secret failed: %v", err)
+	}
+	if loaded.GoogleClientID != "" {
+		t.Fatalf("google client id = %q, want empty", loaded.GoogleClientID)
+	}
+	if loaded.MailReplyTo != "" {
+		t.Fatalf("mail reply-to = %q, want empty", loaded.MailReplyTo)
+	}
+	got, err := loaded.Secrets.GoogleClientSecret.Reveal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Fatalf("google secret revealed %q, want empty", got)
+	}
+}
+
+// TestLoadReadsOperators lists two operator identities in the document.
+// The load must keep both entries in order, so the role check reads them.
+func TestLoadReadsOperators(t *testing.T) {
+	envPath := writeEnv(t, fullEnv())
+	doc := configDoc(envPath)
+	doc = strings.Replace(doc, "operators = []",
+		"operators = [\"email:owner@example.com\", \"google:12345\"]", 1)
+	t.Setenv(PathVar, writeConfig(t, doc))
+
+	loaded, _, err := Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"email:owner@example.com", "google:12345"}
+	if len(loaded.Operators) != len(want) {
+		t.Fatalf("operators = %q, want %q", loaded.Operators, want)
+	}
+	for i := range want {
+		if loaded.Operators[i] != want[i] {
+			t.Fatalf("operators = %q, want %q", loaded.Operators, want)
+		}
+	}
+}
+
+// TestShippedFilesLoadSigninFields reads both shipped settings files and
+// pins that each one carries the new inline fields and secrets. A file
+// that drops one fails the load, so sign-in would have no sender, no key
+// or no operator list to read.
+func TestShippedFilesLoadSigninFields(t *testing.T) {
+	root := repoRoot(t)
+	files := []struct {
+		file    string
+		envPath string
+		keyPath string
+	}{
+		{"config/reprise.local.toml", "/home/nryn/work/reprise/.env", "/home/nryn/.config/reprise/gemini-sa.json"},
+		{"config/reprise.box.toml", "/etc/reprise/env", "/etc/reprise/gemini-sa.json"},
+	}
+	for _, file := range files {
+		raw, err := os.ReadFile(filepath.Join(root, file.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc := string(raw)
+		for _, want := range []string{
+			"mail_from",
+			"mail_reply_to",
+			"google_client_id",
+			"operators",
+		} {
+			if !strings.Contains(doc, want) {
+				t.Fatalf("%s carries no %s", file.file, want)
+			}
+		}
+		envPath := writeEnv(t, fullEnv())
+		keyPath := writeKeyFile(t)
+		doc = strings.ReplaceAll(doc, file.envPath, envPath)
+		doc = strings.Replace(doc, file.keyPath, keyPath, 1)
+		t.Setenv(PathVar, writeConfig(t, doc))
+		got, _, err := Load(context.Background())
+		if err != nil {
+			t.Fatalf("tracked file %s does not load: %v", file.file, err)
+		}
+		if got.MailFrom == "" {
+			t.Fatalf("%s loads with no sending address", file.file)
+		}
+		if got.Operators == nil {
+			t.Fatalf("%s loads with no operator list", file.file)
+		}
+		resend, err := got.Secrets.ResendAPIKey.Reveal()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resend != dummyResendKey {
+			t.Fatalf("%s resend key revealed the wrong value", file.file)
+		}
+		codeKey, err := got.Secrets.LoginCodeKey.Reveal()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if codeKey != dummyLoginKey {
+			t.Fatalf("%s code key revealed the wrong value", file.file)
 		}
 	}
 }

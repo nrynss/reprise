@@ -14,6 +14,17 @@ media_dir = "/var/lib/reprise/media"
 vertex_project = "nryn-personal"
 vertex_location = "global"
 public_origin = "https://reprise.nryn.dev"
+# The sending address for sign-in mail. Resend needs the domain verified
+# with its SPF and DKIM records before any mail is delivered.
+mail_from = "Reprise <reprise@mail.nryn.dev>"
+# Replies go here when set. Empty means replies to sign-in mail go nowhere.
+mail_reply_to = ""
+# The OAuth client for Google sign-in. It stays empty until Google sign-in
+# is configured, and the route refuses while it is empty.
+google_client_id = ""
+# Identities that hold the operator role. Each entry reads email:<address>
+# or google:<sub>. Empty means nobody holds the role.
+operators = []
 
 [secrets.assemblyai_api_key]
 source = "env_file"
@@ -28,3 +39,18 @@ path = "/etc/reprise/gemini-sa.json"
 source = "env_file"
 path = "/etc/reprise/env"
 var = "SESSION_SIGNING_KEY"
+
+[secrets.resend_api_key]
+source = "env_file"
+path = "/etc/reprise/env"
+var = "RESEND_API_KEY"
+
+[secrets.google_client_secret]
+source = "env_file"
+path = "/etc/reprise/env"
+var = "GOOGLE_CLIENT_SECRET"
+
+[secrets.login_code_key]
+source = "env_file"
+path = "/etc/reprise/env"
+var = "LOGIN_CODE_KEY"

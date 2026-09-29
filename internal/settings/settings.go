@@ -1,7 +1,7 @@
 // Package settings loads the Reprise configuration for one environment.
 //
 // One TOML file holds inline settings and secret references. Each secret
-// names a source and never carries a value. Two read an env file. The
+// names a source and never carries a value. Five read an env file. The
 // Gemini credential is a service account key, so it names a file source
 // and the value is the key's contents. The loader resolves
 // every secret at boot and returns a plan that names each source. Log the
@@ -62,7 +62,21 @@ type Settings struct {
 	VertexProject string `toml:"vertex_project"`
 	// VertexLocation names the Vertex AI region the client calls.
 	VertexLocation string `toml:"vertex_location"`
-	// Secrets holds the three secret references. Each resolves at load.
+	// MailFrom names the sending address for sign-in mail. A later domain
+	// change is one line of config, so no code names an address.
+	MailFrom string `toml:"mail_from" config:"required"`
+	// MailReplyTo names the optional reply-to address for sign-in mail.
+	// Empty means replies go nowhere, so set it to an address someone reads.
+	MailReplyTo string `toml:"mail_reply_to"`
+	// GoogleClientID names the OAuth client for Google sign-in. It stays
+	// empty until Google sign-in is configured, and the route refuses
+	// while it is empty.
+	GoogleClientID string `toml:"google_client_id"`
+	// Operators lists the identities that hold the operator role. Each
+	// entry reads email:<address> or google:<sub>. An empty list means
+	// nobody holds the role.
+	Operators []string `toml:"operators"`
+	// Secrets holds the secret references. Each resolves at load.
 	Secrets Secrets `toml:"secrets"`
 }
 
@@ -77,6 +91,15 @@ type Secrets struct {
 	GeminiCredential config.Secret `toml:"gemini_credential" config:"required"`
 	// SessionSigningKey signs the guest session cookies.
 	SessionSigningKey config.Secret `toml:"session_signing_key" config:"required"`
+	// ResendAPIKey authorizes Resend mail sends from the server only.
+	ResendAPIKey config.Secret `toml:"resend_api_key" config:"required"`
+	// GoogleClientSecret authenticates the OAuth client for Google
+	// sign-in. The env entry stays present with an empty value until
+	// Google sign-in is configured, and the route refuses while it is empty.
+	GoogleClientSecret config.Secret `toml:"google_client_secret"`
+	// LoginCodeKey signs the email sign-in codes and address hashes. No
+	// plain code ever reaches stored rows while this key stays secret.
+	LoginCodeKey config.Secret `toml:"login_code_key" config:"required"`
 }
 
 // Load reads the settings file named by PathVar and falls back to
