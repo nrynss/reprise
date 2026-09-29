@@ -1,12 +1,12 @@
-// OwnerAuth gates the admin endpoints behind the owner's login.
+// OwnerAuth gates the admin endpoints behind the operator check.
 //
-// The owner login is still an open decision, so nothing here invents one.
-// The service takes an OwnerAuth and the handler wraps every admin route
-// in it. The guest session middleware already resolves who calls, so the
-// real login plugs in here once it lands: read the resolved user, allow
-// the owner, refuse anyone else. Until then StubOwnerAuth denies every
-// call, which keeps the page visible as a shell while no spend figure or
-// switch leaks through the API.
+// The guest session middleware already resolves who calls, so the
+// check reads the resolved user and the identity keys that user holds.
+// OperatorAuth allows callers listed in the operators setting and
+// refuses anyone else. StubOwnerAuth denies every call and stands in
+// until wiring swaps it. The service takes an OwnerAuth and the
+// handler wraps every admin route in it, so swapping needs no change
+// to the service or the handler.
 package limits
 
 import (

@@ -44,9 +44,15 @@ const (
 	// CodeInternal answers when a dependency breaks mid-call.
 	CodeInternal = broker.CodeInternal
 	// CodeOwnerRequired answers an admin call with no owner behind it.
-	// The owner login that mints that proof is still open, so the stub
-	// below answers it on every call until the login lands.
+	// The stub below answers it on every call until wiring swaps in
+	// the operator check. Screens written against the stub branch on
+	// this value.
 	CodeOwnerRequired = "owner_required"
+	// CodeOperatorRequired answers an admin call from a caller with no
+	// listed operator identity. Guests get 401 and signed-in callers
+	// get 403 under this one code, so screens branch once and read
+	// the status for the sign-in state.
+	CodeOperatorRequired = "operator_required"
 	// CodeUnknownOwner answers a spend lookup for an owner with no
 	// ceiling. A first visit provisions its ceiling on its first mint,
 	// so an unknown owner here simply has not started a session yet.
