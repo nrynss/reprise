@@ -2623,7 +2623,7 @@ owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.sp
              web/src/routes/threads/threads.test.ts, web/src/lib/editor/draft.ts,
              web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts,
              web/src/lib/voice/processing-state.ts, web/src/lib/copy.test.ts
-status:     in-progress:review-r1:t7.82-rev-r1@2a2f9514d8197718cdba449e7a75640c541b1db9
+status:     in-progress:remediate-r1:t7.82-rem-r1
 ```
 T7.81 round 1 recorded two out of scope L notes. The shared `erase()` path in `threads.ts`
 returns live notices naming build vocabulary (`job` ids, `endpoint` accepted and refused lines,
@@ -2641,9 +2641,10 @@ The gate passes in a fresh worktree.
 
 **Decision, 2026-09-29.** Owns widened to the three specs that pin the old wording
 (`threads.test.ts`, `draft.test.ts`, `edit/edit.spec.ts`). The rewrite breaks them by
-design, and updating exact-copy assertions is mechanical. The implementer also flipped
-this task status line back to `not-started` inside its worktree, an out of owns edit
-to an orchestrator-owned file. Remediation reverts that hunk.
+design, and updating exact-copy assertions is mechanical. Round 1 confirmed the
+widening is the right call. (The status-line flip the decision first described
+turned out to be a stale branch base, not an out of owns edit. A rebase
+landing preserves the live status line, so no revert is needed.)
 
 ---
 
