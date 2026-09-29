@@ -71,22 +71,33 @@ export const TRY_AGAIN = 'Try Google sign-in again';
 // means no flag arrived at all.
 export type Outcome = 'done' | 'conflict' | 'failed' | 'start';
 
+// queryFlags snapshots one query string into a plain record. One
+// snapshot keeps every flag read in the same shape. The first value
+// wins on a repeated key, matching a single read.
+function queryFlags(search: string): Record<string, string> {
+	const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+	const flags: Record<string, string> = {};
+	for (const [key, value] of params.entries()) {
+		if (flags[key] === undefined) flags[key] = value;
+	}
+	return flags;
+}
+
 // outcome reads one outcome from a query string. Unknown flags read
 // as a fresh start, so a stray link never strands the page.
 export function outcome(search: string): Outcome {
-	const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
-	if (params.get('done') === '1') return 'done';
-	if (params.get('conflict') === '1') return 'conflict';
-	if (params.get('error') !== null) return 'failed';
+	const flags = queryFlags(search);
+	if (flags['done'] === '1') return 'done';
+	if (flags['conflict'] === '1') return 'conflict';
+	if (flags['error'] !== undefined) return 'failed';
 	return 'start';
 }
 
 // callbackState reads the state the conflict retry needs. It returns
 // null without one, and the switch link stays hidden then.
 export function callbackState(search: string): string | null {
-	const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
-	const state = params.get('state');
-	return state === null || state.length === 0 ? null : state;
+	const state = queryFlags(search)['state'];
+	return state === undefined || state.length === 0 ? null : state;
 }
 
 // switchHref builds the switch retry link for one state. The retry
