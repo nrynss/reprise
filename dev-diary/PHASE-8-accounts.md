@@ -288,7 +288,7 @@ owns:       cmd/reprise/privacy.go, internal/api/routes.go, internal/api/routes_
              web/src/routes/account/+page.svelte, web/src/routes/account/account.spec.ts,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts,
              web/src/routes/account/account.ts, web/src/routes/account/account.test.ts
-status:     in-progress:land:t8.14-rem-r1@6670ac53fca9b52c64950f3e09e274e912d4555b
+status:     done:c262e79
 ```
 T8.7 ships deletion behind an unmounted handler and an unregistered job
 kind: the route 404s and a restart drops a running deletion. The account
@@ -459,6 +459,14 @@ in a fresh worktree.
 
 ### What exists now
 
+T8.14 landed at c262e79 after round 2 APPROVE with zero residue.
+Account deletion runs end to end: mounted route, registered kind
+with restart resume behind a bind gate, linked delete screen.
+Round 1 had one H (golden and mirror missing the entry) plus a
+dead copy export pulled into scope; both closed with load-bearing
+pins. Reviewed commits 736ad3d and 6670ac5 rebased clean. Race
+tests pass on the landed commit. T8.7's Done is now met end to
+end, and T8.15 unblocks on this landing.
 T8.8 landed at c026836 after round 1 APPROVE with zero findings.
 Google OIDC code flow with strict token checks, subject-keyed
 identity, and start plus callback pages, probed against algorithm
