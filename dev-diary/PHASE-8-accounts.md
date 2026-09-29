@@ -321,7 +321,7 @@ owns:       internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts,
              web/package.json
-status:     in-progress:land:t8.15-impl@511dc5616ae2025b306f1d98c02b008ea8fb9d1e
+status:     done:9514655
 ```
 T8.8 ships the Google handler unmounted: both API paths 404 and the
 google spec runs outside the e2e chain.
@@ -459,6 +459,12 @@ in a fresh worktree.
 
 ### What exists now
 
+T8.15 landed at 9514655 after round 1 APPROVE with zero findings.
+Both Google routes mount from settings with a loud misconfiguration
+path, the golden and mirror carry them, and the google spec runs in
+the e2e chain. Reviewed commit 511dc56 rebased clean. Race tests
+pass on the landed commit. T8.8's Done is now met end to end except
+the live provider hit, and T8.12 unblocks on this landing.
 T8.14 landed at c262e79 after round 2 APPROVE with zero residue.
 Account deletion runs end to end: mounted route, registered kind
 with restart resume behind a bind gate, linked delete screen.
