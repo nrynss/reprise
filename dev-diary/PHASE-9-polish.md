@@ -141,7 +141,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/+page.svelte, web/src/routes/threads/threads.ts,
              web/src/routes/threads/gallery-cards.test.ts, web/src/routes/gallery.spec.ts
-status:     in-progress:land:t9.4-rem-r1@6d94628a0b93c3fa79bbf726b53d4fd0d4864941
+status:     done:2146e03
 ```
 * Cards on the shared `.cards` grid, all the same height. A card shows its cover when `cover_path`
   is set, and otherwise the "EP.12" tile.
@@ -289,6 +289,13 @@ The gate passes in a fresh worktree three times in a row, because the gate grew.
 
 ### What exists now
 
+T9.4 landed at 2146e03 after round 2 APPROVE with zero residue.
+The gallery rides the shared card grid with covers and plain
+progress lines. Round 1 had 1 H stale-pin finding on the threads
+spec pinning the old card wording; owns widened to that spec by
+decision and the remediation updated the assert with no product
+change. Reviewed commits 69f8538 and 6d94628 rebased clean. Spec
+pins pass on the landed commit.
 T9.8 landed at 63972cd after round 2 APPROVE with zero residue.
 Account, share and welcome ride the shared shell with the display
 name field, the byline, and the one-line footer. The account shell
