@@ -251,7 +251,7 @@ fixture-ok: yes
 size:       L · frontier
 owns:       internal/identity/google.go, internal/identity/google_test.go,
              web/src/routes/account/google/
-status:     in-progress:review-r1:t8.8-rev-r1@38ba0c3ad89f10a0c6e6769d039719d6ce277282
+status:     in-progress:land:t8.8-impl@38ba0c3ad89f10a0c6e6769d039719d6ce277282
 ```
 The authorization code flow in `future-auth-plan.md`: state, nonce and PKCE. The callback validates
 issuer, audience, expiry, nonce, signature and `sub`. The identity key is `google:<sub>`, never the
