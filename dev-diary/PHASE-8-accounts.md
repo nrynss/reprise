@@ -229,7 +229,7 @@ fixture-ok: yes
 size:       M · frontier
 owns:       internal/privacy/account.go, internal/privacy/account_test.go,
              web/src/routes/account/delete/
-status:     in-progress:review-r1:t8.7-rev-r1@bcb16c9e8feeb930d576809b3ead4f8c9170e43a
+status:     in-progress:land:t8.7-impl@bcb16c9e8feeb930d576809b3ead4f8c9170e43a
 ```
 * Deleting needs a fresh code, typed within the last 10 minutes, as re-authentication.
 * It erases every episode through the existing erase fan-out. It then deletes the identity rows,
