@@ -530,7 +530,7 @@ requires:   T8.13
 fixture-ok: yes
 size:       XS · mid
 owns:       web/src/routes/admin/
-status:     in-progress:land:t8.21-impl@42ab8d8ab745d0c6f4d6ad3449466dede15bfe28
+status:     done:5c571c7
 ```
 **Defect.** On 2026-09-29 the owner opened `/admin` as operator. It read "Spent $33.24 of $1000.00
 today. The ledger carries no history, so this page shows today only." and "Daily ceiling:
@@ -603,6 +603,11 @@ API, or asserted as the named known gap.
 
 ### What exists now
 
+T8.21 landed at 5c571c7 after round 1 APPROVE with zero findings.
+The admin page states lifetime spend and ceiling in plain words,
+with a Limits section, no owner id lookup, and a pause line that
+says a running take finishes. Reviewed commit 42ab8d8 rebased
+clean. Admin and copy pins pass on the landed commit.
 T8.22 landed at 11e7053 after round 1 APPROVE with zero findings.
 Account deletion clears the settle books (scoped reconcile and sweep
 rows, then the session links) and refuses with 409 `take_saving`
