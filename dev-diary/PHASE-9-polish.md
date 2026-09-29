@@ -213,7 +213,7 @@ requires:   T9.5
 fixture-ok: yes
 size:       XS · mid
 owns:       web/src/routes/threads/+page.svelte, web/src/routes/threads/threads.ts
-status:     in-progress:land:t9.7-impl@5e13fd3f556a90253f85bb9e93b112fe5717a973
+status:     done:77a81be
 ```
 * Flat sections. Each thread is one card, and its quotes are a plain list inside it, not cards
   within a card.
@@ -318,6 +318,10 @@ The gate passes in a fresh worktree three times in a row, because the gate grew.
 
 ### What exists now
 
+T9.7 landed at 77a81be after round 1 APPROVE with zero findings.
+Threads renders flat cards with plain quote lists and the agreed
+header as its sub line, matching the gallery split. Reviewed commit
+5e13fd3 rebased clean. Pins pass on the landed commit.
 T9.10 landed at f9abfe2 after round 1 APPROVE with zero findings.
 The processing step list uses the scanner-clean `$derived.by` form
 with identical behavior, and the memory probe skips on Firefox with
