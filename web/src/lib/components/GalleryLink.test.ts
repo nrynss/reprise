@@ -1,7 +1,8 @@
 // Pins for the shared season navigation. The gallery link keeps one
 // label and one address on every page, and the season tabs mark the
 // open page with a filled tab. Both render as anchors, so middle-click
-// keeps working.
+// keeps working. All three ride the shared button classes, so one
+// stylesheet sets their height and shape.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // mount and unmount come from the client runtime by path. The bare
 // specifier resolves to the server build under vitest, which refuses to
@@ -28,7 +29,8 @@ describe('gallery link', () => {
 			const link = links[0] as HTMLAnchorElement;
 			expect(link.textContent).toContain('Back to the gallery');
 			expect(link.getAttribute('href')).toBe('/');
-			expect(link.classList.contains('gallery-link')).toBe(true);
+			expect(link.classList.contains('button')).toBe(true);
+			expect(link.classList.contains('secondary')).toBe(true);
 		} finally {
 			unmount(app);
 		}

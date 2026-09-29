@@ -10,6 +10,7 @@
 	// The store announces its own writes, and the storage event carries
 	// the writes other tabs make. The pill fills while the account
 	// screens show, the way the season tabs fill on their own pages.
+	// It rides the shared secondary pill, so it matches the tabs.
 	let address = $state(readSignedInEmail());
 
 	// openPath reads the open path, or empty outside a request. Unit
@@ -41,30 +42,8 @@
 </script>
 
 <a
-	class="account-link"
+	class="button secondary"
 	class:active
 	href={resolve('/account')}
 	aria-current={active ? 'page' : undefined}>{address === null ? 'Sign in' : 'Account'}</a
 >
-
-<style>
-	.account-link {
-		display: inline-block;
-		border: 1px solid var(--accent, #e8a33d);
-		border-radius: 100px;
-		padding: 0.55rem 1.1rem;
-		font-weight: 600;
-		color: var(--accent, #e8a33d);
-		background: transparent;
-		text-decoration: none;
-	}
-	.account-link.active {
-		background: var(--accent, #e8a33d);
-		border-color: var(--accent, #e8a33d);
-		color: var(--on-accent, #201809);
-	}
-	.account-link:focus-visible {
-		outline: 2px solid var(--accent, #e8a33d);
-		outline-offset: 2px;
-	}
-</style>

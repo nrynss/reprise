@@ -11,21 +11,76 @@ Pages keep their own blocks for what is theirs alone, such as cards. */
 	--on-accent: #201809;
 	--line: #5a4f41;
 	--warning: #e86a5e;
+	--gutter: clamp(1rem, 4vw, 2.5rem);
+	--measure: 64rem;
 }
 
 body {
 	margin: 0;
 	background: var(--paper);
 	color: var(--ink);
+	font-size: max(1rem, 16px);
+	line-height: 1.6;
 }
 
+/* The responsive column. The width keeps two gutters of air on the
+sides and caps at the measure, so the column breathes on a phone
+and never sprawls on a monitor. The narrow modifier holds short
+pages, and the wide modifier opens above a monitor breakpoint. */
 main {
-	max-width: 52rem;
-	margin: 0 auto;
-	padding: 3rem 1.5rem 5rem;
+	width: min(100% - 2 * var(--gutter), var(--measure));
+	margin-inline: auto;
+	padding-block: 3rem 5rem;
+	padding-inline: 0;
+	box-sizing: border-box;
 	font-family: system-ui, sans-serif;
 	background: var(--paper);
 	color: var(--ink);
+}
+
+main.narrow {
+	--measure: 36rem;
+}
+
+@media (min-width: 80rem) {
+	main.wide {
+		--measure: 76rem;
+	}
+}
+
+main,
+main * {
+	box-sizing: border-box;
+}
+
+/* Fluid headings. Each scales with the viewport between a floor
+and a ceiling, so titles stay compact on a phone and open up
+on a monitor without breakpoint jumps. */
+h1 {
+	font-size: clamp(1.75rem, 1.3rem + 2.5vw, 2.75rem);
+	line-height: 1.15;
+	margin: 0 0 0.5rem;
+	color: var(--ink);
+}
+
+h2 {
+	font-size: clamp(1.25rem, 1.1rem + 1vw, 1.75rem);
+	line-height: 1.25;
+	margin: 0 0 0.5rem;
+	color: var(--ink);
+}
+
+h3 {
+	font-size: clamp(1.1rem, 1rem + 0.5vw, 1.35rem);
+	line-height: 1.3;
+	margin: 0 0 0.5rem;
+	color: var(--ink);
+}
+
+/* Running text holds to 65 characters, so lines stay readable
+at any column width. */
+p {
+	max-width: 65ch;
 }
 
 .eyebrow {
@@ -39,7 +94,13 @@ main {
 .sub {
 	color: var(--muted);
 	line-height: 1.6;
-	max-width: 40rem;
+	max-width: 65ch;
+}
+
+.transcript {
+	line-height: 1.7;
+	max-width: 65ch;
+	text-align: left;
 }
 
 main nav {
@@ -69,10 +130,15 @@ input:focus-visible {
 }
 
 /* Bare buttons read as primary, so a new page starts styled. The
-secondary class outlines the same pill, and warning recolours it. */
+secondary class outlines the same pill, quiet reads as a text link,
+and warning recolours it. All three share one height, and none
+shrinks below the minimum tap target. */
 button,
 .button {
-	display: inline-block;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 2.75rem;
 	background: var(--accent);
 	color: var(--on-accent);
 	border: none;
@@ -96,6 +162,21 @@ button,
 	border-color: var(--warning);
 }
 
+.button.quiet {
+	background: transparent;
+	border: none;
+	color: var(--accent);
+	text-decoration: underline;
+	text-underline-offset: 0.2em;
+	padding-inline: 0.5rem;
+}
+
+.button.secondary.active {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--on-accent);
+}
+
 button:focus-visible,
 .button:focus-visible {
 	outline: 2px solid var(--accent);
@@ -112,10 +193,35 @@ button:disabled,
 	cursor: not-allowed;
 }
 
+/* A row of actions. The group wraps on a monitor and stacks full
+width on a phone, so thumbs never chase a small target. */
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.75rem;
+	margin-block: 1.5rem;
+}
+
+@media (max-width: 40rem) {
+	.actions {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.actions button,
+	.actions .button {
+		width: 100%;
+	}
+}
+
 /* The season tabs. The current tab fills with the accent, the other
 stays a plain pill. The account link trails the tabs in this shape. */
 .tab {
-	display: inline-block;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 2.75rem;
 	border: 1px solid var(--accent, #e8a33d);
 	border-radius: 100px;
 	padding: 0.55rem 1.1rem;
@@ -134,4 +240,133 @@ stays a plain pill. The account link trails the tabs in this shape. */
 .tab:focus-visible {
 	outline: 2px solid var(--accent, #e8a33d);
 	outline-offset: 2px;
+}
+
+/* The tab row. Tabs wrap on a monitor and scroll sideways on a
+phone, so the row never squeezes the labels or spills the page. */
+.tabs {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+@media (max-width: 40rem) {
+	.tabs {
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		padding-bottom: 0.25rem;
+		max-width: 100%;
+	}
+
+	.tabs > * {
+		flex-shrink: 0;
+	}
+}
+
+/* Cards. The grid fills the row with equal columns, and every card
+in a row stretches to the same height. The cover stays square, the
+title clamps to two lines, and the status slot pins to the foot. */
+.cards {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+	gap: 1.25rem;
+	align-items: stretch;
+}
+
+/* List wrappers fill their grid area, so a linked card inside
+stretches with its row instead of shrinking to its content. */
+.cards > li {
+	display: flex;
+	min-width: 0;
+	margin: 0;
+}
+
+.cards > li > .card {
+	flex: 1;
+}
+
+.card {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	background: var(--raised);
+	border: 1px solid var(--line);
+	border-radius: 0.75rem;
+	padding: 1rem;
+	color: var(--ink);
+	text-decoration: none;
+}
+
+.card:hover {
+	border-color: var(--accent);
+}
+
+.card .cover {
+	aspect-ratio: 1 / 1;
+	border-radius: 0.6rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--paper);
+	border: 1px solid var(--line);
+	margin-bottom: 0.75rem;
+	overflow: hidden;
+}
+
+.card .cover span {
+	color: var(--accent);
+	font-size: 0.85rem;
+	letter-spacing: 0.12em;
+}
+
+.card .cover img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.card .title,
+.card h2 {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.card .status {
+	margin-top: auto;
+	padding-top: 0.75rem;
+	font-size: 0.75rem;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--accent);
+}
+
+/* Sections stay flat. A heading plus spacing carries the grouping,
+so borders belong to cards and the player alone. */
+.section {
+	margin-block: 2.5rem;
+	border: none;
+}
+
+.section > h2:first-child {
+	margin-bottom: 1rem;
+}
+
+/* The demo marker. A small pill names demo mode, never a sentence. */
+.demo-badge {
+	display: inline-block;
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	line-height: 1;
+	border: 1px solid var(--line);
+	border-radius: 100px;
+	padding: 0.35rem 0.65rem;
+	color: var(--muted);
 }

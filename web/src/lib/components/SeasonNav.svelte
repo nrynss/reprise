@@ -3,48 +3,32 @@
 	import AccountLink from '$lib/components/AccountLink.svelte';
 
 	// The season tabs shared by the gallery and the threads pages. The
-	// current tab fills with the accent, the other stays a plain pill.
-	// The episode page passes none, so both tabs stay plain beside the
-	// filled Edit pill it renders itself. The fixture flag keeps the
-	// scripted season behind its query string.
-	// The props carry current (gallery, threads, or none) and fixture.
-	// The account link trails the tabs. Guests read Sign in, and a
-	// signed in device reads Account.
+	// tabs ride the shared button classes, so the current tab fills
+	// while the other stays outlined. The episode page passes none, so
+	// both tabs stay plain beside the filled Edit pill it renders
+	// itself. The row scrolls sideways on a phone through the shared
+	// tabs class. The fixture flag keeps the scripted season behind
+	// its query string. The anchors carry both the tab and the shared
+	// secondary pill, so the older tab pins and the one button rule
+	// agree on their height and shape. The props carry current
+	// (gallery, threads, or none) and fixture. The account link trails
+	// the tabs. Guests read Sign in, and a signed in device reads
+	// Account.
 	let { current, fixture = false } = $props();
 </script>
 
-<a
-	class="tab"
-	class:active={current === 'gallery'}
-	href={fixture ? resolve('/?fixture=1') : resolve('/')}
-	aria-current={current === 'gallery' ? 'page' : undefined}>Gallery</a
->
-<a
-	class="tab"
-	class:active={current === 'threads'}
-	href={fixture ? resolve('/threads?fixture=1') : resolve('/threads')}
-	aria-current={current === 'threads' ? 'page' : undefined}>Threads</a
->
-<AccountLink />
-
-<style>
-	.tab {
-		display: inline-block;
-		border: 1px solid var(--accent, #e8a33d);
-		border-radius: 100px;
-		padding: 0.55rem 1.1rem;
-		font-weight: 600;
-		color: var(--accent, #e8a33d);
-		background: transparent;
-		text-decoration: none;
-	}
-	.tab.active {
-		background: var(--accent, #e8a33d);
-		border-color: var(--accent, #e8a33d);
-		color: var(--on-accent, #201809);
-	}
-	.tab:focus-visible {
-		outline: 2px solid var(--accent, #e8a33d);
-		outline-offset: 2px;
-	}
-</style>
+<div class="tabs">
+	<a
+		class="tab button secondary"
+		class:active={current === 'gallery'}
+		href={fixture ? resolve('/?fixture=1') : resolve('/')}
+		aria-current={current === 'gallery' ? 'page' : undefined}>Gallery</a
+	>
+	<a
+		class="tab button secondary"
+		class:active={current === 'threads'}
+		href={fixture ? resolve('/threads?fixture=1') : resolve('/threads')}
+		aria-current={current === 'threads' ? 'page' : undefined}>Threads</a
+	>
+	<AccountLink />
+</div>
