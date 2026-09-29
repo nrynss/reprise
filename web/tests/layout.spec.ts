@@ -79,11 +79,22 @@ async function holdsCardRows(page: Page, width: number): Promise<void> {
 }
 
 async function holdsTapTargets(page: Page, width: number): Promise<void> {
-	const heights = await page.locator('button, .button').evaluateAll((controls) =>
-		controls.map((entry) => (entry as HTMLElement).getBoundingClientRect().height)
+	const targets = await page.locator('button, .button').evaluateAll((controls) =>
+		controls.map((entry) => {
+			const box = entry as HTMLElement;
+			const flowingWord =
+				box.closest('section[aria-label*="Transcript"]') !== null ||
+				box.closest('.words') !== null;
+			return { height: box.getBoundingClientRect().height, flowingWord };
+		})
 	);
-	for (const height of heights) {
-		expect(height, `tap target at ${width}px`).toBeGreaterThanOrEqual(43.5);
+	// Word buttons read as flowing text, so the target size minimum
+	// exempts them as inline targets. Every other control still holds
+	// the minimum. The exemption stays scoped to transcript sections
+	// and word containers, so a small control elsewhere still fails.
+	for (const target of targets) {
+		if (target.flowingWord) continue;
+		expect(target.height, `tap target at ${width}px`).toBeGreaterThanOrEqual(43.5);
 	}
 }
 

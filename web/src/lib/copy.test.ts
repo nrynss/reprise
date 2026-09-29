@@ -519,7 +519,8 @@ function readRouteSources(): Array<{ path: string; source: string }> {
 }
 
 // Shown strings are the text between tags plus the attributes a person
-// reads. Identifiers, comments, component props and test hooks stay out.
+// reads. Screen reader labels count as shown, since a listener hears
+// them. Identifiers, comments, component props and test hooks stay out.
 function shownStrings(source: string): string[] {
 	const out: string[] = [];
 	let code = source.replace(/<script[\s\S]*?<\/script>/g, '');
@@ -556,7 +557,7 @@ function shownStrings(source: string): string[] {
 			}
 			continue;
 		}
-		for (const attr of attrs.matchAll(/(?:alt|placeholder|title)="([^"]*)"/g)) {
+		for (const attr of attrs.matchAll(/(?:alt|placeholder|title|aria-label|aria-description)="([^"]*)"/g)) {
 			const text = (attr[1] ?? '').trim().replace(/\s+/g, ' ');
 			if (text.length > 0 && !text.includes('{')) out.push(text);
 		}
