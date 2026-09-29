@@ -471,7 +471,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/account/google/google.ts,
              web/src/routes/account/google/google.test.ts
-status:     in-progress:review-r1:t8.17-rev-r1@e78c93ace89c865077e3b17926b389aafa99f7c0
+status:     in-progress:land:t8.17-impl@e78c93ace89c865077e3b17926b389aafa99f7c0
 ```
 The gate's Svelte 4 leakage scan (`\b(get)\s*\(`, meant for Svelte
 stores) matches `params.get(` in `google.ts`, so the gate is red on
