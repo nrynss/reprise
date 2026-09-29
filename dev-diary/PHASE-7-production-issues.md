@@ -2653,7 +2653,7 @@ fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
              web/src/lib/copy.test.ts
-status:     in-progress:land:t7.83-impl@d637521e180ed218b464be97fa52031fd8403740
+status:     done:f9fdfaf
 ```
 T7.82 round 2 left one out of scope L note standing. The gallery card helpers in
 `threads.ts` return live progress lines naming build vocabulary: `cardFor` answers
@@ -2682,6 +2682,11 @@ build vocabulary. The gate passes in a fresh worktree.
 
 ### What exists now
 
+T7.83 landed at f9fdfaf after round 1 APPROVE with zero findings.
+The gallery card progress lines speak plain words behind named
+constants and call-site pins. Reviewed commit d637521 rebased
+clean (the stale status hunk dropped itself). Unit pins pass on
+the landed commit.
 T7.82 landed at 7052fab after round 2 APPROVE with zero residue.
 Round 1 had four L findings, all stale exact-copy assertions
 pinning the old erase and render wording. The remediation updated
