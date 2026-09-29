@@ -47,6 +47,7 @@ mid.
 | **P5** Guest mode and export | [PHASE-5-guest-export.md](PHASE-5-guest-export.md) | T3.4, T4.1 | P4 | P6 |
 | **P6** Ship | [PHASE-6-ship.md](PHASE-6-ship.md) | P4, P5 | none | submission |
 | **P7** Production issues | [PHASE-7-production-issues.md](PHASE-7-production-issues.md) | T6.1b | none | P6 close |
+| **P8** Accounts | [PHASE-8-accounts.md](PHASE-8-accounts.md) | P7 dogfood rounds | none | T7.4 |
 
 ```text
   P0 ──▶ P1 ──┬──▶ P2 live session ─────────┐

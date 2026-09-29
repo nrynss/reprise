@@ -131,7 +131,7 @@ requires:   T5.3, T1.4
 fixture-ok: yes
 size:       S · mid
 owns:       internal/limits/, web/src/routes/admin/
-status:     blocked:deferred, owner login ships as its own phase after dogfooding
+status:     blocked:its live check runs inside T8.10b once the T8.9 operator role lands
 ```
 The probe measured pause and limits answering 403 `owner_required`
 behind `StubOwnerAuth`, so the kill switch path is covered by broker

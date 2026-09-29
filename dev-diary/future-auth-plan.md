@@ -3,6 +3,12 @@
 This note records the identity shape to build after the next dogfood rounds.
 It is a design boundary, not an implementation checklist.
 
+**Superseded in part on 2026-09-29.** The first provider is now an emailed
+one-time code sent through Resend, and Google follows as the second. The
+operator allowlist also takes email identities. `PHASE-8-accounts.md` carries
+the tasks. The local user model, the no-merge rule and the operator-as-role
+rule below still hold.
+
 ## Purpose
 
 Every visitor can remain anonymous or choose Google sign-in. Both choices
