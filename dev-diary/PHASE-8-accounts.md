@@ -267,7 +267,7 @@ requires:   T8.4
 fixture-ok: yes
 size:       S · mid
 owns:       internal/limits/
-status:     in-progress:implement:t8.9-impl
+status:     in-progress:review-r1:t8.9-rev-r1@af5066e03ce57e39e6ea84d6787ca0c0e107053a
 ```
 Replace `StubOwnerAuth` with a check that the request's user holds an identity listed in the
 `operators` setting. An `email:` entry works as soon as T8.4 lands, and a `google:` entry works once
@@ -277,6 +277,31 @@ The role changes nothing about ownership.
 **Done when:** Tests cover a guest, a signed-in non-operator, an email operator, and a Google operator
 against a stubbed identity. The gate passes in a fresh worktree. T7.4's live check then runs inside
 T8.10b, because a task may not require a higher id.
+
+### T8.13: Operator wiring
+```yaml
+requires:   T8.9, T8.11
+fixture-ok: yes
+size:       S · mid
+owns:       internal/identity/identity.go, cmd/reprise/main.go, cmd/reprise/main_test.go,
+             web/src/routes/admin/
+status:     not-started
+```
+T8.9 ships the `OperatorAuth` seam against a stubbed source, and production
+still wires `StubOwnerAuth`, so every admin endpoint keeps answering
+`owner_required` to everyone. The web admin client branches on
+`owner_required` and would misread the new `operator_required` refusals.
+
+* Add a read-only `identities` row reader on the identity service
+  (`provider, subject` for one `user_id`), and wire
+  `limits.NewOperatorAuth` with the `operators` setting in the boot.
+* Teach the admin client the `operator_required` code and the 401
+  against 403 split. Copy stays plain.
+
+**Done when:** A booted binary answers 401 for a guest, 403 for a signed-in
+non-operator, and serves an email operator on an admin route. The admin
+page names the operator refusal in plain words. The gate passes in a fresh
+worktree.
 
 ### T8.10b: Live sign-in and operator run ★
 ```yaml
@@ -336,7 +361,7 @@ golden test fails on the added entry until they carry it.
 
 ### T8.12: Session-status route
 ```yaml
-requires:   T8.4, T8.11
+requires:   T8.4, T8.11, T8.13
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/identity/status.go, internal/identity/status_test.go
