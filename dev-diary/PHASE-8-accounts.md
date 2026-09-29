@@ -508,7 +508,7 @@ bare. The "Sign in" link in `AccountLink.svelte` is an underlined text link besi
    holds the `.eyebrow` and `.sub` text styles, a `nav` row, form inputs with a visible focus
    ring, and two button classes. `.button` is the primary filled pill, and `.button.secondary` is
    the outlined pill. Bare `button` elements get the primary style, so a new page starts styled.
-2. On the account pages, drop "Season one". Use no eyebrow, or "Reprise". Give each Bits UI
+2. On the account pages, `/account` and `/account/delete` alike, drop "Season one". Use no eyebrow, or "Reprise". Give each Bits UI
    `Button.Root` the shared class. The send and check buttons are primary, and resend, keep, switch
    and sign out are secondary. Delete account is a secondary pill in the warning colour.
 3. `AccountLink` renders as the same pill as the season tabs. It is filled when the current page is
@@ -621,6 +621,36 @@ a lifetime one. The page also shows build vocabulary a person cannot act on: "Gu
 finds "spent in total".
 
 **Done when:** The spec passes, and the gate passes in a fresh worktree.
+
+### T8.22: Account deletion leaves no bookkeeping rows behind
+```yaml
+requires:   T8.14
+fixture-ok: yes
+size:       S · frontier
+owns:       internal/privacy/account.go, internal/privacy/account_test.go
+status:     not-started
+```
+**Defect.** The live deletion on 2026-09-29 at 17:16 UTC removed the user's episodes, identity,
+sessions, codes and media. A scan of every table still found rows naming the user or its episode:
+`cost_owner_budget.owner`, `lease_entry.owner`, and `session_settle.owner_id` with
+`session_settle.episode_id`. T8.7's own test promised that a query of every table finds nothing.
+The rows hold no content, but they are keyed to the person.
+
+**Change.**
+1. Delete the user's `session_settle` rows, and the `reconcile_state` and `sweep_state` rows of
+   those sessions, once each session is settled. The global spend total stays as it is.
+2. The owner budget and the leases are Keel tables (`keel/cost`, `keel/lease`). Use a Keel API to
+   drop an owner's budget row and closed leases if one exists. If none does, write the gap up in the
+   handoff in Keel's own terms, so the orchestrator files it on `nrynss/keel`. Do not write to Keel's
+   tables directly. Until Keel ships it, record the residue in the handoff as a known gap.
+3. An unsettled session blocks deletion with a plain message, "Your last take is still being
+   saved. Try again in a minute." The money must settle first.
+
+**Tests.** `account_test.go`: after deleting a user with a settled session, a scan of every Reprise
+table for the user id and episode ids finds nothing. The Keel rows are either gone through the Keel
+API, or asserted as the named known gap.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree.
 
 ---
 

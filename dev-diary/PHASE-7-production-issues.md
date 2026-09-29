@@ -2666,11 +2666,11 @@ is kept." No test pins them either way.
 **Done when:** The extended copy gate fails when either line is restored to its
 build vocabulary. The gate passes in a fresh worktree.
 
-### T7.84: A deploy reaches every open browser: cache headers on the app
+### T7.84: A deploy reaches every open browser, and an early interruption never fails a transcript
 ```yaml
 requires:   T7.83
 fixture-ok: yes
-size:       XS · mid
+size:       S · frontier
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
 status:     not-started
 ```
@@ -2694,8 +2694,26 @@ origin sends none, although those files never change under one name.
 **Tests** in `main_test.go`: against a temporary web directory, `/` and an unknown client route
 (the fallback) answer `no-cache`, and `/_app/immutable/x.js` answers `max-age=31536000, immutable`.
 
-**Done when:** The tests pass, and the gate passes in a fresh worktree. After the next deploy, a
-`curl -D -` from a workstation shows both headers on the live site. Record it in the handoff.
+**Second defect, critical. It rides here because it shares `cmd/reprise/main.go` and must ship
+first.** On 2026-09-29 at 17:14 UTC, a live take's transcript job failed with
+`reprise: host replies: reply ends before it starts`, and the whole episode failed with it. In
+`replyEnd`, when a turn's `interrupted_at_ms` falls before its `agent_reply_started_at_ms`, the
+computed end is earlier than the start, and the function returns an error. That happens when the
+guest talks over the host at the very moment a reply begins. One odd turn must never cost the
+episode its transcript. An episode always ships.
+
+* In `replyEnd`, clamp such an end to the start, so the reply spans zero milliseconds. Log the turn
+  once. Never return an error for it. A turn with no reply text is already skipped.
+* Give `repliesFromTimeline` the same rule for any other inverted span. It keeps the good turns and
+  drops or clamps the bad one.
+
+**Tests** in `main_test.go`: a timeline whose second turn has `interrupted_at_ms` 200 ms before
+its `agent_reply_started_at_ms` yields host replies for every turn, with that reply at zero
+length, and no error. Restoring the error fails it.
+
+**Done when:** All the tests pass, and the gate passes in a fresh worktree. After the next deploy, a
+`curl -D -` from a workstation shows both cache headers on the live site. Record it in the
+handoff.
 
 ### T7.85: The owner sees the cover, and publishing shows just the link
 ```yaml
@@ -2739,6 +2757,37 @@ nor the gallery card can show one. The notice is built in `threads.ts`, in the p
 * A spec checks that the episode page shows an `img` whose `src` is the cover path.
 
 **Done when:** The tests pass in Chromium and Firefox, and the gate passes in a fresh worktree.
+
+### T7.86: Erase leaves the page it erased, and the episode page speaks plainly
+```yaml
+requires:   T7.85
+fixture-ok: yes
+size:       XS · mid
+owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.test.ts,
+             web/src/routes/threads/threads.spec.ts, web/src/routes/episode/[id]/+page.svelte
+status:     not-started
+```
+**Defect.** On 2026-09-29 at 17:14:52 UTC the owner erased an episode. `DELETE /api/episodes/{id}`
+answered 202, and the erase job finished all 8 targets. The page stayed on the erased episode with
+its erase control. A second press at 17:14:55 got 404 because the episode was gone. The page then
+showed `LIVE_ERASE_FAILED_NOTICE`, "The erase did not go through. Retry." The same page also read
+"The detail carries no audio stream address yet, so playback waits here. The proposals and the
+quoted moment below still read."
+
+**Change.**
+1. After a 202, go to the gallery with the notice "Episode erased." Nothing on the erased page can
+   be pressed again.
+2. A 404 on DELETE counts as already erased, with the same result.
+3. Replace the playback-waiting sentence with "No audio yet." for a draft, and with nothing for a
+   failed episode, which says why it failed.
+4. A failed episode shows one plain line, such as "This take could not be transcribed.", in place
+   of the raw job error. The raw error stays in the server log.
+
+**Tests.** `threads.test.ts`: a 202 erase navigates to the gallery, and a 404 erase does too, with no
+failure notice. `threads.spec.ts` updates the refusal case to a 500, which still shows the retry
+notice.
+
+**Done when:** The tests pass, and the gate passes in a fresh worktree.
 
 ---
 
