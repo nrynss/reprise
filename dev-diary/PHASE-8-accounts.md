@@ -144,7 +144,7 @@ size:       L · frontier
 owns:       internal/identity/, internal/api/routes.go, internal/api/routes_test.go,
              web/src/lib/api/types.ts, web/src/lib/api/testdata/routes.json,
              cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:remediate-r1:t8.4-rem-r1
+status:     in-progress:review-r2:t8.4-rev-r2@aab6caf72c46a66df88601f9a718d7f81828f6bf
 ```
 Two routes, both under the identity middleware.
 
