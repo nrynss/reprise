@@ -492,7 +492,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       web/src/app.css, web/src/routes/+layout.svelte, web/src/routes/account/,
              web/src/lib/components/AccountLink.svelte
-status:     in-progress:land:t8.18-impl@73818e9e02858007e4f81e8e34f1dd7b9d091dcc
+status:     done:93eef87
 ```
 **Defect.** On 2026-09-29 the owner opened `/account`. It had no page width, no centring, and no
 button styles. It also showed a "Season one" eyebrow copied from the gallery, where it means
@@ -603,6 +603,13 @@ API, or asserted as the named known gap.
 
 ### What exists now
 
+T8.18 landed at 93eef87 after round 1 APPROVE with zero findings.
+One shared stylesheet carries the tokens and the page shell, the
+account pages drop the copied eyebrow, and the sign in link renders
+as a filled pill on the account page. Reviewed commit 73818e9
+rebased clean. Unit and spec pins pass on the landed commit. Out of
+scope note for P9: the Google account pages still render a "Season
+one" eyebrow, outside this task's owns.
 T8.21 landed at 5c571c7 after round 1 APPROVE with zero findings.
 The admin page states lifetime spend and ceiling in plain words,
 with a Limits section, no owner id lookup, and a pause line that
