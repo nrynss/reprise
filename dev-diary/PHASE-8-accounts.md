@@ -288,7 +288,7 @@ owns:       cmd/reprise/privacy.go, internal/api/routes.go, internal/api/routes_
              web/src/routes/account/+page.svelte, web/src/routes/account/account.spec.ts,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts,
              web/src/routes/account/account.ts, web/src/routes/account/account.test.ts
-status:     in-progress:review-r2:t8.14-rev-r2@6670ac53fca9b52c64950f3e09e274e912d4555b
+status:     in-progress:land:t8.14-rem-r1@6670ac53fca9b52c64950f3e09e274e912d4555b
 ```
 T8.7 ships deletion behind an unmounted handler and an unregistered job
 kind: the route 404s and a restart drops a running deletion. The account
