@@ -291,7 +291,7 @@ requires:   T9.3, T9.4, T9.5, T9.6, T9.7, T9.8
 fixture-ok: yes
 size:       S · mid
 owns:       web/src/lib/copy.test.ts, web/tests/layout.spec.ts
-status:     in-progress:land:t9.9-rem-r1@764ca69
+status:     done:790276a
 ```
 * `copy.test.ts` scans every `.svelte` file under `web/src/routes` and every exported string in the
   page controllers. It fails on `voice.md`'s banned words, on "No backend", "Scripted", "survives a
@@ -368,6 +368,17 @@ status:     done:68e2ace
 
 ### What exists now
 
+T9.9 landed at 790276a after round 2 APPROVE with zero residue.
+The copy guard scans routes plus controllers (aria labels included)
+and the layout spec pins all 14 fixture pages at four widths. Round
+1 had 2 M guard defects; the remediation added the inline-word
+exemption and the aria scan with no page changes. Reviewed commits
+ac65f50 and 764ca69 rebased clean. Copy 14/14 and layout 14/14 pass
+on the landed tree with T9.11's pages. Gate proof in a fresh
+worktree: `check.sh` exits 1 three times in a row, all at the
+exogenous ffmpeg env pin (host 9.0.2 vs pinned 9.0.1) before any
+code stage. Past the pin, Go packages, 426 unit tests,
+svelte-check, eslint, build, and layout plus shell specs all pass.
 T9.11 landed at 45da0e0 after round 2 APPROVE with zero residue.
 Privacy and Google start copy speak plain words, and the share pin
 asserts the rewritten caveat. Round 1 had one out of scope H on
