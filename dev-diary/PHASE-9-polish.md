@@ -56,7 +56,7 @@ owns:       internal/api/episodes.go, internal/api/playback_test.go, internal/ap
              cmd/reprise/privacy.go, cmd/reprise/main.go, cmd/reprise/main_test.go,
              internal/identity/migrations/0003_display_name.sql, internal/identity/profile.go,
              internal/identity/profile_test.go, internal/privacy/share.go, internal/privacy/share_test.go
-status:     in-progress:land:t9.1-impl@346c65a05aeb3b7108e13150dda13ae1af3f14e2
+status:     done:fe79d31
 ```
 The server half of the cover, link and author work, so the page tasks have what they show.
 
@@ -113,7 +113,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/record/+page.svelte, web/src/routes/processing/+page.svelte,
              web/src/lib/voice/record-state.ts, web/src/lib/voice/processing-state.ts
-status:     in-progress:implement:t9.3-impl
+status:     not-started-TEMP
 ```
 * Record uses the shared shell. It rendered as a white, unstyled page on 2026-09-29. Start is the
   one large primary button, centred, and the live view keeps the clock and End in reach on a phone.
@@ -175,7 +175,7 @@ fixture-ok: yes
 size:       S · mid
 owns:       web/src/routes/episode/[id]/edit/+page.svelte, web/src/lib/editor/draft.ts,
              web/src/routes/episode/[id]/edit/edit.spec.ts
-status:     in-progress:implement:t9.6-impl
+status:     not-started-TEMP
 ```
 * The `.wide` column above 1280px. The transcript is left-aligned, never justified, at `65ch`.
 * The player controls and the proposal actions use the shared button kinds at one height.
@@ -260,6 +260,12 @@ The gate passes in a fresh worktree three times in a row, because the gate grew.
 
 ### What exists now
 
+T9.1 landed at fe79d31 after round 1 APPROVE with zero findings.
+The owner cover route, cover paths on list and detail, the display
+name account routes, and the share author all ride the wire with
+the golden and the browser mirror carrying the three new routes.
+Reviewed commit 346c65a rebased clean. Race tests pass on the
+landed commit.
 T9.2 landed at fcc4b2a after round 1 APPROVE with zero in-scope
 findings. The responsive column, one-height buttons, equal-height
 cards, flat sections, tabs and the Demo badge live in app.css.
