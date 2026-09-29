@@ -1434,9 +1434,16 @@ export interface EpisodeScreen {
 	gateResult: string;
 }
 
+// Live erase notices in plain words. A started erase leaves the gallery
+// once it lands. A refused erase names the retry. The screen shows the
+// outcome only, never the reference behind it.
+export const LIVE_ERASE_STARTED_NOTICE =
+	'The erase started. The episode leaves the gallery once it is gone.';
+export const LIVE_ERASE_FAILED_NOTICE = 'The erase did not go through. Retry.';
+
 // eraseJob reads the erasure job id one erase answer carries, or
-// empty when the body drifts. The screen names the job it follows,
-// and falls back to its standing accept line without one.
+// empty when the body drifts. The screen shows plain words instead,
+// so this stays a parsing seam its pin reads directly.
 export function eraseJob(raw: string): string {
 	try {
 		const decoded: unknown = JSON.parse(raw);
@@ -1766,19 +1773,12 @@ export class EpisodeController {
 			const response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`, {
 				method: 'DELETE'
 			});
-			let started = '';
-			if (response.ok) started = eraseJob(await response.text());
 			this.snap = {
 				...this.snap,
-				notice:
-					response.ok && started !== ''
-						? `The erase started as job ${started}. The gallery drops the episode once it lands.`
-						: response.ok
-							? 'The erase endpoint accepted. The job stream carries it from here.'
-							: 'The erase endpoint refused, so the fixture episode stays.'
+				notice: response.ok ? LIVE_ERASE_STARTED_NOTICE : LIVE_ERASE_FAILED_NOTICE
 			};
 		} catch {
-			this.snap = { ...this.snap, notice: 'The erase endpoint refused, so the fixture episode stays.' };
+			this.snap = { ...this.snap, notice: LIVE_ERASE_FAILED_NOTICE };
 		}
 		this.emit();
 	}

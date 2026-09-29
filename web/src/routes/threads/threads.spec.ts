@@ -259,7 +259,7 @@ test('the episode renders its release states without backend actions', async ({ 
 	await page.getByRole('button', { name: 'Erase this episode' }).click();
 	await expect(page.getByRole('button', { name: 'Confirm erase' })).toBeVisible();
 	await page.getByRole('button', { name: 'Confirm erase' }).click();
-	await expect(page.getByText('The erase endpoint refused, so the fixture episode stays.')).toBeVisible();
+	await expect(page.getByText('The erase did not go through. Retry.')).toBeVisible();
 });
 
 test('a live episode walks its release controls against the routes', async ({ page }) => {
@@ -304,7 +304,7 @@ test('a live episode walks its release controls against the routes', async ({ pa
 	await page.getByRole('button', { name: 'Erase this episode' }).click();
 	await expect(page.getByRole('button', { name: 'Confirm erase' })).toBeVisible();
 	await page.getByRole('button', { name: 'Confirm erase' }).click();
-	await expect(page.getByText('The erase started as job erase-7.', { exact: false })).toBeVisible();
+	await expect(page.getByText('The erase started. The episode leaves the gallery once it is gone.', { exact: false })).toBeVisible();
 });
 
 test('the season screens pass both gates', async ({ page }) => {

@@ -94,6 +94,13 @@ export interface DraftOptions {
 export const LIVE_DRAFT_NOTICE = '';
 export const LIVE_DRAFT_EMPTY_NOTICE = 'No transcript yet.';
 
+// Live render pass details in plain words. The screen shows the pass
+// state and where to look next, never the reference behind it.
+export const LIVE_RENDER_RUNNING_DETAIL = 'The render is running. Open the gallery to see its state.';
+export const LIVE_RENDER_DONE_READY_DETAIL =
+	'The render is done. Open the gallery to hear the finished episode.';
+export const LIVE_RENDER_DONE_DETAIL = 'The render is done. Open the gallery to see its state.';
+
 export function emptyDraft(episodeId: string): DraftSnapshot {
 	return {
 		ready: false,
@@ -1024,7 +1031,7 @@ export class DraftController {
 			this.snap = {
 				...this.snap,
 				renderStage: 'running',
-				renderDetail: `Render running as job ${jobId}.`
+				renderDetail: LIVE_RENDER_RUNNING_DETAIL
 			};
 			this.emit();
 			this.followRender(jobId);
@@ -1103,7 +1110,7 @@ export class DraftController {
 		if (!stream || !jobId) return;
 		if (stream.status === 'done') {
 			this.stopFollowPoll();
-			await this.onRenderDone(jobId);
+			await this.onRenderDone();
 			return;
 		}
 		if (
@@ -1122,7 +1129,7 @@ export class DraftController {
 		}
 	}
 
-	private async onRenderDone(jobId: string): Promise<void> {
+	private async onRenderDone(): Promise<void> {
 		let ready = false;
 		try {
 			const response = await fetch(`/api/episodes/${encodeURIComponent(this.episodeId)}`);
@@ -1140,13 +1147,13 @@ export class DraftController {
 			this.snap = {
 				...this.snap,
 				renderStage: 'done',
-				renderDetail: `Render done for job ${jobId}. The episode is ready at /episode/${this.episodeId}.`
+				renderDetail: LIVE_RENDER_DONE_READY_DETAIL
 			};
 		} else {
 			this.snap = {
 				...this.snap,
 				renderStage: 'done',
-				renderDetail: `Render done for job ${jobId}. Open the gallery to see its state.`
+				renderDetail: LIVE_RENDER_DONE_DETAIL
 			};
 		}
 		this.emit();

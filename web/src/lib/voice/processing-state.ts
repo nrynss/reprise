@@ -75,6 +75,11 @@ function retryAfterMs(response: Response): number {
 // It names the take, never the machinery behind it.
 export const TRANSCRIBING_DETAIL = 'Transcribing your take.';
 
+// The line a watched pass shows when its live progress stops. The last
+// shown step still stands, so the screen keeps it.
+export const PROGRESS_STOPPED_DETAIL =
+	'Progress stopped updating. The last shown step still stands.';
+
 let pendingHandoff: ProcessingHandoff | null = null;
 
 // depositProcessingHandoff holds one in-flight upload for the next screen.
@@ -156,7 +161,7 @@ export function readingFromJob(
 		return { ...step, state: 'failed', detail: stoppedDetail(pass, status, errorMessage), percent: step.percent };
 	}
 	if (connection === 'failed') {
-		return { ...step, state: 'failed', detail: 'The job stream failed.', percent: step.percent };
+		return { ...step, state: 'failed', detail: PROGRESS_STOPPED_DETAIL, percent: step.percent };
 	}
 	if (current !== undefined && total !== undefined && total > 0) {
 		return {
