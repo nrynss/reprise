@@ -24,7 +24,7 @@ mail_reply_to = ""
 google_client_id = ""
 # Identities that hold the operator role. Each entry reads email:<address>
 # or google:<sub>. Empty means nobody holds the role.
-operators = []
+operators = ["email:rocknarayan@gmail.com"]
 
 [secrets.assemblyai_api_key]
 source = "env_file"
