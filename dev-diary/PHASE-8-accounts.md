@@ -333,7 +333,7 @@ owns:       internal/identity/signout.go, internal/identity/signout_test.go,
              internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go, web/package.json,
              web/src/lib/api/testdata/routes.json, web/src/lib/api/types.ts
-status:     in-progress:review-r1:t8.11-rev-r1@aabac5b3c0490538e30f2e9f2dd44f543039fd78
+status:     in-progress:remediate-r1:t8.11-rem-r1
 ```
 T8.6 round 1 proved no sign-out route exists: the account page calls
 `POST /api/login/signout` against an unrouted path, so the session cookie
