@@ -167,7 +167,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       web/src/routes/episode/[id]/+page.svelte, web/src/routes/threads/threads.ts,
              web/src/routes/threads/threads.test.ts, web/src/routes/threads/threads.spec.ts
-status:     not-started
+status:     in-progress:land:t9.5-rem-r1@6c810a13693c637d0dc4273f734f5f87a0478b7e
 ```
 * The cover at the top, from `cover_path`. The eyebrow shows only "EP.12". The "Public" and
   "Private" line goes.
@@ -255,6 +255,35 @@ adds `PUT` to the union with no runtime change, so the gate can pass.
 ---
 
 ## Wave 3
+
+### T9.10: Gate irritants: runes scan and the Firefox memory probe
+```yaml
+requires:   none
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/processing/+page.svelte, tools/check.sh,
+             web/src/routes/record/mock-session.spec.ts
+status:     in-progress:implement:t9.10-impl
+```
+Two pre-existing gate reds no page task owns, both proved on pristine
+bases during Wave 2 reviews.
+
+* The Svelte 4 leakage scan (`tools/check.sh:131`) false-positives on
+  valid Svelte 5 `$derived(expr)` at
+  `web/src/routes/processing/+page.svelte:24`. Either rewrite that
+  line to the behavior-identical `$derived.by(() => [...])` form the
+  neighboring lines use, or narrow the scan so `$-prefixed` runes no
+  longer match. Do not weaken the scan for real store `get(` calls:
+  the T7.34 and T8.17 pins must keep passing.
+* The record mock "memory stays flat" probe reads the Chromium-only
+  `performance.memory`, so it fails on Firefox before any product
+  code runs. Skip it on Firefox with `test.fixme` and the reason, or
+  tag it Chromium-only. Chromium behavior stays pinned.
+
+**Done when:** The gate text scans pass on the touched lines, the
+memory probe passes in Chromium and skips with reason in Firefox,
+and the gate passes in a fresh worktree past the code checks (the
+ffmpeg env pin stays exogenous).
 
 ### T9.9: Copy and layout guards
 ```yaml
