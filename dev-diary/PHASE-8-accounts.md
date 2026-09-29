@@ -251,7 +251,7 @@ fixture-ok: yes
 size:       L · frontier
 owns:       internal/identity/google.go, internal/identity/google_test.go,
              web/src/routes/account/google/
-status:     in-progress:land:t8.8-impl@38ba0c3ad89f10a0c6e6769d039719d6ce277282
+status:     done:c026836
 ```
 The authorization code flow in `future-auth-plan.md`: state, nonce and PKCE. The callback validates
 issuer, audience, expiry, nonce, signature and `sub`. The identity key is `google:<sub>`, never the
@@ -451,6 +451,13 @@ in a fresh worktree.
 
 ### What exists now
 
+T8.8 landed at c026836 after round 1 APPROVE with zero findings.
+Google OIDC code flow with strict token checks, subject-keyed
+identity, and start plus callback pages, probed against algorithm
+confusion, replay, and open redirects. Done holds at unit level:
+the handler mounts in T8.15, so both API paths 404 for now.
+Reviewed commit 38ba0c3 rebased clean. Race tests pass on the
+landed commit.
 T8.13 landed at a5e5d3b after round 1 APPROVE with zero findings.
 The operator check runs in production behind the operators
 setting, with a read-only identity adapter and plain admin
