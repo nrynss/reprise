@@ -492,7 +492,7 @@ fixture-ok: yes
 size:       M · mid
 owns:       web/src/app.css, web/src/routes/+layout.svelte, web/src/routes/account/,
              web/src/lib/components/AccountLink.svelte
-status:     not-started
+status:     in-progress:land:t8.18-impl@73818e9e02858007e4f81e8e34f1dd7b9d091dcc
 ```
 **Defect.** On 2026-09-29 the owner opened `/account`. It had no page width, no centring, and no
 button styles. It also showed a "Season one" eyebrow copied from the gallery, where it means
@@ -530,7 +530,7 @@ requires:   T8.13
 fixture-ok: yes
 size:       XS · mid
 owns:       web/src/routes/admin/
-status:     not-started
+status:     in-progress:land:t8.21-impl@42ab8d8ab745d0c6f4d6ad3449466dede15bfe28
 ```
 **Defect.** On 2026-09-29 the owner opened `/admin` as operator. It read "Spent $33.24 of $1000.00
 today. The ledger carries no history, so this page shows today only." and "Daily ceiling:
@@ -563,7 +563,7 @@ requires:   T8.14
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/privacy/account.go, internal/privacy/account_test.go
-status:     not-started
+status:     in-progress:land:t8.22-impl@3ad7cd28d1c9c4bb261c2ee1eb7b1944cfc70fce
 ```
 **Defect.** The live deletion on 2026-09-29 at 17:16 UTC removed the user's episodes, identity,
 sessions, codes and media. A scan of every table still found rows naming the user or its episode:

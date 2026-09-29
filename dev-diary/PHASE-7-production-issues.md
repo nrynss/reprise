@@ -2672,7 +2672,7 @@ requires:   T7.83
 fixture-ok: yes
 size:       S · frontier
 owns:       cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     not-started
+status:     in-progress:land:t7.84-impl@24e7bc2dcdb8914c850f756fe06dbf1c7cac6b8c
 ```
 **Defect.** On 2026-09-29 at 16:55 UTC, the owner's processing screen still read "Following the
 job." That string left the code with T7.81, which was in the build deployed at 16:12, whose code
