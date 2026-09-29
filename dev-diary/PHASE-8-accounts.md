@@ -181,7 +181,7 @@ fixture-ok: yes
 size:       M · frontier
 owns:       internal/identity/sendlimit.go, internal/identity/sendlimit_test.go,
              internal/identity/login.go, internal/identity/login_test.go
-status:     in-progress:review-r1:t8.5-rev-r1@64fa4a11db0f977ad6b1223c32d83b8d91224363
+status:     in-progress:remediate-r1:t8.5-rem-r1
 ```
 Refuse before the send, never after it. Every limit answers `429` with `Retry-After`.
 
