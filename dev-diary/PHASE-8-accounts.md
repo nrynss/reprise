@@ -307,7 +307,7 @@ size:       S · frontier
 owns:       internal/identity/signout.go, internal/identity/signout_test.go,
              internal/api/routes.go, internal/api/routes_test.go,
              cmd/reprise/main.go, cmd/reprise/main_test.go, web/package.json
-status:     not-started
+status:     in-progress:implement:t8.11-impl
 ```
 T8.6 round 1 proved no sign-out route exists: the account page calls
 `POST /api/login/signout` against an unrouted path, so the session cookie
