@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import AccountLink from '$lib/components/AccountLink.svelte';
 
 	// The season tabs shared by the gallery and the threads pages. The
 	// current tab fills with the accent, the other stays a plain pill.
@@ -7,6 +8,8 @@
 	// filled Edit pill it renders itself. The fixture flag keeps the
 	// scripted season behind its query string.
 	// The props carry current (gallery, threads, or none) and fixture.
+	// The account link trails the tabs. Guests read Sign in, and a
+	// signed in device reads Account.
 	let { current, fixture = false } = $props();
 </script>
 
@@ -22,6 +25,7 @@
 	href={fixture ? resolve('/threads?fixture=1') : resolve('/threads')}
 	aria-current={current === 'threads' ? 'page' : undefined}>Threads</a
 >
+<AccountLink />
 
 <style>
 	.tab {
