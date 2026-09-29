@@ -2620,9 +2620,10 @@ requires:   T7.81
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/threads/threads.ts, web/src/routes/threads/threads.spec.ts,
-             web/src/lib/editor/draft.ts, web/src/lib/voice/processing-state.ts,
-             web/src/lib/copy.test.ts
-status:     in-progress:implement:t7.82-impl
+             web/src/routes/threads/threads.test.ts, web/src/lib/editor/draft.ts,
+             web/src/lib/editor/draft.test.ts, web/src/routes/episode/[id]/edit/edit.spec.ts,
+             web/src/lib/voice/processing-state.ts, web/src/lib/copy.test.ts
+status:     in-progress:review-r1:t7.82-rev-r1@2a2f9514d8197718cdba449e7a75640c541b1db9
 ```
 T7.81 round 1 recorded two out of scope L notes. The shared `erase()` path in `threads.ts`
 returns live notices naming build vocabulary (`job` ids, `endpoint` accepted and refused lines,
@@ -2637,6 +2638,12 @@ constants, so the T7.81 copy gate does not read them.
 **Done when:** The extended copy gate fails when any covered erase or render notice is
 restored to its build vocabulary. The updated Playwright expectation passes in Chromium.
 The gate passes in a fresh worktree.
+
+**Decision, 2026-09-29.** Owns widened to the three specs that pin the old wording
+(`threads.test.ts`, `draft.test.ts`, `edit/edit.spec.ts`). The rewrite breaks them by
+design, and updating exact-copy assertions is mechanical. The implementer also flipped
+this task status line back to `not-started` inside its worktree, an out of owns edit
+to an orchestrator-owned file. Remediation reverts that hunk.
 
 ---
 
