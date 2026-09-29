@@ -2418,7 +2418,7 @@ fixture-ok: yes
 size:       XS · mid
 owns:       internal/episode/query.go, internal/episode/service.go, internal/privacy/publish.go,
              internal/privacy/publish_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go
-status:     in-progress:review-r1:t7.80-rev-r1@3e54a566fec1cfb03d5550f662b30e2cba56dc65
+status:     in-progress:land:t7.80-impl@3e54a566fec1cfb03d5550f662b30e2cba56dc65
 ```
 T7.76 round 1 recorded an out of scope H finding. The binary
 mounts the episode detail with a nil share lookup, so a public
