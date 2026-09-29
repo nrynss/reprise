@@ -563,7 +563,7 @@ requires:   T8.14
 fixture-ok: yes
 size:       S · frontier
 owns:       internal/privacy/account.go, internal/privacy/account_test.go
-status:     in-progress:land:t8.22-impl@3ad7cd28d1c9c4bb261c2ee1eb7b1944cfc70fce
+status:     done:11e7053
 ```
 **Defect.** The live deletion on 2026-09-29 at 17:16 UTC removed the user's episodes, identity,
 sessions, codes and media. A scan of every table still found rows naming the user or its episode:
@@ -603,6 +603,14 @@ API, or asserted as the named known gap.
 
 ### What exists now
 
+T8.22 landed at 11e7053 after round 1 APPROVE with zero findings.
+Account deletion clears the settle books (scoped reconcile and sweep
+rows, then the session links) and refuses with 409 `take_saving`
+while a take is unsettled, without burning the code. Reviewed commit
+3ad7cd2 rebased clean. Race tests pass on the landed commit. Known
+gap: owner ceiling and lease rows stay, because Keel v0.3.0 ships no
+removal call. The test pins that boundary through public Keel calls.
+Filed as https://github.com/nrynss/keel/issues/3.
 T8.17 landed at e34a620 after round 1 APPROVE with zero findings.
 The Google callback flags read through one snapshot with exact
 behavior parity, and the gate leakage grep returns empty
