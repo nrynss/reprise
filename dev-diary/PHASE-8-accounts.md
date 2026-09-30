@@ -368,7 +368,7 @@ requires:   T8.7, T8.8, T8.9, T8.14, T8.15
 fixture-ok: no
 size:       S · frontier
 owns:       dev-diary/probes/accounts-live.md
-status:     not-started
+status:     done:a6f25aa74ac09812987dc62a20e61392a3fadfe3
 ```
 The one task that needs a person and production.
 
