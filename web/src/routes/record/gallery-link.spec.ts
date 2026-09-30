@@ -41,7 +41,7 @@ async function followGalleryLink(page: Page): Promise<void> {
 	const link = page.getByRole('link', { name: 'Back to the gallery', exact: true });
 	await expect(link).toBeVisible();
 	await link.click();
-	await expect(page.getByRole('heading', { name: 'The season so far', exact: true })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Your episodes', exact: true })).toBeVisible();
 	expect(new URL(page.url()).pathname).toBe('/');
 }
 
@@ -169,7 +169,7 @@ async function expectStayedOnGallery(page: Page, wait: 'take' | 'retry' = 'take'
 		});
 	expect(settled.path).toBe('/');
 	expect(settled.assigns.some((url) => url.includes('/processing'))).toBe(false);
-	await expect(page.getByRole('heading', { name: 'The season so far', exact: true })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Your episodes', exact: true })).toBeVisible();
 	expect(new URL(page.url()).pathname).toBe('/');
 }
 
