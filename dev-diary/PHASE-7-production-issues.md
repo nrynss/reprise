@@ -2936,7 +2936,7 @@ fresh worktree. `git diff --stat` shows files under `internal/host/` only.
 requires:   T7.87
 fixture-ok: yes
 size:       M · frontier
-owns:       internal/broker/, cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/voice/, web/src/routes/record/
+owns:       internal/broker/, internal/api/handlers_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/voice/, web/src/routes/record/
 status:     in-progress:implement:t7.88-impl
 ```
 **Read first.** T7.87's block above, and the landed `internal/host/host.go`. In the broker,
