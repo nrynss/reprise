@@ -2937,7 +2937,7 @@ requires:   T7.87
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/broker/, internal/api/handlers_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/voice/, web/src/routes/record/
-status:     in-progress:land:t7.88-rev-r1@0f0c42c166b13092d06b7527b897cd562bcd34ef
+status:     blocked:implementation landed at 3a6f004662489d8227954e54e3e19fc14610f8bc, pending live provider probe and postdeploy owner voice takes
 ```
 **Read first.** T7.87's block above, and the landed `internal/host/host.go`. In the broker,
 `(*Broker).create` in `internal/broker/broker.go`. In `cmd/reprise/main.go`, `hostBuilder` and the
@@ -3104,6 +3104,11 @@ goes in the handoff too.
 ## Handoff log
 
 ### What exists now
+
+T7.88 implementation landed at 3a6f004 after round 1 APPROVE with zero findings.
+Guests choose Anna, George, or Eve. Setup sends the selected voice and 1500/4000 ms turn silence.
+Independent and post-rebase gates passed, including race tests, 430 unit tests, and 209 browser tests.
+The owner accepted ffmpeg 9.0.2 for these checks. The provider probe and postdeploy owner takes remain pending.
 
 T7.87 landed at c45b318 after round 1 APPROVE with zero findings.
 The host offers three voices with the guest choice carried into
@@ -3558,6 +3563,9 @@ T7.2 lands, so dogfood sparingly.
 
 ### What surprised us
 
+The voice builder interface also required updating the API test fake, so T7.88 ownership expanded before that edit.
+Host WebKit libraries were absent. The installed Playwright container ran the browser suites sequentially with media tools available.
+
 A pagehide beacon can carry the provider id while the call stays
 open. Delete does not end a connected socket. Reconcile does not
 send `session.end`. The client end is not enough when that frame
@@ -3613,6 +3621,11 @@ guarded build spend only, so `daily_spend_cents` went to 100000 at
 a0a9339. Owner limits stay at $20 each.
 
 ### Notes for the next developer
+
+T7.88 needs its live golden-frame probe and three owner voice takes after deploy.
+Read each stored timeline's first config update for voice and turn silence before closing acceptance.
+The controller freezes voice as an argument per start attempt. Review accepted that choice over another mutable field.
+Unrelated probe caches and runs from claude-opus-5-5 remained untouched in the main checkout.
 
 Real-take findings, 2026-09-20, all measured on the live edge with
 the owner present. First take died silently on Cloudflare challenge
