@@ -2717,6 +2717,380 @@ handoff.
 
 ---
 
+### T7.87: The host talks like a podcast host, and remembers only what the guest said
+```yaml
+requires:   T7.84
+fixture-ok: yes
+size:       M · frontier
+owns:       internal/host/
+status:     not-started
+```
+**Read first.** `internal/host/host.go` in full, and `internal/host/host_test.go`. This task
+touches no other file. `cmd/reprise/main.go` calls `host.Load(ctx, db, ownerID)`, and that call
+must keep compiling unchanged. T7.88 moves it to the new function.
+
+**Defect one, the prompt.** On 2026-09-30 the owner's live take (episode 14, 101 s) had a host
+that sounded like a helpdesk. Its replies ran two or three sentences, and it recapped the guest.
+It cut in twice mid-sentence and once finished the guest's sentence. `systemPrompt` in `host.go`
+says nothing about energy, gushing or therapy talk. It does say "You interrupt to follow up when
+something matters", which invites the cut-ins. The owner approved the replacement below on
+2026-09-30.
+
+**Defect two, the memory.** Episode 14's prompt listed `Episode 12 (keyphrase): "great hearing"`
+under "Things the guest said before". The host said those words ("It was great hearing from you"),
+not the guest. Mentions come from analysing the rendered episode, which mixes both voices, so host
+phrases land in the `mentions` table. `recentMentions` feeds every mention to both `threadsFrom`
+and `keytermsFrom`. The same take's keyterms held host lines such as "How do you feel about that?".
+Everything the host recalls must be something the guest said.
+
+#### Step 1. Voices
+
+Add to `host.go`, each with a doc comment:
+
+```go
+// Voice is one host voice the guest can pick. ID is the provider's voice id.
+// Name is what the host calls itself.
+type Voice struct {
+	ID   string
+	Name string
+}
+
+// Voices lists the host voices on offer, in the order the page shows them.
+var Voices = []Voice{{ID: "anna", Name: "Anna"}, {ID: "george", Name: "George"}, {ID: "eve", Name: "Eve"}}
+
+// DefaultVoice is the voice id used when the guest picks none.
+const DefaultVoice = "anna"
+
+// ErrVoice reports a voice id outside Voices.
+var ErrVoice = errors.New("host: unknown voice")
+```
+
+* `func VoiceByID(id string) (Voice, error)`. The empty string returns the Anna entry. An exact
+  match on `ID` returns that entry. Anything else returns `Voice{}` and
+  `fmt.Errorf("host: voice %q: %w", id, ErrVoice)`. No trimming, no case folding: `"GEORGE"` and
+  `" eve"` are errors.
+* `Input` gains a field `Voice Voice`. When `Input.Voice.Name` is empty, `Build` uses the Anna
+  entry. Tests that build `Input` by hand keep working.
+* `Config` gains `Voice string` with the tag `json:"voice"`. `Build` sets it to the voice's `ID`.
+* Add `func LoadVoice(ctx context.Context, db *sql.DB, ownerID, voiceID string) (Config, error)`.
+  It calls `VoiceByID` first and returns its error before any query. Then it does what `Load`
+  does today and passes the voice into `Input`.
+* `Load(ctx, db, ownerID)` keeps its signature. Its body becomes
+  `return LoadVoice(ctx, db, ownerID, DefaultVoice)`.
+
+#### Step 2. The prompt
+
+Add one raw string constant, `promptBody`, holding the text between the fences below exactly. Keep
+every line break. It holds no backtick, so a Go raw string holds it as is. `systemPrompt` gains a
+`name string` parameter. It writes
+`strings.ReplaceAll(promptBody, "{name}", name)` first, then the greeting on the very next line.
+Everything after the greeting stays exactly as the code has it today: the threads block when a
+thread exists, then the four closing sentences starting "Use only the names, episodes, and counts
+listed above." Delete the six `out.WriteString` lines that write the old opening, from "You are
+the host of a personal podcast." to "You open with the greeting below exactly once, before anything
+else:\n".
+
+```text
+You are {name}, the host of a personal podcast. One guest, talking about their own life.
+
+Listen and be empathetic. This is the most important rule.
+- Talk the way people talk on a good podcast: natural, a little loose, never a speech.
+- Say what you want to say, then hand the turn back. One question per turn.
+- If they pause mid-thought, wait. Don't finish their sentence.
+
+Energy:
+- Open bright. You're glad they showed up, and it shows.
+- Then follow them. Match their pace and mood as the conversation goes.
+- If they're excited, get excited with them. If they slow down or go quiet, you do too.
+- Never stay louder than the guest. Their energy sets the room.
+
+React like a friend, not a fan. No gushing, no praising their story.
+Don't recap what they just said. They were there.
+
+You're a host, not a therapist. Don't name their feelings for them,
+don't counsel, don't fix. Ask about what happened, not how it made them feel.
+If something's heavy, a short, plain reply is enough.
+
+Bad: "Oh, that sounds absolutely magical! It must have meant a lot to share that with the kids."
+Good: "Wait, the dessert looked like a snitch? Okay, I need to know. Did anyone actually eat it, or did it just sit there looking pretty?"
+
+You CAN:
+- Bring up something from an earlier episode, if one is listed at the end.
+- Ask about a detail they just mentioned.
+- Let a topic go when they move on.
+
+You CANNOT:
+- Invent an episode, a name, a date or a count. Only the episodes listed at the end happened. If none are listed, this is their first.
+- Give advice unless they ask. If they do, keep it brief, then hand it back.
+- Talk about your own life. If asked: "Not my episode. So, what happened next?"
+
+Flow:
+1. Open with the greeting below, once.
+2. Follow what they bring. Their topic beats your callback.
+3. Pick a concrete detail and ask about it: a person, a place, what happened next.
+4. When they sign off, let them go warmly. No summary.
+
+Say numbers out loud the way people do: "episode twelve", never the digits.
+Casual words are fine: "yeah", "oh wow", "huh", "right", "no way", "fair". Use contractions.
+
+Vibe: a good friend with a microphone. Curious, warm, never performing.
+
+Greeting:
+```
+
+Three traps:
+* The "Bad" and "Good" lines mention a dessert and a snitch. That is fixed example wording, not a
+  stored thread. Keep it word for word. Do not route it through the threads block.
+* The numbered Flow steps put the digits 1 to 4 in the prompt. `TestGreetingProvenance` checks
+  digits in the **greeting** only, so it still passes. If any other existing test scans the whole
+  prompt for digits, exclude `promptBody` from that scan and say so in the handoff. Never reword
+  the prompt to dodge a test.
+* An existing test counts `"Episode "` in the prompt to count threads. The new text uses only
+  lower-case "episode", so that count still works. Keep it that way.
+
+#### Step 3. The greetings
+
+`Build` makes the greeting in three cases. Use these strings exactly. `{name}` is the voice name.
+* No prior episodes (`opener`): `Hey, I'm {name}. Welcome to your first episode! What's on your mind today?`
+* Prior episodes, no callback (`returningOpener`): `Hey, welcome back! What's on your mind today?`
+* A callback: `Hey, welcome back! Last time in episode %d you mentioned %q, so tell me how that went.`
+
+`opener` becomes a format that takes the name, for example built with `strings.ReplaceAll` like
+the prompt. The callback case keeps its current `fmt.Sprintf` arguments and its `callbackID`
+logic.
+
+#### Step 4. Only the guest's words
+
+Add one unexported helper, `normalise(s string) string`. It lower-cases `s`, turns every rune that
+is not `unicode.IsLetter` or `unicode.IsDigit` into a space, then joins `strings.Fields` with
+single spaces. So `"We didn't go!"` becomes `"we didn t go"`.
+
+Add `guestText(ctx, db, ownerID) (map[string]string, error)`. It runs this query once:
+
+```sql
+SELECT episode_id, text FROM words
+WHERE owner_id = ? AND source = 'edit' AND speaker = 'user'
+ORDER BY episode_id, rowid
+```
+
+It joins each episode's `text` values with single spaces and stores `normalise` of that per
+episode id. Also add `labelled(ctx, db, ownerID) (map[string]bool, error)`, true for every episode
+id with at least one `source = 'edit'` row of any speaker. Use the literal strings `'edit'` and
+`'user'` in the SQL. Do not import `internal/transcript` for them, because host must not depend on
+it. A comment says they match the transcript package's stored values.
+
+A mention is **the guest's** when either:
+* its episode is not in `labelled` (seeded and older episodes carry no speaker labels, so they
+  keep every mention), or
+* `normalise(quote)` is non-empty and is a substring of that episode's guest text. A labelled
+  episode with no guest words at all therefore keeps no mentions.
+
+Apply it in two places:
+* `recentMentions` selects `m.episode_id` as well, and drops every mention that is not the
+  guest's. `threadsFrom` and `keytermsFrom` then see only guest mentions. `Thread` gains no new
+  exported field. Use a local struct if the episode id must travel.
+* `unusedCallback` drops `LIMIT 1`, selects `m.episode_id` too, walks the rows in order, and
+  returns the first one that is the guest's. If none is, it returns nil, nil. It never updates or
+  deletes a row. The claim in `main.go` still decides races.
+
+Both helpers run once per `LoadVoice` call. Pass the maps into the two functions. Do not query per
+mention.
+
+#### Step 5. The package comment
+
+The package comment and the `systemPrompt` comment say the fixed wording holds no names and no
+digits. Rewrite both to say: the only name in the fixed wording is the chosen voice's own, and the
+only digits are the numbered steps of the flow. Every stored value still comes from a row.
+
+#### Tests, in `internal/host/host_test.go`
+
+Write each one as its own `Test...` function.
+* `VoiceByID`: `""` gives Anna, `"george"` gives George, `"eve"` gives Eve. `"bob"`, `"GEORGE"` and
+  `" eve"` each give an error that `errors.Is(err, host.ErrVoice)`.
+* `LoadVoice` with `"bob"` returns `ErrVoice` against an empty test database, before any query runs.
+* `Build` with each of the three voices: the prompt starts with `You are Anna, the host` (George,
+  Eve), and `Config.Voice` is the id.
+* `Build` with a zero `Input.Voice` behaves as Anna.
+* The prompt contains `Energy:` and `You're a host, not a therapist.` and does not contain
+  `You interrupt`.
+* The three greetings, each compared as a whole string, for Eve.
+* The guest filter. Seed one owner with episode 1 whose `edit` words are, in order,
+  `host: "It was great hearing from you."` and `user: "The loft was cold."`. Seed mentions
+  `"great hearing"` and `"the loft"` on episode 1. The prompt quotes `the loft` and not
+  `great hearing`. `Config.Keyterms` holds `the loft` and not `great hearing`.
+* Punctuation: a mention `"didn't go"` survives when the guest said `"We didn't go!"`.
+* An episode with mentions and no `edit` words keeps every mention.
+* A labelled episode whose guest said nothing keeps no mention.
+* Two unused callbacks, the older one quoting only host words. `LoadVoice` greets with the newer
+  one and returns its `CallbackID`. Both callback rows still read `used = 0` afterwards.
+* Every existing test that pins the old wording now pins the new wording. No other assertion
+  changes.
+
+**Done when:** All the tests pass with `go test -race ./internal/host/`, and the gate passes in a
+fresh worktree. `git diff --stat` shows files under `internal/host/` only.
+
+---
+
+### T7.88: The guest picks the host's voice, and the host waits for the end of a thought
+```yaml
+requires:   T7.87
+fixture-ok: yes
+size:       M · frontier
+owns:       internal/broker/, cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/voice/, web/src/routes/record/
+status:     not-started
+```
+**Read first.** T7.87's block above, and the landed `internal/host/host.go`. In the broker,
+`(*Broker).create` in `internal/broker/broker.go`. In `cmd/reprise/main.go`, `hostBuilder` and the
+`broker.New(broker.Config{...})` call. In the web, `web/src/lib/voice/session.ts`, `socket.ts`,
+`session-calls.ts`, `record-state.ts` (`start`, `startRealTake`, `startMockTake`), `mock.ts`,
+`testdata/session-update.golden.json`, and `web/src/routes/record/+page.svelte`.
+
+**Why.** The owner wants the guest to choose the host's voice on the Record page, from Anna
+(British), George (American) and Eve (American). The voice is fixed once a provider session
+starts, so it goes in the setup frame. Today the frame has no `output` block, and the provider
+falls back to `anna`. The frame has no `turn_detection` either, so the provider ends a turn after
+its default 600 ms minimum silence. On 2026-09-30 that cut the guest off twice mid-sentence, after
+pauses of about 1.2 s. The provider's documented fields are
+`session.output.voice` and `session.input.turn_detection.{min_silence, max_silence}` in
+milliseconds.
+
+#### Step 1. The broker
+
+* `SessionConfig` in `broker.go` gains `Voice string` with tag `json:"voice"`, after `Keyterms`.
+* `ConfigBuilder.BuildSessionConfig` becomes `BuildSessionConfig(ctx context.Context, ownerID,
+  voice string) (SessionConfig, error)`. Update its doc comment and every fake in the broker tests.
+* `broker.Config` gains `VoiceCheck func(voice string) error`, with a doc comment. `New` accepts a
+  nil `VoiceCheck`. A nil check accepts only the empty voice and refuses every other value.
+* Add `CodeBadRequest = "bad_request"` beside the other codes, with a doc comment.
+* In `create`, read the voice **right after the owner check and before the kill switch read**.
+  This order is load-bearing: a refusal must happen before any budget, lease or mint.
+  * Wrap the body: `r.Body = http.MaxBytesReader(w, r.Body, 1024)`, then read it all.
+  * An empty body (zero bytes) means voice `""`.
+  * Otherwise decode into a local struct with one field, `Voice string`, tagged `json:"voice"`. A decode error, or a body over
+    1 KiB, answers `400`, `CodeBadRequest`, message `"the session request could not be read"`.
+  * Run `VoiceCheck` on the voice. An error answers `400`, `CodeBadRequest`, message
+    `"that voice is not on offer"`.
+* Pass the voice into `b.sessions.BuildSessionConfig(ctx, owner, voice)`.
+
+The broker never imports `internal/host`. `main.go` wires the check.
+
+#### Step 2. `cmd/reprise/main.go`
+
+* In `broker.New(broker.Config{...})`, set
+  `VoiceCheck: func(v string) error { _, err := host.VoiceByID(v); return err }`.
+* `hostBuilder.BuildSessionConfig` takes `voice string`, calls `host.LoadVoice(ctx, b.db, ownerID,
+  voice)` instead of `host.Load`, and sets `Voice: cfg.Voice` in **both** `broker.SessionConfig`
+  literals.
+
+#### Step 3. The setup frame
+
+* `SessionConfig` in `session.ts` gains `voice: string`. `parseSessionStart` reads it with the same
+  helper as `greeting`, and refuses a missing or empty value with an error naming `voice`.
+* In `socket.ts`, export two constants with this comment above them: "A guest telling a story
+  pauses to find a word. The provider's default ends the turn after 600 ms, which cut guests off
+  mid-sentence, so the host waits longer."
+  ```ts
+  export const MIN_SILENCE_MS = 1500;
+  export const MAX_SILENCE_MS = 4000;
+  ```
+* `sessionUpdateFrame` builds `input` every time now: `{ turn_detection: { min_silence:
+  MIN_SILENCE_MS, max_silence: MAX_SILENCE_MS } }`, plus `keyterms` when the list is non-empty.
+  It adds `output: { voice: config.voice }`. Key order in the object is `system_prompt`,
+  `greeting`, `tools`, `input`, `output`. Update the function's comment, which says an empty keyterm
+  list omits `input`.
+* Rewrite `testdata/session-update.golden.json` to exactly this, tab indented like today:
+  ```json
+  {
+  	"type": "session.update",
+  	"session": {
+  		"system_prompt": "You are the host of Reprise. Open on the stored callback.",
+  		"greeting": "Last week you mentioned the loft. Did you ever go back?",
+  		"tools": [],
+  		"input": {
+  			"turn_detection": { "min_silence": 1500, "max_silence": 4000 },
+  			"keyterms": ["the loft", "Mara"]
+  		},
+  		"output": { "voice": "anna" }
+  	}
+  }
+  ```
+  `internal/assemblyai/voice_live_test.go` sends this golden frame to the provider under the `live`
+  tag, so the provider's acceptance of both new fields is measured there. Do not edit that file.
+* `mock.ts` echoes `session.update` today. Make sure its echo carries `output` and
+  `input.turn_detection` unchanged, the way it carries the rest.
+
+#### Step 4. The mint call and the controller
+
+* `mintSession(voice: string)` in `session-calls.ts` sends `method: 'POST'`,
+  `headers: { 'content-type': 'application/json' }`, `body: JSON.stringify({ voice })`. Keep its
+  no-retry rule.
+* `RecordController.start()` becomes `start(voice: string)`. It stores the voice and
+  `startRealTake` passes it to `mintSession`. Update the doc comment.
+* `startMockTake` sets `voice` in its fake `config` to the chosen voice, so the mock socket gets a
+  full frame.
+
+#### Step 5. The Record page
+
+In `web/src/routes/record/+page.svelte`, inside the existing
+`{#if snap.phase === 'preflight' || snap.phase === 'starting'}` block, above the Start button:
+
+* A Bits UI `RadioGroup.Root` with `aria-label="Host voice"`, and a visible label reading
+  `Host voice` above it. Import `RadioGroup` from `bits-ui`, which the account page already uses
+  for `Button` and `Label`.
+* One `RadioGroup.Item` per entry, in this order and with these words exactly:
+
+  | value | first line | second line |
+  |---|---|---|
+  | `anna` | Anna | British |
+  | `george` | George | American |
+  | `eve` | Eve | American |
+
+  Write this list as a constant in the page. The web cannot import Go. A comment says it must
+  match `Voices` in the host package.
+* Style each item with the existing classes `button secondary`, and add `active` to the checked one.
+  Those classes live in `web/src/app.css`, which this task does not own, so do not edit that file.
+  Put layout only in the page's own `<style>`: a flex row with `flex-wrap: wrap` and a gap, and the
+  second line in a smaller `var(--muted)` text. Each item is at least 44 px tall, which `.button`
+  already gives.
+* Hold the choice in `let voice = $state('anna')`. Read `localStorage.getItem('reprise.voice')`
+  once in the page's existing `$effect`, inside try/catch. Use the stored value only when it is one
+  of the three ids. On every change, write it back inside try/catch.
+* Disable the group while `snap.phase === 'starting'`. The group sits inside the preflight block,
+  so it disappears once the take is live.
+* The Start button's handler becomes `activeController?.start(voice)`.
+* Add no other copy. Follow `dev-diary/voice.md`. The copy test must still pass.
+
+#### Tests
+
+* `internal/broker`: a body `{"voice":"bob"}` answers 400 with `bad_request`, and afterwards the
+  test's budget, lease and diary fakes record no reservation, no lease and no episode. A body
+  `not json` answers 400. An empty body reaches the builder with voice `""`. `{"voice":"eve"}`
+  reaches it as `eve`. A nil `VoiceCheck` refuses `eve` and accepts the empty body.
+* `cmd/reprise/main_test.go`: `hostBuilder{db}.BuildSessionConfig(ctx, owner, "george")` returns
+  `Voice == "george"` and a prompt starting `You are George,`. With `"bob"` it returns an error
+  that `errors.Is(err, host.ErrVoice)`.
+* `socket.test.ts`: `sessionUpdateFrame` for voice `george` and no keyterms carries
+  `session.output.voice === 'george'`, `session.input.turn_detection` with 1500 and 4000, and no
+  `keyterms` key. The existing golden comparison now matches the new golden file.
+* `session.test.ts`: a start body whose config lacks `voice` is refused.
+* A Playwright spec, `web/src/routes/record/voice-picker.spec.ts`, under the existing mock config:
+  * With `?mock=1`: the three voices show in order, Anna is checked, and choosing Eve checks Eve.
+    After Start the group is gone. A reload shows Eve checked.
+  * At a 375 px wide viewport, the page has no horizontal scroll and all three items sit on
+    screen.
+  * Without `?mock=1`, `page.route('**/api/sessions', ...)` answers `503` with
+    `{"code":"sessions_paused","message":"live sessions are paused"}` and records the request.
+    Choose George and press Start. The recorded request body parses to `{"voice":"george"}`. The
+    503 stops the take before any socket opens.
+
+**Done when:** All the tests pass, and the gate passes in a fresh worktree. After deploy, the owner
+records one take with each voice. For each take, the orchestrator reads the stored timeline on the
+box, `config_changes[0].update`, and records `output.voice` and `input.turn_detection` in the
+handoff. The live `voice_live_test.go` probe is run once with the new golden file, and its result
+goes in the handoff too.
+
+---
+
 ## Exit criteria
 
 - [ ] A fixture episode becomes a ready episode through the wired handlers with no network.
