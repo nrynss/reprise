@@ -2723,7 +2723,7 @@ requires:   T7.84
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/host/
-status:     not-started
+status:     in-progress:implement:t7.87-impl
 ```
 **Read first.** `internal/host/host.go` in full, and `internal/host/host_test.go`. This task
 touches no other file. `cmd/reprise/main.go` calls `host.Load(ctx, db, ownerID)`, and that call
