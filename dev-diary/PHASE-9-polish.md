@@ -359,7 +359,7 @@ requires:   T9.4
 fixture-ok: yes
 size:       XS · light
 owns:       web/src/routes/record/gallery-link.spec.ts
-status:     in-progress:land:t9.14-impl@4806e37d01578d66d905b287d3256869e63407c3
+status:     done:a6c5bd3
 ```
 T9.4 replaced the gallery h1 by design, and the record link spec still
 asserts the old header in two helpers (`followGalleryLink` and the
@@ -387,6 +387,9 @@ and the gate passes in a fresh worktree.
 
 ### What exists now
 
+T9.14 landed at a6c5bd3 after round 1 APPROVE with zero findings.
+The record link spec pins the landed gallery header. Reviewed
+commit 4806e37 rebased clean. Pin passes on the landed commit.
 T9.9 landed at 790276a after round 2 APPROVE with zero residue.
 The copy guard scans routes plus controllers (aria labels included)
 and the layout spec pins all 14 fixture pages at four widths. Round
