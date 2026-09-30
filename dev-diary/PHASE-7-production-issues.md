@@ -2723,7 +2723,7 @@ requires:   T7.84
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/host/
-status:     in-progress:land:t7.87-impl@b3c63f37d02f05e855db54781ac4f76b5658b790
+status:     done:c45b318b75f3e9e41b25f2539a074d95c89aa6d4
 ```
 **Read first.** `internal/host/host.go` in full, and `internal/host/host_test.go`. This task
 touches no other file. `cmd/reprise/main.go` calls `host.Load(ctx, db, ownerID)`, and that call
@@ -3105,6 +3105,12 @@ goes in the handoff too.
 
 ### What exists now
 
+T7.87 landed at c45b318 after round 1 APPROVE with zero findings.
+The host offers three voices with the guest choice carried into
+the setup, speaks the approved warmer prompt, and greets from
+stored history with guest-only mentions. Reviewed commit b3c63f3
+rebased clean. Race tests pass on the landed commit. T7.88
+unblocks on this landing.
 T7.84 landed at f32229a after round 1 APPROVE with zero findings.
 Immutable bundles cache for a year while every HTML shell and client
 fallback revalidates, so a deploy reaches open browsers at once. An
