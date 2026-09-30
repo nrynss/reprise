@@ -6,6 +6,7 @@
 import { AudioPlayer } from '@nrynss/chaaya/audio';
 import { isTerminalStatus, JobStream, type JobSnapshot, type JobStatus } from '@nrynss/chaaya/job';
 import { activeWordAt, toEditedTime } from '@nrynss/chaaya/transcript';
+import { ensureSeasonCopy } from '../../lib/api/season-copy';
 
 export type EpisodeState = 'ready' | 'rendering' | 'draft';
 
@@ -1143,6 +1144,9 @@ export class GalleryController {
 
 	private async mountLive(): Promise<void> {
 		const token = this.mountToken;
+		// A first visit gets its starter season before the list reads it.
+		await ensureSeasonCopy(window.fetch);
+		if (token !== this.mountToken) return;
 		let listed: LiveEpisode[];
 		for (;;) {
 			try {

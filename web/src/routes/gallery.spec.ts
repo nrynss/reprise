@@ -198,3 +198,38 @@ test('a running card reads its progress in plain words', async ({ page }) => {
 	await expect(page.getByText('Working')).toHaveCount(0);
 	await expect(page.getByText('survives a reload')).toHaveCount(0);
 });
+
+test('a first visit asks for its starter season before listing episodes', async ({ page }) => {
+	const order: string[] = [];
+	await page.route('**/api/welcome', async (route) => {
+		order.push('welcome');
+		await route.fulfill({ json: { mode: 'seeded', episodes: 1 } });
+	});
+	await page.route('**/api/episodes', async (route) => {
+		order.push('episodes');
+		await route.fulfill({
+			json: {
+				episodes: [{ id: 'e1', number: 1, title: 'Starter', state: 'ready', visibility: 'private' }]
+			}
+		});
+	});
+	await page.route('**/api/jobs/**', (route) => route.fulfill({ status: 404, body: '' }));
+	await page.goto('/');
+	await expect(page.getByText('Starter')).toBeVisible();
+	expect(order[0]).toBe('welcome');
+	expect(order.filter((name) => name === 'welcome')).toHaveLength(1);
+});
+
+test('the gallery still lists episodes when the season copy is refused', async ({ page }) => {
+	await page.route('**/api/welcome', (route) => route.fulfill({ status: 500, body: '' }));
+	await page.route('**/api/episodes', (route) =>
+		route.fulfill({
+			json: {
+				episodes: [{ id: 'e1', number: 1, title: 'Starter', state: 'ready', visibility: 'private' }]
+			}
+		})
+	);
+	await page.route('**/api/jobs/**', (route) => route.fulfill({ status: 404, body: '' }));
+	await page.goto('/');
+	await expect(page.getByText('Starter')).toBeVisible();
+});
