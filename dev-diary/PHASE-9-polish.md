@@ -353,6 +353,25 @@ status:     done:68e2ace
 
 **Done when:** `go test ./internal/identity/migrations/` passes, and the gate passes in a fresh worktree.
 
+### T9.14: Stale gallery header pins in the record link spec
+```yaml
+requires:   T9.4
+fixture-ok: yes
+size:       XS · light
+owns:       web/src/routes/record/gallery-link.spec.ts
+status:     in-progress:land:t9.14-impl@4806e37d01578d66d905b287d3256869e63407c3
+```
+T9.4 replaced the gallery h1 by design, and the record link spec still
+asserts the old header in two helpers (`followGalleryLink` and the
+ Held-navigation helper around line 172). CI on the P9 landing run
+failed exactly those 10 tests and nothing else.
+
+* Assert the landed h1 (`Your episodes`) in both helpers. No product
+  change.
+
+**Done when:** The record mock suite passes in Chromium and Firefox,
+and the gate passes in a fresh worktree.
+
 ---
 
 ## Exit criteria
