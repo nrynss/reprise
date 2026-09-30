@@ -2937,7 +2937,7 @@ requires:   T7.87
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/broker/, internal/api/handlers_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/voice/, web/src/routes/record/
-status:     in-progress:implement:t7.88-impl
+status:     in-progress:review-r1:t7.88-rev-r1@0f0c42c166b13092d06b7527b897cd562bcd34ef
 ```
 **Read first.** T7.87's block above, and the landed `internal/host/host.go`. In the broker,
 `(*Broker).create` in `internal/broker/broker.go`. In `cmd/reprise/main.go`, `hostBuilder` and the
