@@ -40,12 +40,13 @@ class FakeHandle implements SocketHandle {
 	}
 }
 
-const CONFIG: SessionConfig = { system_prompt: 'prompt', greeting: 'hello', keyterms: ['Mara'] };
+const CONFIG: SessionConfig = { system_prompt: 'prompt', greeting: 'hello', keyterms: ['Mara'], voice: 'anna' };
 
 const GOLDEN_CONFIG: SessionConfig = {
 	system_prompt: 'You are the host of Reprise. Open on the stored callback.',
 	greeting: 'Last week you mentioned the loft. Did you ever go back?',
-	keyterms: ['the loft', 'Mara']
+	keyterms: ['the loft', 'Mara'],
+	voice: 'anna'
 };
 
 interface ProviderFrame {
@@ -120,7 +121,11 @@ describe('VoiceSocket', () => {
 		expect(session['system_prompt']).toBe('prompt');
 		expect(session['greeting']).toBe('hello');
 		expect(session['tools']).toEqual([]);
-		expect(session['input']).toEqual({ keyterms: ['Mara'] });
+		expect(session['input']).toEqual({
+			turn_detection: { min_silence: 1500, max_silence: 4000 },
+			keyterms: ['Mara']
+		});
+		expect(session['output']).toEqual({ voice: 'anna' });
 	});
 
 	it('routes host audio through a base64 round trip', () => {
@@ -356,10 +361,24 @@ describe('session setup frame', () => {
 		expect(sessionUpdateFrame(GOLDEN_CONFIG)).toEqual(golden);
 	});
 
-	it('omits input when no keyterms are set', () => {
-		const frame = sessionUpdateFrame({ system_prompt: 'prompt', greeting: 'hello', keyterms: [] });
+	it('carries the picked voice and the wait with no keyterms', () => {
+		const frame = sessionUpdateFrame({
+			system_prompt: 'prompt',
+			greeting: 'hello',
+			keyterms: [],
+			voice: 'george'
+		});
 		const session = frame['session'] as Record<string, unknown>;
-		expect('input' in session).toBe(false);
+		expect(session['output']).toEqual({ voice: 'george' });
+		const input = session['input'] as Record<string, unknown>;
+		expect(input['turn_detection']).toEqual({ min_silence: 1500, max_silence: 4000 });
+		expect('keyterms' in input).toBe(false);
+	});
+
+	it('keeps the setup key order behind prompt, greeting, tools, input and output', () => {
+		const frame = sessionUpdateFrame(GOLDEN_CONFIG);
+		const session = frame['session'] as Record<string, unknown>;
+		expect(Object.keys(session)).toEqual(['system_prompt', 'greeting', 'tools', 'input', 'output']);
 	});
 
 	it('sends the golden frame on open', () => {

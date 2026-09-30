@@ -16,11 +16,16 @@ export interface UploadSlot {
 	readonly error?: { readonly code: string } | undefined;
 }
 
-// mintSession opens one broker session and reads its body. A second call
-// would mint a second session and reserve budget twice, so a failure throws
-// with no retry. The page stays preflight and the start control is the retry.
-export async function mintSession(): Promise<SessionStart> {
-	const value = await readJsonAnswer('session mint', '/api/sessions', { method: 'POST' });
+// mintSession opens one broker session for the picked voice and reads its
+// body. A second call would mint a second session and reserve budget twice,
+// so a failure throws with no retry. The page stays preflight and the start
+// control is the retry.
+export async function mintSession(voice: string): Promise<SessionStart> {
+	const value = await readJsonAnswer('session mint', '/api/sessions', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ voice })
+	});
 	return parseSessionStart(JSON.stringify(value));
 }
 

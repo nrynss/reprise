@@ -374,7 +374,7 @@ func TestHostBuilderServesOpenerOnEmptySeason(t *testing.T) {
 	if _, err := reprisestore.Open(ctx, db); err != nil {
 		t.Fatalf("migrate diary schema: %v", err)
 	}
-	got, err := hostBuilder{db: db.Writer()}.BuildSessionConfig(ctx, "owner-1")
+	got, err := hostBuilder{db: db.Writer()}.BuildSessionConfig(ctx, "owner-1", "")
 	if err != nil {
 		t.Fatalf("BuildSessionConfig error = %v, want nil", err)
 	}
@@ -387,6 +387,44 @@ func TestHostBuilderServesOpenerOnEmptySeason(t *testing.T) {
 	}
 	if len(got.Keyterms) != 0 {
 		t.Fatalf("keyterms = %v, want none on an empty season", got.Keyterms)
+	}
+}
+
+func TestHostBuilderServesGeorgeVoice(t *testing.T) {
+	ctx := context.Background()
+	db, err := keelsqlite.Open(ctx, keelsqlite.Config{Path: filepath.Join(t.TempDir(), "test.db")})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	if _, err := reprisestore.Open(ctx, db); err != nil {
+		t.Fatalf("migrate diary schema: %v", err)
+	}
+	got, err := hostBuilder{db: db.Writer()}.BuildSessionConfig(ctx, "owner-1", "george")
+	if err != nil {
+		t.Fatalf("BuildSessionConfig error = %v, want nil", err)
+	}
+	if got.Voice != "george" {
+		t.Fatalf("voice = %q, want george", got.Voice)
+	}
+	if !strings.HasPrefix(got.SystemPrompt, "You are George,") {
+		t.Fatalf("prompt opens %q, want the George host", got.SystemPrompt[:40])
+	}
+}
+
+func TestHostBuilderRefusesUnknownVoice(t *testing.T) {
+	ctx := context.Background()
+	db, err := keelsqlite.Open(ctx, keelsqlite.Config{Path: filepath.Join(t.TempDir(), "test.db")})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+	if _, err := reprisestore.Open(ctx, db); err != nil {
+		t.Fatalf("migrate diary schema: %v", err)
+	}
+	_, err = hostBuilder{db: db.Writer()}.BuildSessionConfig(ctx, "owner-1", "bob")
+	if !errors.Is(err, host.ErrVoice) {
+		t.Fatalf("BuildSessionConfig error = %v, want the voice refusal", err)
 	}
 }
 
@@ -418,11 +456,11 @@ func TestHostBuilderMarksEachCallbackOnce(t *testing.T) {
 	exec("INSERT INTO callbacks (id, owner_id, episode_id, mention_id, used) VALUES ('cb1', 'owner-cb', 'ep1', 'm1', 0)")
 	exec("INSERT INTO callbacks (id, owner_id, episode_id, mention_id, used) VALUES ('cb2', 'owner-cb', 'ep2', 'm2', 0)")
 	builder := hostBuilder{db: writer}
-	first, err := builder.BuildSessionConfig(ctx, "owner-cb")
+	first, err := builder.BuildSessionConfig(ctx, "owner-cb", "")
 	if err != nil {
 		t.Fatalf("first BuildSessionConfig error = %v, want nil", err)
 	}
-	second, err := builder.BuildSessionConfig(ctx, "owner-cb")
+	second, err := builder.BuildSessionConfig(ctx, "owner-cb", "")
 	if err != nil {
 		t.Fatalf("second BuildSessionConfig error = %v, want nil", err)
 	}
@@ -484,7 +522,7 @@ func TestHostBuilderConcurrentMintsDiverge(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			cfg, err := builder.BuildSessionConfig(ctx, "owner-cb")
+			cfg, err := builder.BuildSessionConfig(ctx, "owner-cb", "")
 			if err != nil {
 				errs[i] = err
 				return
@@ -804,7 +842,7 @@ func (wireMinter) Mint(context.Context, int) (string, error) { return "wire-toke
 // wireBuilder answers an empty session config from stored rows.
 type wireBuilder struct{}
 
-func (wireBuilder) BuildSessionConfig(context.Context, string) (broker.SessionConfig, error) {
+func (wireBuilder) BuildSessionConfig(context.Context, string, string) (broker.SessionConfig, error) {
 	return broker.SessionConfig{}, nil
 }
 

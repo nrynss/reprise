@@ -7,6 +7,7 @@ export interface SessionConfig {
 	system_prompt: string;
 	greeting: string;
 	keyterms: string[];
+	voice: string;
 }
 
 // SessionStart carries one minted session: the provider token beside the
@@ -64,7 +65,8 @@ export function parseSessionStart(text: string): SessionStart {
 		config: {
 			system_prompt: readString(rawConfig, 'system_prompt'),
 			greeting: readString(rawConfig, 'greeting'),
-			keyterms: [...rawKeyterms] as string[]
+			keyterms: [...rawKeyterms] as string[],
+			voice: readString(rawConfig, 'voice')
 		}
 	};
 }

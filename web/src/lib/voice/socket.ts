@@ -49,17 +49,26 @@ export interface SessionErrorDetail {
 	param: string;
 }
 
+// A guest telling a story pauses to find a word. The provider's default ends the turn after 600 ms, which cut guests off mid-sentence, so the host waits longer.
+export const MIN_SILENCE_MS = 1500;
+export const MAX_SILENCE_MS = 4000;
+
 // sessionUpdateFrame builds the setup frame in the shape the provider takes.
-// The setup nests under session, with keyterms under input. An empty keyterm
-// list omits input. The provider reads a missing input as no keyterms.
+// The setup nests under session, with turn detection and keyterms under
+// input and the picked voice under output. The provider reads a missing
+// keyterms list as no keyterms.
 export function sessionUpdateFrame(config: SessionConfig): Record<string, unknown> {
 	const inner: Record<string, unknown> = {
 		system_prompt: config.system_prompt,
 		greeting: config.greeting,
-		tools: []
+		tools: [],
+		input: {
+			turn_detection: { min_silence: MIN_SILENCE_MS, max_silence: MAX_SILENCE_MS }
+		},
+		output: { voice: config.voice }
 	};
 	if (config.keyterms.length > 0) {
-		inner['input'] = { keyterms: [...config.keyterms] };
+		(inner['input'] as Record<string, unknown>)['keyterms'] = [...config.keyterms];
 	}
 	return { type: 'session.update', session: inner };
 }

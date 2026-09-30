@@ -47,13 +47,18 @@ func (s *stubMinter) Mint(_ context.Context, _ int) (string, error) {
 	return s.token, nil
 }
 
-// stubBuilder answers the session config from its fields.
+// stubBuilder answers the session config from its fields and records the
+// voice the broker passed.
 type stubBuilder struct {
 	config SessionConfig
 	err    error
+	voice  string
+	calls  int
 }
 
-func (s stubBuilder) BuildSessionConfig(_ context.Context, _ string) (SessionConfig, error) {
+func (s *stubBuilder) BuildSessionConfig(_ context.Context, _, voice string) (SessionConfig, error) {
+	s.calls++
+	s.voice = voice
 	if s.err != nil {
 		return SessionConfig{}, s.err
 	}
@@ -78,6 +83,7 @@ type fixtureOptions struct {
 	minter      TokenMinter
 	builder     ConfigBuilder
 	diary       Diary
+	check       func(voice string) error
 }
 
 type fixture struct {
@@ -130,7 +136,7 @@ func newFixture(t *testing.T, opts *fixtureOptions) *fixture {
 			minter = stub
 		}
 	}
-	builder := ConfigBuilder(stubBuilder{config: SessionConfig{
+	builder := ConfigBuilder(&stubBuilder{config: SessionConfig{
 		SystemPrompt: "Speak warmly and ask one question at a time.",
 		Greeting:     "Last time you mentioned the lantern. Did you ever light it?",
 		Keyterms:     []string{"Mara", "Quilby"},
@@ -188,6 +194,7 @@ func newFixture(t *testing.T, opts *fixtureOptions) *fixture {
 		LeaseStore:        leases,
 		Minter:            minterFace,
 		Sessions:          builder,
+		VoiceCheck:        o.check,
 		Diary:             diary,
 		SessionCapSeconds: testCapSeconds,
 		GuestMaxSessions:  o.guestMax,
@@ -221,6 +228,29 @@ type postResult struct {
 func (f *fixture) post(cookie *http.Cookie) postResult {
 	f.t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/sessions", nil)
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	f.chain.ServeHTTP(rec, req)
+	out := postResult{rec: rec}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == identity.CookieName {
+			got := *c
+			out.cookie = &got
+		}
+	}
+	if out.cookie == nil {
+		out.cookie = cookie
+	}
+	return out
+}
+
+// postBody posts one session body, so the voice tests pin the body read
+// without touching the other checks.
+func (f *fixture) postBody(cookie *http.Cookie, body string) postResult {
+	f.t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions", strings.NewReader(body))
 	if cookie != nil {
 		req.AddCookie(cookie)
 	}
@@ -554,7 +584,7 @@ func TestTokenFailureReleasesEverything(t *testing.T) {
 
 func TestConfigFailureReleasesEverything(t *testing.T) {
 	fx := newFixture(t, &fixtureOptions{
-		builder: stubBuilder{err: errors.New("stubBuilder: forced config failure")},
+		builder: &stubBuilder{err: errors.New("stubBuilder: forced config failure")},
 	})
 	got := fx.post(nil)
 	status, code := refusalCode(t, got.rec)
@@ -615,6 +645,133 @@ func TestStoreFailureReleasesEverything(t *testing.T) {
 	}
 	if active := rebuilt.Leases().Active(); active != 0 {
 		t.Fatalf("open leases %d, want 0", active)
+	}
+}
+
+func TestVoiceRefusedBeforeAnythingHeld(t *testing.T) {
+	refuse := errors.New("no such voice")
+	fx := newFixture(t, &fixtureOptions{
+		check: func(voice string) error {
+			if voice == "bob" {
+				return refuse
+			}
+			return nil
+		},
+	})
+	got := fx.postBody(nil, `{"voice":"bob"}`)
+	status, code := refusalCode(t, got.rec)
+	if status != http.StatusBadRequest || code != CodeBadRequest {
+		t.Fatalf("voice refusal %d/%q, want 400/%s", status, code, CodeBadRequest)
+	}
+	if fx.minter.calls != 0 {
+		t.Fatalf("token calls %d, want 0", fx.minter.calls)
+	}
+	if n := countRows(t, fx.db, "SELECT COUNT(*) FROM sessions"); n != 0 {
+		t.Fatalf("session rows %d, want 0", n)
+	}
+	if n := countRows(t, fx.db, "SELECT COUNT(*) FROM episodes"); n != 0 {
+		t.Fatalf("episode rows %d, want 0", n)
+	}
+	if held := heldReservations(t, fx.costs); held != 0 {
+		t.Fatalf("held reservations %d, want 0", held)
+	}
+	if active := fx.broker.Leases().Active(); active != 0 {
+		t.Fatalf("open leases %d, want 0", active)
+	}
+}
+
+func TestVoiceUnreadableBodyRefuses(t *testing.T) {
+	fx := newFixture(t, nil)
+	got := fx.postBody(nil, `not json`)
+	status, code := refusalCode(t, got.rec)
+	if status != http.StatusBadRequest || code != CodeBadRequest {
+		t.Fatalf("unreadable refusal %d/%q, want 400/%s", status, code, CodeBadRequest)
+	}
+	if fx.minter.calls != 0 {
+		t.Fatalf("token calls %d, want 0", fx.minter.calls)
+	}
+	if held := heldReservations(t, fx.costs); held != 0 {
+		t.Fatalf("held reservations %d, want 0", held)
+	}
+}
+
+func TestVoiceOversizeBodyRefuses(t *testing.T) {
+	fx := newFixture(t, nil)
+	got := fx.postBody(nil, `{"voice":"`+strings.Repeat("x", 2048)+`"}`)
+	status, code := refusalCode(t, got.rec)
+	if status != http.StatusBadRequest || code != CodeBadRequest {
+		t.Fatalf("oversize refusal %d/%q, want 400/%s", status, code, CodeBadRequest)
+	}
+	if fx.minter.calls != 0 {
+		t.Fatalf("token calls %d, want 0", fx.minter.calls)
+	}
+	if held := heldReservations(t, fx.costs); held != 0 {
+		t.Fatalf("held reservations %d, want 0", held)
+	}
+}
+
+func TestVoiceEmptyBodyReachesBuilderEmpty(t *testing.T) {
+	sb := &stubBuilder{config: SessionConfig{
+		SystemPrompt: "Speak warmly and ask one question at a time.",
+		Greeting:     "Last time you mentioned the lantern. Did you ever light it?",
+		Keyterms:     []string{"Mara"},
+	}}
+	fx := newFixture(t, &fixtureOptions{builder: sb})
+	got := fx.post(nil)
+	if got.rec.Code != http.StatusCreated {
+		t.Fatalf("status %d, want 201: %s", got.rec.Code, got.rec.Body.String())
+	}
+	if sb.calls != 1 {
+		t.Fatalf("builder calls %d, want 1", sb.calls)
+	}
+	if sb.voice != "" {
+		t.Fatalf("builder voice %q, want empty", sb.voice)
+	}
+}
+
+func TestVoiceEveReachesBuilder(t *testing.T) {
+	sb := &stubBuilder{config: SessionConfig{
+		SystemPrompt: "Speak warmly and ask one question at a time.",
+		Greeting:     "Last time you mentioned the lantern. Did you ever light it?",
+		Keyterms:     []string{"Mara"},
+		Voice:        "eve",
+	}}
+	fx := newFixture(t, &fixtureOptions{
+		builder: sb,
+		check:   func(_ string) error { return nil },
+	})
+	got := fx.postBody(nil, `{"voice":"eve"}`)
+	if got.rec.Code != http.StatusCreated {
+		t.Fatalf("status %d, want 201: %s", got.rec.Code, got.rec.Body.String())
+	}
+	if sb.voice != "eve" {
+		t.Fatalf("builder voice %q, want eve", sb.voice)
+	}
+	var body sessionBody
+	if err := json.Unmarshal(got.rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	if body.Config.Voice != "eve" {
+		t.Fatalf("response voice %q, want eve", body.Config.Voice)
+	}
+}
+
+func TestVoiceNilCheckRefusesEveAcceptsEmpty(t *testing.T) {
+	fx := newFixture(t, nil)
+	got := fx.postBody(nil, `{"voice":"eve"}`)
+	status, code := refusalCode(t, got.rec)
+	if status != http.StatusBadRequest || code != CodeBadRequest {
+		t.Fatalf("nil check refusal %d/%q, want 400/%s", status, code, CodeBadRequest)
+	}
+	if fx.minter.calls != 0 {
+		t.Fatalf("token calls %d, want 0", fx.minter.calls)
+	}
+	if held := heldReservations(t, fx.costs); held != 0 {
+		t.Fatalf("held reservations %d, want 0", held)
+	}
+	again := fx.postBody(got.cookie, ``)
+	if again.rec.Code != http.StatusCreated {
+		t.Fatalf("empty status %d, want 201: %s", again.rec.Code, again.rec.Body.String())
 	}
 }
 

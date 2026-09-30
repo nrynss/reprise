@@ -480,15 +480,15 @@ type hostBuilder struct {
 	db *sql.DB
 }
 
-// BuildSessionConfig loads the session config for one owner from stored
-// rows. Counts and names in it come from those rows, never from invention.
-// A greeting that cites a callback claims that row with one conditional
-// write, so two mints racing each other land on different callbacks. A mint
-// that loses its claim reloads and tries the next row. A failed claim
-// refuses the mint instead of repeating silently.
-func (b hostBuilder) BuildSessionConfig(ctx context.Context, ownerID string) (broker.SessionConfig, error) {
+// BuildSessionConfig loads the session config for one owner and one voice
+// from stored rows. Counts and names in it come from those rows, never from
+// invention. A greeting that cites a callback claims that row with one
+// conditional write, so two mints racing each other land on different
+// callbacks. A mint that loses its claim reloads and tries the next row. A
+// failed claim refuses the mint instead of repeating silently.
+func (b hostBuilder) BuildSessionConfig(ctx context.Context, ownerID, voice string) (broker.SessionConfig, error) {
 	for {
-		cfg, err := host.Load(ctx, b.db, ownerID)
+		cfg, err := host.LoadVoice(ctx, b.db, ownerID, voice)
 		if err != nil {
 			return broker.SessionConfig{}, err
 		}
@@ -497,6 +497,7 @@ func (b hostBuilder) BuildSessionConfig(ctx context.Context, ownerID string) (br
 				SystemPrompt: cfg.SystemPrompt,
 				Greeting:     cfg.Greeting,
 				Keyterms:     cfg.Keyterms,
+				Voice:        cfg.Voice,
 			}, nil
 		}
 		claimed, err := claimCallback(ctx, b.db, ownerID, cfg.CallbackID)
@@ -508,6 +509,7 @@ func (b hostBuilder) BuildSessionConfig(ctx context.Context, ownerID string) (br
 				SystemPrompt: cfg.SystemPrompt,
 				Greeting:     cfg.Greeting,
 				Keyterms:     cfg.Keyterms,
+				Voice:        cfg.Voice,
 			}, nil
 		}
 	}
@@ -735,13 +737,17 @@ func wireAPI(ctx context.Context, mux *http.ServeMux, loaded settings.Settings, 
 		return nil, fmt.Errorf("reprise: open session diary: %w", err)
 	}
 	sessionBroker, err := broker.New(broker.Config{
-		Flags:             flagStore,
-		Budgets:           keyed,
-		DB:                db,
-		LeaseQuota:        quota,
-		LeaseStore:        leaseStore,
-		Minter:            minter,
-		Sessions:          hostBuilder{db: db.Writer()},
+		Flags:      flagStore,
+		Budgets:    keyed,
+		DB:         db,
+		LeaseQuota: quota,
+		LeaseStore: leaseStore,
+		Minter:     minter,
+		Sessions:   hostBuilder{db: db.Writer()},
+		VoiceCheck: func(v string) error {
+			_, err := host.VoiceByID(v)
+			return err
+		},
 		Diary:             diary,
 		SessionCapSeconds: loaded.SessionMaxSeconds,
 		GuestMaxSessions:  loaded.GuestMaxSessions,

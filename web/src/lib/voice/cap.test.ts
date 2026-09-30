@@ -10,7 +10,7 @@ import { makeTestTone } from './pcm';
 import { VoiceSocket } from './socket';
 import type { SessionConfig } from './session';
 
-const CONFIG: SessionConfig = { system_prompt: 'prompt', greeting: 'hello', keyterms: [] };
+const CONFIG: SessionConfig = { system_prompt: 'prompt', greeting: 'hello', keyterms: [], voice: 'anna' };
 
 interface FakeTimer {
 	id: number;

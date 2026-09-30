@@ -1,11 +1,21 @@
 <script lang="ts">
 	import { pageTitle } from '$lib/shell';
 	import GalleryLink from '$lib/components/GalleryLink.svelte';
+	import { RadioGroup } from 'bits-ui';
 	import { RecordController, emptySnapshot } from '$lib/voice/record-state';
 	import {
 		createCompletionDriver,
 		exposeStemsMock
 	} from './stems-complete';
+
+	// The host voices on offer. This list must match Voices in the host package.
+	const VOICES = [
+		{ id: 'anna', name: 'Anna', accent: 'British' },
+		{ id: 'george', name: 'George', accent: 'American' },
+		{ id: 'eve', name: 'Eve', accent: 'American' }
+	];
+
+	const VOICE_KEY = 'reprise.voice';
 
 	let snap = $state(emptySnapshot);
 	let completionVisible = $state(false);
@@ -13,6 +23,7 @@
 	let completionFailed = $state(false);
 	let retryReady = $state(false);
 	let activeController = $state<RecordController | null>(null);
+	let voice = $state('anna');
 
 	const completionDriver = createCompletionDriver((view) => {
 		completionVisible = true;
@@ -31,6 +42,14 @@
 
 	$effect(() => {
 		const params = Object.fromEntries(new URLSearchParams(window.location.search).entries());
+		try {
+			const stored = localStorage.getItem(VOICE_KEY);
+			if (stored !== null && VOICES.some((entry) => entry.id === stored)) {
+				voice = stored;
+			}
+		} catch {
+			// A locked store keeps the default pick, so the take still starts.
+		}
 		const controller = new RecordController({
 			mock: params['mock'] === '1',
 			resume: params['resume'] === '1',
@@ -73,6 +92,16 @@
 			controller.destroy();
 		};
 	});
+
+	// Keep the picked voice on the device, so the next visit opens on it.
+	$effect(() => {
+		const picked = voice;
+		try {
+			localStorage.setItem(VOICE_KEY, picked);
+		} catch {
+			// A locked store keeps the in-memory pick, so the take still starts.
+		}
+	});
 </script>
 
 <svelte:head>
@@ -85,12 +114,33 @@
 	<p class="sub" role="status">{snap.notice}</p>
 
 	{#if snap.phase === 'preflight' || snap.phase === 'starting'}
+		<section class="section voice-pick" aria-label="Host voice">
+			<p class="voice-label">Host voice</p>
+			<RadioGroup.Root
+				bind:value={voice}
+				aria-label="Host voice"
+				disabled={snap.phase === 'starting'}
+				class="voice-row"
+			>
+				{#each VOICES as entry (entry.id)}
+					<RadioGroup.Item
+						value={entry.id}
+						class={voice === entry.id
+							? 'button secondary voice-choice active'
+							: 'button secondary voice-choice'}
+					>
+						<span class="voice-name">{entry.name}</span>
+						<span class="voice-accent">{entry.accent}</span>
+					</RadioGroup.Item>
+				{/each}
+			</RadioGroup.Root>
+		</section>
 		<div class="actions start-wrap">
 			<button
 				id="record-start"
 				class="button start-big"
 				disabled={activeController === null || snap.phase !== 'preflight'}
-				onclick={() => void activeController?.start()}
+				onclick={() => void activeController?.start(voice)}
 				aria-label="Start session"
 			>
 				{snap.phase === 'starting' ? 'Opening…' : 'Start session'}
@@ -195,6 +245,36 @@
 		font-size: 1.25rem;
 		padding: 1rem 2.75rem;
 		min-height: 3.5rem;
+	}
+	/* The voice picker. A flex row that wraps, so the three choices sit
+	side by side on a monitor and fold on a phone. The second line reads
+	smaller and muted. The shared button already clears the tap target.
+	The row and the choices render inside the radio group component, so
+	their selectors stay global while the label and the lines stay local. */
+	.voice-pick {
+		margin-top: 1.5rem;
+	}
+	.voice-label {
+		font-weight: 600;
+		margin: 0 0 0.5rem;
+	}
+	:global(.voice-row) {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+	}
+	:global(.voice-choice) {
+		flex-direction: column;
+		gap: 0.1rem;
+		line-height: 1.25;
+	}
+	.voice-accent {
+		font-size: 0.85rem;
+		font-weight: 400;
+		color: var(--muted);
+	}
+	:global(.voice-choice.active) .voice-accent {
+		color: inherit;
 	}
 	/* The live clock. Large tabular figures hold still as they tick,
 	so the time reads at a glance in the hand. */

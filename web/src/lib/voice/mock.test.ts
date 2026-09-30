@@ -4,7 +4,7 @@ import { MockSocketHandle, MockUploadServer, progressFrame, sseResponse, statusF
 import { makeTestTone } from './pcm';
 import type { SessionConfig } from './session';
 
-const CONFIG: SessionConfig = { system_prompt: 'prompt', greeting: 'hello', keyterms: [] };
+const CONFIG: SessionConfig = { system_prompt: 'prompt', greeting: 'hello', keyterms: [], voice: 'anna' };
 
 function script() {
 	return {
@@ -119,6 +119,11 @@ describe('MockSocketHandle setup shape', () => {
 		const echo = updated?.['config'] as Record<string, unknown>;
 		expect(echo['system_prompt']).toBe(CONFIG.system_prompt);
 		expect(echo['greeting']).toBe(CONFIG.greeting);
+		expect(echo['output']).toEqual({ voice: 'anna' });
+		expect((echo['input'] as Record<string, unknown>)['turn_detection']).toEqual({
+			min_silence: 1500,
+			max_silence: 4000
+		});
 		expect(types).toContain('reply.audio');
 		expect(types).toContain('reply.done');
 		expect(types).not.toContain('session.error');

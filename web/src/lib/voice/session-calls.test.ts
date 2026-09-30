@@ -18,7 +18,7 @@ const SESSION_BODY = {
 	token: 'tok',
 	expires_in_seconds: 60,
 	max_session_duration_seconds: 1200,
-	config: { system_prompt: 'prompt', greeting: 'hello', keyterms: ['the loft'] }
+	config: { system_prompt: 'prompt', greeting: 'hello', keyterms: ['the loft'], voice: 'anna' }
 };
 
 function jsonResponse(status: number, value: unknown, headers: Record<string, string> = {}): Response {
@@ -55,15 +55,28 @@ afterEach(() => {
 describe('mintSession', () => {
 	it('passes a JSON answer through to the session shape', async () => {
 		stubFetchSequence([() => jsonResponse(200, SESSION_BODY)]);
-		const session = await mintSession();
+		const session = await mintSession('anna');
 		expect(session.session_id).toBe('s1');
 		expect(session.episode_id).toBe('e1');
 		expect(session.token).toBe('tok');
+		expect(session.config.voice).toBe('anna');
+	});
+
+	it('posts the picked voice as JSON with no retry', async () => {
+		const stub = stubFetchSequence([() => jsonResponse(200, SESSION_BODY)]);
+		await mintSession('george');
+		expect(stub).toHaveBeenCalledTimes(1);
+		const call = stub.mock.calls[0] as unknown[] | undefined;
+		expect(call?.[0]).toBe('/api/sessions');
+		const init = call?.[1] as RequestInit | undefined;
+		expect(init?.method).toBe('POST');
+		expect((init?.headers as Record<string, string>)['content-type']).toBe('application/json');
+		expect(init?.body).toBe(JSON.stringify({ voice: 'george' }));
 	});
 
 	it('names the call when a challenge page answers and never retries the mint', async () => {
 		const stub = stubFetchSequence([() => htmlResponse(200, '<html><body>challenge</body></html>')]);
-		const failure = await mintSession().then(
+		const failure = await mintSession('anna').then(
 			() => null,
 			(error: unknown) => error
 		);
@@ -79,7 +92,7 @@ describe('mintSession', () => {
 				throw new TypeError('the network dropped');
 			}
 		]);
-		const failure = await mintSession().then(
+		const failure = await mintSession('anna').then(
 			() => null,
 			(error: unknown) => error
 		);

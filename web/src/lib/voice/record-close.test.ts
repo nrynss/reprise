@@ -128,7 +128,7 @@ describe('pagehide close body', () => {
 			}
 		});
 		controller.mount();
-		await controller.start();
+		await controller.start('anna');
 		if ((window as unknown as { __mockVoice?: MockVoiceHarness }).__mockVoice === undefined) {
 			throw new Error(notices.join(' | ') || 'the take emitted nothing');
 		}

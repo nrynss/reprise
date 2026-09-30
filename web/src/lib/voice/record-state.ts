@@ -368,8 +368,8 @@ export class RecordController {
 		if (this.phase === 'live') void this.voice?.end();
 	}
 
-	/** Open the session from the start control. A gesture must wrap this. */
-	async start(): Promise<void> {
+	/** Open the session for the picked voice from the start control. A gesture must wrap this. */
+	async start(voice: string): Promise<void> {
 		if (this.phase !== 'preflight') return;
 		this.phase = 'starting';
 		this.notice = RECORD_OPENING_NOTICE;
@@ -384,10 +384,10 @@ export class RecordController {
 		this.emit();
 		try {
 			if (this.mockMode) {
-				await this.startMockTake();
+				await this.startMockTake(voice);
 			} else {
 				this.openLiveCapture();
-				await this.startRealTake();
+				await this.startRealTake(voice);
 			}
 			this.takeStart = this.context?.currentTime ?? 0;
 			this.armStemClock();
@@ -871,8 +871,8 @@ export class RecordController {
 		}
 	}
 
-	private async startRealTake(): Promise<void> {
-		this.session = await mintSession();
+	private async startRealTake(voice: string): Promise<void> {
+		this.session = await mintSession(voice);
 		this.greeting = this.session.config.greeting;
 		this.owner = this.session.episode_id;
 		await this.captureReady;
@@ -893,7 +893,7 @@ export class RecordController {
 		await this.voice.waitForSetup();
 	}
 
-	private async startMockTake(): Promise<void> {
+	private async startMockTake(voice: string): Promise<void> {
 		this.acceptBlocks = true;
 		this.context = new AudioContext();
 		await this.context.resume();
@@ -907,7 +907,8 @@ export class RecordController {
 			config: {
 				system_prompt: 'mock host',
 				greeting: 'Last time you mentioned the loft. Did you ever go back?',
-				keyterms: ['the loft']
+				keyterms: ['the loft'],
+				voice
 			}
 		};
 		this.greeting = this.session.config.greeting;

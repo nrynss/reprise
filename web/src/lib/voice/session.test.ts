@@ -7,7 +7,7 @@ const BODY = JSON.stringify({
 	token: 'tok',
 	expires_in_seconds: 60,
 	max_session_duration_seconds: 1200,
-	config: { system_prompt: 'prompt', greeting: 'hello', keyterms: ['Mara', 'the loft'] }
+	config: { system_prompt: 'prompt', greeting: 'hello', keyterms: ['Mara', 'the loft'], voice: 'anna' }
 });
 
 describe('parseSessionStart', () => {
@@ -20,12 +20,25 @@ describe('parseSessionStart', () => {
 		expect(parsed.max_session_duration_seconds).toBe(1200);
 		expect(parsed.config.greeting).toBe('hello');
 		expect(parsed.config.keyterms).toEqual(['Mara', 'the loft']);
+		expect(parsed.config.voice).toBe('anna');
 	});
 
 	it('throws on a missing token instead of opening an anonymous socket', () => {
 		const without = JSON.parse(BODY) as Record<string, unknown>;
 		delete without['token'];
 		expect(() => parseSessionStart(JSON.stringify(without))).toThrow();
+	});
+
+	it('throws on a start body whose config names no voice', () => {
+		const without = JSON.parse(BODY) as { config: Record<string, unknown> };
+		delete without.config['voice'];
+		expect(() => parseSessionStart(JSON.stringify(without))).toThrow(/voice/);
+	});
+
+	it('throws on a start body whose config carries an empty voice', () => {
+		const empty = JSON.parse(BODY) as { config: { voice: unknown } };
+		empty.config.voice = '';
+		expect(() => parseSessionStart(JSON.stringify(empty))).toThrow(/voice/);
 	});
 
 	it('throws on keyterms that are not a string list', () => {

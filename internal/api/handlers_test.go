@@ -658,7 +658,7 @@ func (settleMinter) Mint(context.Context, int) (string, error) {
 type settleBuilder struct{}
 
 // BuildSessionConfig returns an empty config. The close tests never read it.
-func (settleBuilder) BuildSessionConfig(context.Context, string) (broker.SessionConfig, error) {
+func (settleBuilder) BuildSessionConfig(context.Context, string, string) (broker.SessionConfig, error) {
 	return broker.SessionConfig{}, nil
 }
 

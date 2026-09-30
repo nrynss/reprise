@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -63,6 +64,9 @@ const (
 	CodeSlots = "too_many_sessions"
 	// CodeProvider answers when the token call fails.
 	CodeProvider = "session_provider_unavailable"
+	// CodeBadRequest answers a session body the broker could not read, or a
+	// voice outside the offer.
+	CodeBadRequest = "bad_request"
 	// CodeInternal answers when the diary or a dependency breaks.
 	CodeInternal = "internal_error"
 )
@@ -97,13 +101,16 @@ type SessionConfig struct {
 	Greeting string `json:"greeting"`
 	// Keyterms holds up to 100 recurring names for recognition.
 	Keyterms []string `json:"keyterms"`
+	// Voice is the provider voice id the guest picked for the setup frame.
+	Voice string `json:"voice"`
 }
 
-// ConfigBuilder builds the session config from stored rows. The host prompt
-// task implements it. A stub serves until then.
+// ConfigBuilder builds the session config from stored rows for one owner
+// and one voice. The host prompt task implements it. A stub serves until then.
 type ConfigBuilder interface {
-	// BuildSessionConfig returns the config for one owner from stored rows.
-	BuildSessionConfig(ctx context.Context, ownerID string) (SessionConfig, error)
+	// BuildSessionConfig returns the config for one owner and one voice from
+	// stored rows.
+	BuildSessionConfig(ctx context.Context, ownerID, voice string) (SessionConfig, error)
 }
 
 // TokenMinter mints one single-use provider token capped at the given
@@ -196,6 +203,9 @@ type Config struct {
 	Minter TokenMinter
 	// Sessions builds the session config. It must not be nil.
 	Sessions ConfigBuilder
+	// VoiceCheck refuses a voice id outside the offer. Nil accepts only the
+	// empty voice and refuses every other value.
+	VoiceCheck func(voice string) error
 	// Diary persists the session rows. It must not be nil.
 	Diary Diary
 	// SessionCapSeconds caps one live session. It must sit within 60 to 10800.
@@ -216,6 +226,7 @@ type Broker struct {
 	leases     *lease.Manager
 	minter     TokenMinter
 	sessions   ConfigBuilder
+	voiceCheck func(voice string) error
 	diary      Diary
 	cap        int
 	guestMax   int
@@ -272,6 +283,15 @@ func New(cfg Config) (*Broker, error) {
 	if err := ensureLinkTable(context.Background(), cfg.DB); err != nil {
 		return nil, err
 	}
+	voiceCheck := cfg.VoiceCheck
+	if voiceCheck == nil {
+		voiceCheck = func(voice string) error {
+			if voice != "" {
+				return fmt.Errorf("broker: voice %q: no voice is on offer", voice)
+			}
+			return nil
+		}
+	}
 	return &Broker{
 		flags:      cfg.Flags,
 		budgets:    cfg.Budgets,
@@ -279,6 +299,7 @@ func New(cfg Config) (*Broker, error) {
 		leases:     manager,
 		minter:     cfg.Minter,
 		sessions:   cfg.Sessions,
+		voiceCheck: voiceCheck,
 		diary:      cfg.Diary,
 		cap:        cfg.SessionCapSeconds,
 		guestMax:   cfg.GuestMaxSessions,
@@ -330,6 +351,33 @@ func (b *Broker) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	owner := user.ID
+
+	// The voice read sits right after the owner check and before the kill
+	// switch, so a refusal holds nothing. No budget, no lease, no mint.
+	if r.Body == nil {
+		r.Body = http.NoBody
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeRefusal(w, http.StatusBadRequest, CodeBadRequest, "the session request could not be read")
+		return
+	}
+	voice := ""
+	if len(raw) > 0 {
+		var req struct {
+			Voice string `json:"voice"`
+		}
+		if err := json.Unmarshal(raw, &req); err != nil {
+			writeRefusal(w, http.StatusBadRequest, CodeBadRequest, "the session request could not be read")
+			return
+		}
+		voice = req.Voice
+	}
+	if err := b.voiceCheck(voice); err != nil {
+		writeRefusal(w, http.StatusBadRequest, CodeBadRequest, "that voice is not on offer")
+		return
+	}
 
 	paused, _, err := b.flags.Bool(ctx, KillSwitch)
 	if err != nil {
@@ -387,7 +435,7 @@ func (b *Broker) create(w http.ResponseWriter, r *http.Request) {
 		writeRefusal(w, http.StatusBadGateway, CodeProvider, "the provider would not mint a token")
 		return
 	}
-	sessionConfig, err := b.sessions.BuildSessionConfig(ctx, owner)
+	sessionConfig, err := b.sessions.BuildSessionConfig(ctx, owner, voice)
 	if err != nil {
 		cleanup()
 		writeRefusal(w, http.StatusInternalServerError, CodeInternal, "the session config could not be built")

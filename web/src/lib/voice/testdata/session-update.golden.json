@@ -5,7 +5,9 @@
 		"greeting": "Last week you mentioned the loft. Did you ever go back?",
 		"tools": [],
 		"input": {
+			"turn_detection": { "min_silence": 1500, "max_silence": 4000 },
 			"keyterms": ["the loft", "Mara"]
-		}
+		},
+		"output": { "voice": "anna" }
 	}
 }

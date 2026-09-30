@@ -112,6 +112,7 @@ export class MockSocketHandle implements SocketHandle {
 			greeting: inner?.['greeting']
 		};
 		if (inner?.['input'] !== undefined) echo['input'] = inner?.['input'];
+		if (inner?.['output'] !== undefined) echo['output'] = inner?.['output'];
 		this.emit({ type: 'session.updated', config: echo });
 		this.emitReply(this.script.greetingAudio, this.script.greetingText, false);
 	}
