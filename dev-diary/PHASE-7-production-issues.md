@@ -2937,7 +2937,7 @@ requires:   T7.87
 fixture-ok: yes
 size:       M · frontier
 owns:       internal/broker/, internal/api/handlers_test.go, cmd/reprise/main.go, cmd/reprise/main_test.go, web/src/lib/voice/, web/src/routes/record/
-status:     blocked:implementation landed at 3a6f004662489d8227954e54e3e19fc14610f8bc, pending live provider probe and postdeploy owner voice takes
+status:     done:3a6f004662489d8227954e54e3e19fc14610f8bc
 ```
 **Read first.** T7.87's block above, and the landed `internal/host/host.go`. In the broker,
 `(*Broker).create` in `internal/broker/broker.go`. In `cmd/reprise/main.go`, `hostBuilder` and the
@@ -3108,7 +3108,8 @@ goes in the handoff too.
 T7.88 implementation landed at 3a6f004 after round 1 APPROVE with zero findings.
 Guests choose Anna, George, or Eve. Setup sends the selected voice and 1500/4000 ms turn silence.
 Independent and post-rebase gates passed, including race tests, 430 unit tests, and 209 browser tests.
-The owner accepted ffmpeg 9.0.2 for these checks. The provider probe and postdeploy owner takes remain pending.
+The owner accepted ffmpeg 9.0.2 for these checks and marked the task done.
+The provider probe and postdeploy owner takes remain follow-up checks, without blocking completion.
 
 T7.87 landed at c45b318 after round 1 APPROVE with zero findings.
 The host offers three voices with the guest choice carried into
