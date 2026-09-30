@@ -2738,6 +2738,10 @@ interrupted host reply that ends before it starts clamps to zero
 length instead of failing the transcript. Reviewed commit 24e7bc2
 rebased clean. Race tests pass on the landed commit. The live `curl`
 header check rides with the next deploy.
+Live check 2026-09-30, build 4173d4a: `/` answers `no-cache`, an
+unknown client route answers `no-cache` with the shell, and
+`/_app/immutable/entry/start.*.js` answers
+`public, max-age=31536000, immutable`. All three from a workstation.
 T7.83 landed at f9fdfaf after round 1 APPROVE with zero findings.
 The gallery card progress lines speak plain words behind named
 constants and call-site pins. Reviewed commit d637521 rebased
