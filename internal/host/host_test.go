@@ -119,7 +119,7 @@ func TestGoldenConfigFromFixtureSeason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	wantGreeting := `Last time in episode 1 you mentioned "the talk I keep dreading with my sister", so tell me how that went.`
+	wantGreeting := `Hey, welcome back! Last time in episode 1 you mentioned "the talk I keep dreading with my sister", so tell me how that went.`
 	if config.Greeting != wantGreeting {
 		t.Fatalf("greeting = %q, want %q", config.Greeting, wantGreeting)
 	}
@@ -133,8 +133,8 @@ func TestGoldenConfigFromFixtureSeason(t *testing.T) {
 		`Episode 4 (person): "Priya"`,
 		`Episode 3 (commitment): "I will call Maya back"`,
 		"Use only the names, episodes, and counts listed above.",
-		"You ask a single question at a time",
-		"You interrupt to follow up",
+		"One question per turn.",
+		"If they pause mid-thought, wait.",
 	} {
 		if !strings.Contains(config.SystemPrompt, want) {
 			t.Fatalf("system prompt misses %q:\n%s", want, config.SystemPrompt)
@@ -203,7 +203,7 @@ func TestFirstEpisodeOpener(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	want := "Welcome to your first episode, tell me what is on your mind today."
+	want := "Hey, I'm Anna. Welcome to your first episode! What's on your mind today?"
 	if config.Greeting != want {
 		t.Fatalf("greeting = %q, want %q", config.Greeting, want)
 	}
@@ -229,7 +229,7 @@ func TestUsedCallbackIgnoredAndOwnerIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if plain.Greeting != "Welcome back, tell me what is on your mind today." {
+	if plain.Greeting != "Hey, welcome back! What's on your mind today?" {
 		t.Fatalf("greeting = %q, want the returning opener once the callback is used", plain.Greeting)
 	}
 	seedSeason(t, db, "owner-b")
@@ -315,14 +315,14 @@ func TestLoadRejectsBadInput(t *testing.T) {
 func TestOpenerFollowsPriorEpisodes(t *testing.T) {
 	t.Parallel()
 	first := host.Build(host.Input{PriorEpisodes: 0})
-	if want := "Welcome to your first episode, tell me what is on your mind today."; first.Greeting != want {
+	if want := "Hey, I'm Anna. Welcome to your first episode! What's on your mind today?"; first.Greeting != want {
 		t.Fatalf("greeting = %q, want %q", first.Greeting, want)
 	}
 	if first.CallbackID != "" {
 		t.Fatalf("callback id = %q, want empty with no callback", first.CallbackID)
 	}
 	returning := host.Build(host.Input{PriorEpisodes: 2})
-	if want := "Welcome back, tell me what is on your mind today."; returning.Greeting != want {
+	if want := "Hey, welcome back! What's on your mind today?"; returning.Greeting != want {
 		t.Fatalf("greeting = %q, want %q", returning.Greeting, want)
 	}
 	if returning.CallbackID != "" {
@@ -362,10 +362,298 @@ func TestReturningOpenerLoadsFromStoredEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if want := "Welcome back, tell me what is on your mind today."; config.Greeting != want {
+	if want := "Hey, welcome back! What's on your mind today?"; config.Greeting != want {
 		t.Fatalf("greeting = %q, want %q", config.Greeting, want)
 	}
 	if config.CallbackID != "" {
 		t.Fatalf("callback id = %q, want empty with no callback", config.CallbackID)
+	}
+}
+
+// TestVoiceByID checks the empty id gives Anna, each known id gives its
+// voice, and unknown ids wrap ErrVoice without trimming or case folding.
+func TestVoiceByID(t *testing.T) {
+	t.Parallel()
+	anna, err := host.VoiceByID("")
+	if err != nil {
+		t.Fatalf("voice by empty id error = %v, want nil", err)
+	}
+	if anna.ID != "anna" || anna.Name != "Anna" {
+		t.Fatalf("voice by empty id = %+v, want the Anna entry", anna)
+	}
+	for _, want := range []host.Voice{{ID: "anna", Name: "Anna"}, {ID: "george", Name: "George"}, {ID: "eve", Name: "Eve"}} {
+		got, err := host.VoiceByID(want.ID)
+		if err != nil {
+			t.Fatalf("voice by %q error = %v, want nil", want.ID, err)
+		}
+		if got != want {
+			t.Fatalf("voice by %q = %+v, want %+v", want.ID, got, want)
+		}
+	}
+	for _, bad := range []string{"bob", "GEORGE", " eve"} {
+		if _, err := host.VoiceByID(bad); !errors.Is(err, host.ErrVoice) {
+			t.Fatalf("voice by %q error = %v, want ErrVoice", bad, err)
+		}
+	}
+}
+
+// TestLoadVoiceRejectsUnknownVoice loads with a voice outside the offer and
+// checks the voice error arrives before any query runs.
+func TestLoadVoiceRejectsUnknownVoice(t *testing.T) {
+	t.Parallel()
+	db := openSeason(t)
+	addOwner(t, db, "owner-voice")
+	if _, err := host.LoadVoice(t.Context(), db, "owner-voice", "bob"); !errors.Is(err, host.ErrVoice) {
+		t.Fatalf("load voice error = %v, want ErrVoice", err)
+	}
+	if _, err := host.LoadVoice(t.Context(), nil, "", "bob"); !errors.Is(err, host.ErrVoice) {
+		t.Fatalf("load voice on bad input error = %v, want the voice error first", err)
+	}
+}
+
+// TestBuildVoices builds with each offered voice and checks the prompt
+// introduces that voice while the config carries its id.
+func TestBuildVoices(t *testing.T) {
+	t.Parallel()
+	for _, want := range []struct {
+		id   string
+		name string
+	}{{"anna", "Anna"}, {"george", "George"}, {"eve", "Eve"}} {
+		voice, err := host.VoiceByID(want.id)
+		if err != nil {
+			t.Fatalf("voice by %q error = %v, want nil", want.id, err)
+		}
+		config := host.Build(host.Input{Voice: voice})
+		if prefix := "You are " + want.name + ", the host"; !strings.HasPrefix(config.SystemPrompt, prefix) {
+			t.Fatalf("system prompt for %q misses prefix %q", want.id, prefix)
+		}
+		if config.Voice != want.id {
+			t.Fatalf("config voice = %q, want %q", config.Voice, want.id)
+		}
+	}
+}
+
+// TestBuildZeroVoiceBehavesAsAnna builds without a voice and checks Anna
+// speaks, so inputs built by hand keep working.
+func TestBuildZeroVoiceBehavesAsAnna(t *testing.T) {
+	t.Parallel()
+	config := host.Build(host.Input{})
+	if !strings.HasPrefix(config.SystemPrompt, "You are Anna, the host") {
+		t.Fatalf("system prompt misses the Anna opening:\n%s", config.SystemPrompt)
+	}
+	if config.Voice != "anna" {
+		t.Fatalf("config voice = %q, want anna", config.Voice)
+	}
+	if greeting := "Hey, I'm Anna. Welcome to your first episode! What's on your mind today?"; config.Greeting != greeting {
+		t.Fatalf("greeting = %q, want %q", config.Greeting, greeting)
+	}
+}
+
+// TestPromptHoldsVoiceWithoutInterrupts checks the fixed wording carries the
+// new voice and never invites the host to cut in.
+func TestPromptHoldsVoiceWithoutInterrupts(t *testing.T) {
+	t.Parallel()
+	config := host.Build(host.Input{})
+	for _, want := range []string{"Energy:", "You're a host, not a therapist."} {
+		if !strings.Contains(config.SystemPrompt, want) {
+			t.Fatalf("system prompt misses %q:\n%s", want, config.SystemPrompt)
+		}
+	}
+	if strings.Contains(config.SystemPrompt, "You interrupt") {
+		t.Fatalf("system prompt still invites cut-ins:\n%s", config.SystemPrompt)
+	}
+}
+
+// TestGreetingsForEve compares each of the three greetings as a whole
+// string for Eve.
+func TestGreetingsForEve(t *testing.T) {
+	t.Parallel()
+	eve, err := host.VoiceByID("eve")
+	if err != nil {
+		t.Fatalf("voice by eve error = %v, want nil", err)
+	}
+	first := host.Build(host.Input{Voice: eve})
+	if want := "Hey, I'm Eve. Welcome to your first episode! What's on your mind today?"; first.Greeting != want {
+		t.Fatalf("first greeting = %q, want %q", first.Greeting, want)
+	}
+	back := host.Build(host.Input{Voice: eve, PriorEpisodes: 2})
+	if want := "Hey, welcome back! What's on your mind today?"; back.Greeting != want {
+		t.Fatalf("returning greeting = %q, want %q", back.Greeting, want)
+	}
+	cited := host.Build(host.Input{
+		Voice:         eve,
+		PriorEpisodes: 2,
+		Callback: &host.Callback{
+			ID: "cb-eve",
+			Mention: host.Mention{
+				ID:            "m-eve",
+				EpisodeNumber: 3,
+				Kind:          "topic",
+				Quote:         "the loft",
+			},
+		},
+	})
+	if want := `Hey, welcome back! Last time in episode 3 you mentioned "the loft", so tell me how that went.`; cited.Greeting != want {
+		t.Fatalf("callback greeting = %q, want %q", cited.Greeting, want)
+	}
+	if cited.CallbackID != "cb-eve" {
+		t.Fatalf("callback id = %q, want cb-eve", cited.CallbackID)
+	}
+}
+
+// addWords stores one edit word row per token of text, in order, naming the
+// speaker. The guest filter joins these rows, so this order decides what
+// counts as said.
+func addWords(t *testing.T, db *sql.DB, owner, episode, speaker, text string) {
+	t.Helper()
+	start := 0
+	for i, token := range strings.Fields(text) {
+		mustExec(t, db, "INSERT INTO words (id, owner_id, episode_id, text, start_ms, end_ms, source, speaker) VALUES (?, ?, ?, ?, ?, ?, 'edit', ?)",
+			fmt.Sprintf("%s-%s-%d", episode, speaker, i), owner, episode, token, start, start+100, speaker)
+		start += 150
+	}
+}
+
+// addCallback plants one unused callback row pointing at a mention.
+func addCallback(t *testing.T, db *sql.DB, id, owner, episode, mention string) {
+	t.Helper()
+	mustExec(t, db, "INSERT INTO callbacks (id, owner_id, episode_id, mention_id, used) VALUES (?, ?, ?, ?, 0)",
+		id, owner, episode, mention)
+}
+
+// TestGuestFilterKeepsGuestWords seeds host and guest words on one labelled
+// episode and checks only the guest mention reaches the prompt and the
+// keyterms.
+func TestGuestFilterKeepsGuestWords(t *testing.T) {
+	t.Parallel()
+	db := openSeason(t)
+	addOwner(t, db, "owner-guest")
+	addEpisode(t, db, "g-ep1", "owner-guest", 1, "ready")
+	addWords(t, db, "owner-guest", "g-ep1", "host", "It was great hearing from you.")
+	addWords(t, db, "owner-guest", "g-ep1", "user", "The loft was cold.")
+	addMention(t, db, "g-m1", "owner-guest", "g-ep1", "topic", 1, "great hearing")
+	addMention(t, db, "g-m2", "owner-guest", "g-ep1", "topic", 2, "the loft")
+	config, err := host.LoadVoice(t.Context(), db, "owner-guest", "anna")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !strings.Contains(config.SystemPrompt, `"the loft"`) {
+		t.Fatalf("system prompt misses the guest quote:\n%s", config.SystemPrompt)
+	}
+	if strings.Contains(config.SystemPrompt, "great hearing") {
+		t.Fatalf("system prompt quotes the host:\n%s", config.SystemPrompt)
+	}
+	if !slices.Contains(config.Keyterms, "the loft") {
+		t.Fatalf("keyterms = %q, want the guest quote", config.Keyterms)
+	}
+	if slices.Contains(config.Keyterms, "great hearing") {
+		t.Fatalf("keyterms = %q, want no host quote", config.Keyterms)
+	}
+}
+
+// TestGuestFilterSurvivesPunctuation checks a mention with an apostrophe
+// survives when the guest spoke it with punctuation around it.
+func TestGuestFilterSurvivesPunctuation(t *testing.T) {
+	t.Parallel()
+	db := openSeason(t)
+	addOwner(t, db, "owner-punct")
+	addEpisode(t, db, "p-ep1", "owner-punct", 1, "ready")
+	addWords(t, db, "owner-punct", "p-ep1", "user", "We didn't go!")
+	addMention(t, db, "p-m1", "owner-punct", "p-ep1", "topic", 1, "didn't go")
+	config, err := host.LoadVoice(t.Context(), db, "owner-punct", "anna")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !slices.Contains(config.Keyterms, "didn't go") {
+		t.Fatalf("keyterms = %q, want the guest quote", config.Keyterms)
+	}
+}
+
+// TestUnlabelledEpisodeKeepsMentions seeds mentions with no edit words and
+// checks every mention survives, because older episodes predate labels.
+func TestUnlabelledEpisodeKeepsMentions(t *testing.T) {
+	t.Parallel()
+	db := openSeason(t)
+	addOwner(t, db, "owner-seed")
+	addEpisode(t, db, "s-ep1", "owner-seed", 1, "ready")
+	addMention(t, db, "s-m1", "owner-seed", "s-ep1", "person", 1, "Maya")
+	config, err := host.LoadVoice(t.Context(), db, "owner-seed", "anna")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !slices.Equal(config.Keyterms, []string{"Maya"}) {
+		t.Fatalf("keyterms = %q, want the seeded mention", config.Keyterms)
+	}
+	if !strings.Contains(config.SystemPrompt, `"Maya"`) {
+		t.Fatalf("system prompt misses the seeded quote:\n%s", config.SystemPrompt)
+	}
+}
+
+// TestLabelledEpisodeWithoutGuestWordsKeepsNone seeds only host words on a
+// labelled episode and checks its mention reaches neither the prompt nor
+// the keyterms.
+func TestLabelledEpisodeWithoutGuestWordsKeepsNone(t *testing.T) {
+	t.Parallel()
+	db := openSeason(t)
+	addOwner(t, db, "owner-quiet")
+	addEpisode(t, db, "q-ep1", "owner-quiet", 1, "ready")
+	addWords(t, db, "owner-quiet", "q-ep1", "host", "It was great hearing from you.")
+	addMention(t, db, "q-m1", "owner-quiet", "q-ep1", "topic", 1, "great hearing")
+	config, err := host.LoadVoice(t.Context(), db, "owner-quiet", "anna")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if len(config.Keyterms) != 0 {
+		t.Fatalf("keyterms = %q, want none when the guest said nothing", config.Keyterms)
+	}
+	if strings.Contains(config.SystemPrompt, "Episode ") {
+		t.Fatalf("system prompt quotes a thread the guest never said:\n%s", config.SystemPrompt)
+	}
+}
+
+// TestCallbackSkipsHostOnlyQuote plants two callbacks with the older one
+// quoting only host words, and checks the greeting cites the newer one
+// while both rows stay unused.
+func TestCallbackSkipsHostOnlyQuote(t *testing.T) {
+	t.Parallel()
+	db := openSeason(t)
+	addOwner(t, db, "owner-cb")
+	addEpisode(t, db, "c-ep1", "owner-cb", 1, "ready")
+	addEpisode(t, db, "c-ep2", "owner-cb", 2, "ready")
+	addEpisode(t, db, "c-ep3", "owner-cb", 3, "recording")
+	addWords(t, db, "owner-cb", "c-ep1", "host", "It was great hearing from you.")
+	addWords(t, db, "owner-cb", "c-ep2", "user", "The loft was cold.")
+	addMention(t, db, "c-m-old", "owner-cb", "c-ep1", "topic", 1, "great hearing")
+	addMention(t, db, "c-m-new", "owner-cb", "c-ep2", "topic", 2, "the loft")
+	addCallback(t, db, "cb-old", "owner-cb", "c-ep3", "c-m-old")
+	addCallback(t, db, "cb-new", "owner-cb", "c-ep3", "c-m-new")
+	config, err := host.LoadVoice(t.Context(), db, "owner-cb", "anna")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if want := `Hey, welcome back! Last time in episode 2 you mentioned "the loft", so tell me how that went.`; config.Greeting != want {
+		t.Fatalf("greeting = %q, want %q", config.Greeting, want)
+	}
+	if config.CallbackID != "cb-new" {
+		t.Fatalf("callback id = %q, want cb-new", config.CallbackID)
+	}
+	rows, err := db.QueryContext(t.Context(), "SELECT used FROM callbacks WHERE owner_id = ? ORDER BY rowid", "owner-cb")
+	if err != nil {
+		t.Fatalf("query callback use: %v", err)
+	}
+	defer rows.Close() // the rows drain below, so close reports nothing new
+	var used []int
+	for rows.Next() {
+		var flag int
+		if err := rows.Scan(&flag); err != nil {
+			t.Fatalf("scan callback use: %v", err)
+		}
+		used = append(used, flag)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read callback use: %v", err)
+	}
+	if !slices.Equal(used, []int{0, 0}) {
+		t.Fatalf("callback use = %v, want both rows still unused", used)
 	}
 }
